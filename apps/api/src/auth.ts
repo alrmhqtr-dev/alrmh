@@ -1,6 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, createParamDecorator } from '@nestjs/common';
 import { db } from './db.js';
-import { config } from './config.js';
 import { sha256 } from './lib.js';
 
 export type Customer = { id: string; phone: string; name: string | null; email: string | null; language: string };
@@ -19,15 +18,6 @@ export class CustomerGuard implements CanActivate {
     );
     if (!customer) throw new UnauthorizedException({ code: 'unauthorized' });
     req.customer = customer;
-    return true;
-  }
-}
-
-@Injectable()
-export class AdminGuard implements CanActivate {
-  canActivate(ctx: ExecutionContext) {
-    const req = ctx.switchToHttp().getRequest();
-    if (req.headers['x-admin-token'] !== config.adminToken) throw new UnauthorizedException({ code: 'unauthorized' });
     return true;
   }
 }

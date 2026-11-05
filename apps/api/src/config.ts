@@ -10,7 +10,6 @@ export const config = {
   otpMode: (env.OTP_MODE ?? 'preview') as 'preview' | 'sms',
   otpPreviewCode: env.OTP_PREVIEW_CODE ?? '123456',
   paymentMode: (env.PAYMENT_MODE ?? 'mock') as 'mock' | 'sadad',
-  adminToken: env.ADMIN_TOKEN ?? 'dev-admin-token',
   sessionDays: Number(env.SESSION_DAYS ?? 90),
 };
 

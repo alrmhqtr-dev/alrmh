@@ -108,7 +108,7 @@ export async function closePayment(paymentId: string, status: 'failed' | 'cancel
   return p?.order_id as string | undefined;
 }
 
-export async function setStage(orderId: string, stage: Stage, client?: Queryable) {
+export async function setStage(orderId: string, stage: Stage, client?: Queryable, staffId: string | null = null) {
   const run = async (c: Queryable) => {
     const order = await db.one('select * from orders where id = $1', [orderId], c);
     if (!order) throw new NotFoundException({ code: 'order_not_found' });
@@ -118,7 +118,7 @@ export async function setStage(orderId: string, stage: Stage, client?: Queryable
     const to = flow.indexOf(stage);
     if (to < 0) fail('invalid_stage');
     if (from < 0 || to <= from) fail('stage_not_forward', { current: order.stage });
-    for (const s of flow.slice(from + 1, to + 1)) await c.query('insert into order_events (order_id, stage) values ($1, $2)', [orderId, s]);
+    for (const s of flow.slice(from + 1, to + 1)) await c.query('insert into order_events (order_id, stage, staff_id) values ($1, $2, $3)', [orderId, s, staffId]);
     await c.query('update orders set stage = $2 where id = $1', [orderId, stage]);
     await notify(order.customer_id, 'order', withNumber(STAGE_TEXT[stage], order.number), `/orders/${orderId}`, c);
     if (stage === 'delivered' && !order.points_awarded && order.points_to_earn > 0) {

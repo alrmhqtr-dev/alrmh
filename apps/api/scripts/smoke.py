@@ -1,11 +1,17 @@
 import json, urllib.request, sys
 import os
 B = os.environ.get("API", "http://localhost:4000") + "/v1"
+_staff = {}
+def staff_token():
+    if "t" not in _staff:
+        _staff["t"] = call("POST", "/admin/auth/login", {"email": os.environ.get("ADMIN_EMAIL", "owner@alrmh.qa"), "password": os.environ.get("ADMIN_PASSWORD", "owner-pass-2026")})["token"]
+    return _staff["t"]
+
 def call(method, path, body=None, token=None, admin=False, ok=True):
     req = urllib.request.Request(B + path, method=method, data=json.dumps(body).encode() if body is not None else None)
     req.add_header("Content-Type", "application/json")
+    if admin: token = staff_token()
     if token: req.add_header("Authorization", "Bearer " + token)
-    if admin: req.add_header("X-Admin-Token", os.environ.get("ADMIN_TOKEN", "dev-admin-token"))
     try:
         with urllib.request.urlopen(req) as r: return json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:

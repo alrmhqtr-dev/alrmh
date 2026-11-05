@@ -13,7 +13,10 @@ import { BookingController } from './modules/booking.controller.js';
 import { BasketController } from './modules/basket.controller.js';
 import { OrdersController } from './modules/orders.controller.js';
 import { NotificationsController, RewardsController } from './modules/rewards.controller.js';
-import { AdminController } from './modules/admin.controller.js';
+import { AdminCoreController } from './modules/admin-core.controller.js';
+import { AdminOpsController } from './modules/admin-ops.controller.js';
+import { AdminSetupController } from './modules/admin-setup.controller.js';
+import { ensureOwner } from './staff.js';
 
 @Controller()
 class HealthController {
@@ -35,7 +38,9 @@ class HealthController {
     OrdersController,
     RewardsController,
     NotificationsController,
-    AdminController,
+    AdminCoreController,
+    AdminOpsController,
+    AdminSetupController,
   ],
 })
 class AppModule {}
@@ -43,10 +48,11 @@ class AppModule {}
 async function bootstrap() {
   if (process.env.MIGRATE_ON_START !== 'false') await migrate();
   if (process.env.SEED_ON_START === 'true') await seed({ demo: process.env.SEED_DEMO !== 'false' });
+  await ensureOwner();
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn', 'log'] });
   app.enableCors({
     origin: config.corsOrigins.includes('*') ? true : config.corsOrigins,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Token'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   app.enableShutdownHooks();

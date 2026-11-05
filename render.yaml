@@ -30,9 +30,29 @@ services:
         value: '123456'
       - key: PAYMENT_MODE
         value: mock
-      - key: ADMIN_TOKEN
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
         generateValue: true
       - key: APP_URL
         sync: false
       - key: CORS_ORIGINS
+        sync: false
+
+  - type: web
+    name: alrmh-admin
+    runtime: static
+    rootDir: apps/admin
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    headers:
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
         sync: false

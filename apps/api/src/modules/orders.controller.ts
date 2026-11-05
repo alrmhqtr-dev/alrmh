@@ -63,7 +63,7 @@ export class OrdersController {
     if (!order) throw new NotFoundException({ code: 'order_not_found' });
     const [items, events, appointments] = await Promise.all([
       db.many('select id, kind, snapshot, qty, unit_price, line_total from order_items where order_id = $1 order by kind desc', [id]),
-      db.many('select stage, at, note from order_events where order_id = $1 order by at', [id]),
+      db.many("select stage, at, note from order_events where order_id = $1 order by at, array_position(array['confirmed','measured','cutting','stitching','ready','out_for_delivery','delivered','cancelled'], stage)", [id]),
       db.many(
         `select a.id, a.kind, a.starts_at, a.status, f.name as member_name, b.name_en as branch_name_en, b.name_ar as branch_name_ar, ad.area
            from appointments a join family_members f on f.id = a.member_id left join branches b on b.id = a.branch_id left join addresses ad on ad.id = a.address_id
