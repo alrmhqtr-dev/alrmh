@@ -13,7 +13,7 @@ import { colors, fonts, radius, type as typeScale } from '@/theme/tokens';
 
 function appUrl() {
   if (Platform.OS !== 'web') return 'alrmh://';
-  return `${window.location.origin}${process.env.EXPO_PUBLIC_BASE_URL ?? ''}`;
+  return window.location.origin;
 }
 
 export default function Checkout() {

@@ -1,7 +1,5 @@
 import type { ExpoConfig } from 'expo/config';
 
-const baseUrl = process.env.EXPO_BASE_URL ?? '';
-
 const config: ExpoConfig = {
   name: 'AlRmh',
   slug: 'alrmh',
@@ -37,7 +35,6 @@ const config: ExpoConfig = {
   plugins: ['expo-router', 'expo-font', 'expo-splash-screen', 'expo-secure-store'],
   experiments: {
     typedRoutes: false,
-    ...(baseUrl ? { baseUrl } : {}),
   },
 };
 

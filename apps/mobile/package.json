@@ -31,12 +31,14 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "expo start",
+    "dev": "expo start",
+    "web": "expo start --web",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web",
-    "build:web": "expo export -p web && node scripts/postexport.mjs",
-    "typecheck": "tsc --noEmit"
+    "build": "expo export --platform web && node scripts/postexport.mjs",
+    "start": "node scripts/serve.mjs",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist .expo"
   },
   "private": true
 }

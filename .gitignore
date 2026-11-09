@@ -9,3 +9,6 @@ web-build/
 apps/mobile/ios/
 apps/mobile/android/
 .DS_Store
+.turbo/
+.vercel/
+_to_delete/

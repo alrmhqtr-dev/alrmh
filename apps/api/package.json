@@ -1,18 +1,14 @@
 {
   "name": "@alrmh/api",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.1.0",
   "scripts": {
     "build": "tsc -p .",
     "start": "node dist/main.js",
-    "migrate": "node dist/migrate.js",
-    "seed": "node dist/seed.js",
-    "dev": "tsc -p . && node dist/migrate.js && node dist/main.js",
-    "test": "node --test dist/test/"
+    "dev": "tsc -p . && node --env-file-if-exists=.env dist/main.js",
+    "migrate": "node --env-file-if-exists=.env dist/migrate.js",
+    "seed": "node --env-file-if-exists=.env dist/seed.js",
+    "type-check": "tsc --noEmit -p ."
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "@nestjs/common": "^12.3.2",
     "@nestjs/core": "^12.3.2",

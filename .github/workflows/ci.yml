@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Type-check and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm turbo run type-check build
+        env:
+          EXPO_PUBLIC_API_URL: http://localhost:4000
+          VITE_API_URL: http://localhost:4000
+
+  api-smoke:
+    name: API smoke test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: alrmh
+          POSTGRES_PASSWORD: alrmh
+          POSTGRES_DB: alrmh
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alrmh"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://alrmh:alrmh@localhost:5432/alrmh
+      PORT: 4000
+      MIGRATE_ON_START: 'false'
+      SEED_ON_START: 'true'
+      SEED_DEMO: 'true'
+      OTP_MODE: preview
+      PAYMENT_MODE: mock
+      ADMIN_EMAIL: owner@alrmh.qa
+      ADMIN_PASSWORD: ci-owner-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --filter "@alrmh/api..." --filter alrmh
+
+      - run: pnpm turbo run build --filter=@alrmh/api
+
+      - name: Run migrations
+        working-directory: apps/api
+        run: node dist/migrate.js
+
+      - name: Start API
+        working-directory: apps/api
+        run: |
+          node dist/main.js > /tmp/api.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4000/health && exit 0
+            sleep 1
+          done
+          cat /tmp/api.log
+          exit 1
+
+      - name: Smoke test
+        run: python3 apps/api/scripts/smoke.py 55559999
+        env:
+          API: http://localhost:4000
+
+      - name: API log
+        if: failure()
+        run: cat /tmp/api.log

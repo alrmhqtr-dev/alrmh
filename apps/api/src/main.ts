@@ -20,6 +20,11 @@ import { ensureOwner } from './staff.js';
 
 @Controller()
 class HealthController {
+  @Get('health/live')
+  live() {
+    return { ok: true };
+  }
+
   @Get('health')
   async health() {
     await db.pool.query('select 1');

@@ -5,7 +5,7 @@ export const config = {
   databaseUrl: env.DATABASE_URL ?? 'postgres://alrmh:alrmh@localhost:5432/alrmh',
   databaseSsl: env.DATABASE_SSL === 'true',
   appUrl: (env.APP_URL ?? 'http://localhost:8081').replace(/\/$/, ''),
-  apiUrl: (env.API_URL ?? env.RENDER_EXTERNAL_URL ?? `http://localhost:${env.PORT ?? 4000}`).replace(/\/$/, ''),
+  apiUrl: (env.API_URL ?? (env.RAILWAY_PUBLIC_DOMAIN ? `https://${env.RAILWAY_PUBLIC_DOMAIN}` : undefined) ?? `http://localhost:${env.PORT ?? 4000}`).replace(/\/$/, ''),
   corsOrigins: (env.CORS_ORIGINS ?? '*').split(',').map((s) => s.trim()),
   otpMode: (env.OTP_MODE ?? 'preview') as 'preview' | 'sms',
   otpPreviewCode: env.OTP_PREVIEW_CODE ?? '123456',

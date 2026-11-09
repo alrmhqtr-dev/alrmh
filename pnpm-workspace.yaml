@@ -1,0 +1,9 @@
+packages:
+  - apps/*
+
+# pnpm blocks dependency lifecycle scripts unless they are listed here.
+# true = allowed to run, false = skipped. If `pnpm install` reports another
+# package with ignored build scripts, decide here (pnpm 12 fails on unlisted ones).
+allowBuilds:
+  '@nestjs/core': false
+  esbuild: true

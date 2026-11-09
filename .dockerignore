@@ -1,0 +1,11 @@
+.git
+**/node_modules
+**/.turbo
+**/.expo
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+**/AGENTS.md
+**/CLAUDE.md
+_to_delete
