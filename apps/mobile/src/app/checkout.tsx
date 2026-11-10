@@ -204,7 +204,7 @@ export default function Checkout() {
           </View>
           {q.coupon?.error ? (
             <Text variant="small" color={colors.error}>
-              {t(`checkout.${q.coupon.error}` as any)}
+              {t(`checkout.${q.coupon.error}` as any, { min: q.coupon.min ?? 0 })}
             </Text>
           ) : null}
         </View>

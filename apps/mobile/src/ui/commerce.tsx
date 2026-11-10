@@ -13,7 +13,7 @@ export function ProductCard({ product, onPress }: { product: Product; onPress: (
   const pts = Math.round(product.price * (cat.data?.settings.points.product_per_qar ?? 0.1));
   return (
     <Touch testID={`product-${product.id}`} onPress={onPress} style={{ flex: 1, gap: 8 }}>
-      <ProductArt label={t('shop.render')} />
+      <ProductArt label={t('shop.render')} uri={product.image_url} />
       <Text variant="smallStrong" numberOfLines={1}>
         {f.name(product)}
       </Text>

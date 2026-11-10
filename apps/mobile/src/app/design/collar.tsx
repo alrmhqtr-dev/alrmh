@@ -47,7 +47,7 @@ export default function CollarStep() {
                   <SelectedCheck />
                 </View>
               ) : null}
-              <CollarGlyph collar={c.id} />
+              <CollarGlyph collar={c.shape ?? c.id} />
               <Text variant="smallStrong" center>
                 {f.name(c)}
               </Text>

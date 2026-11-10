@@ -55,6 +55,9 @@ jobs:
       SEED_DEMO: 'true'
       OTP_MODE: preview
       PAYMENT_MODE: mock
+      APP_URL: http://localhost:8081
+      CORS_ORIGINS: http://localhost:8081
+      RATE_LIMITS: 'off'
       ADMIN_EMAIL: owner@alrmh.qa
       ADMIN_PASSWORD: ci-owner-password
     steps:
@@ -88,6 +91,11 @@ jobs:
 
       - name: Smoke test
         run: python3 apps/api/scripts/smoke.py 55559999
+        env:
+          API: http://localhost:4000
+
+      - name: Regression checks
+        run: python3 apps/api/scripts/regress.py
         env:
           API: http://localhost:4000
 

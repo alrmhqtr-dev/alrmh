@@ -1,5 +1,5 @@
 import { RefreshControl, ScrollView, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, Bell, Clock, MessageCircle, Repeat, Ruler, Scissors, Store, Users } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
@@ -18,9 +18,10 @@ export default function Home() {
   const { signedIn } = useSession();
   const builder = useBuilder();
   const cat = useCatalogue();
-  const me = useMe();
+  const focused = useIsFocused();
+  const me = useMe(focused);
   const rewards = useRewards();
-  const orders = useOrders();
+  const orders = useOrders(focused);
   const family = useFamily();
 
   const firstName = (me.data?.name ?? '').split(' ')[0];
@@ -31,6 +32,7 @@ export default function Home() {
   const showBalance = signedIn && rewards.data && (rewards.data.balance > 0 || hasHistory);
   const support = cat.data?.settings.support.whatsapp ?? '';
   const branch = cat.data?.branches[0];
+  const branchCount = cat.data?.branches.length ?? 0;
 
   const startDesign = () => {
     builder.reset(defaultsFor(cat.data));
@@ -141,7 +143,7 @@ export default function Home() {
           {[
             { icon: Ruler, title: t('home.bookMeasure'), sub: t('home.bookMeasureSub'), onPress: () => needAuth('/book?standalone=1&kind=branch'), id: 'quick-book' },
             { icon: Users, title: t('home.family'), sub: family.data?.length === 1 ? t('home.familySub1') : t('home.familySub', { n: family.data?.length ?? 0 }), onPress: () => needAuth('/account/family'), id: 'quick-family' },
-            { icon: Store, title: t('home.branch'), sub: f.name(branch) || ' ', onPress: () => router.push('/account/help'), id: 'quick-branch' },
+            { icon: Store, title: t('home.branch'), sub: branchCount > 1 ? t('home.branchesN', { n: branchCount }) : f.name(branch) || ' ', onPress: () => router.push('/account/help'), id: 'quick-branch' },
             { icon: MessageCircle, title: t('home.help'), sub: t('home.helpSub'), onPress: () => openWhatsApp(support), id: 'quick-help' },
           ].map((q) => (
             <Card key={q.id} testID={q.id} onPress={q.onPress} style={{ width: '47.5%', flexGrow: 1, padding: 15, gap: 8 }}>

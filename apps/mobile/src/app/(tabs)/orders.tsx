@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { RefreshControl, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, FileText, Repeat } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { useSession } from '@/state/session';
+import { api } from '@/api/client';
 import { useAppointments, useOrders, type OrderSummary } from '@/api/hooks';
-import { Button, Card, EmptyState, ErrorState, Icon, Loading, Overline, Pill, Text, Touch } from '@/ui/primitives';
-import { Screen } from '@/ui/layout';
+import { errorText } from '@/lib/errors';
+import { Button, Card, EmptyState, ErrorState, Icon, Loading, Note, Overline, Pill, Text, Touch } from '@/ui/primitives';
+import { Screen, Sheet } from '@/ui/layout';
 import { orderLine } from '@/ui/commerce';
 import { colors, radius } from '@/theme/tokens';
 
@@ -15,7 +17,9 @@ function OrderRow({ o, past }: { o: OrderSummary; past?: boolean }) {
   const { t, f } = useLocale();
   const today = f.date(o.created_at) === f.date(new Date());
   const when = past
-    ? t('orders.deliveredOn', { date: f.date(o.created_at) })
+    ? o.stage === 'cancelled'
+      ? t('orders.placedOn', { date: f.day(o.created_at) })
+      : t('orders.deliveredOn', { date: f.date(o.closed_at ?? o.created_at) })
     : o.expected_delivery && o.stage !== 'confirmed'
       ? t('orders.deliveryOn', { date: f.weekdayDate(o.expected_delivery) })
       : today
@@ -53,9 +57,27 @@ export default function Orders() {
   const { t, f } = useLocale();
   const qc = useQueryClient();
   const { signedIn } = useSession();
-  const orders = useOrders();
+  const orders = useOrders(useIsFocused());
   const appts = useAppointments();
   const [tab, setTab] = useState<'active' | 'past'>('active');
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const cancelVisit = async () => {
+    if (!cancelId) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await api(`/appointments/${cancelId}`, { method: 'DELETE' });
+      await qc.invalidateQueries();
+      setCancelId(null);
+    } catch (e) {
+      setCancelError(errorText(t, e));
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   if (!signedIn)
     return (
@@ -114,12 +136,30 @@ export default function Orders() {
                 {`${f.when(appt.starts_at)} · ${appt.kind === 'home' ? appt.area : f.name(appt, 'branch_name')}`}
               </Text>
             </View>
-            <Touch testID="reschedule" onPress={() => router.push({ pathname: '/book', params: { kind: appt.kind, mode: 'reschedule', appointmentId: appt.id } })}>
-              <Text variant="smallStrong">{t('orders.reschedule')}</Text>
-            </Touch>
+            <View style={{ alignItems: 'flex-end', gap: 10 }}>
+              <Touch testID="reschedule" onPress={() => router.push({ pathname: '/book', params: { kind: appt.kind, mode: 'reschedule', appointmentId: appt.id, branchId: appt.branch_id ?? '' } })}>
+                <Text variant="smallStrong">{t('orders.reschedule')}</Text>
+              </Touch>
+              {!appt.order_id ? (
+                <Touch testID="cancel-visit" onPress={() => { setCancelError(null); setCancelId(appt.id); }}>
+                  <Text variant="small" color={colors.textSecondary}>{t('orders.cancelVisit')}</Text>
+                </Touch>
+              ) : null}
+            </View>
           </Card>
         </View>
       ) : null}
+      <Sheet visible={Boolean(cancelId)} onClose={() => setCancelId(null)}>
+        <Text variant="h2">{t('orders.cancelVisitQ')}</Text>
+        <Text variant="body" color={colors.textSecondary} style={{ marginTop: 8 }}>
+          {t('orders.cancelVisitBody')}
+        </Text>
+        {cancelError ? <View style={{ marginTop: 12 }}><Note tone="error">{cancelError}</Note></View> : null}
+        <View style={{ gap: 6, marginTop: 20 }}>
+          <Button testID="cancel-visit-confirm" label={t('orders.cancelVisit')} kind="danger" loading={cancelling} onPress={cancelVisit} />
+          <Button label={t('orders.keepVisit')} kind="ghost" onPress={() => setCancelId(null)} />
+        </View>
+      </Sheet>
     </Screen>
   );
 }

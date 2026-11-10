@@ -14,7 +14,9 @@ export class AdminOpsController {
   @Get('orders')
   @UseGuards(AnyStaff)
   orders(@Query('stage') stage?: string, @Query('q') q?: string) {
+    // Phone and order numbers match with spaces ignored; names match as typed.
     const needle = q?.trim() ? `%${q.trim().replace(/\s+/g, '')}%` : null;
+    const text = q?.trim() ? `%${q.trim().replace(/\s+/g, ' ')}%` : null;
     return db.many(
       `select o.id, o.number, o.stage, o.total, o.created_at, o.paid_at, o.expected_delivery, c.id as customer_id, c.name as customer_name, c.phone,
               (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobe_count,
@@ -23,9 +25,9 @@ export class AdminOpsController {
          from orders o join customers c on c.id = o.customer_id
         where o.stage not in ('pending_payment','payment_failed')
           and ($1::text is null or o.stage = $1)
-          and ($2::text is null or o.number ilike $2 or replace(c.phone,' ','') ilike $2 or c.name ilike $2)
+          and ($2::text is null or o.number ilike $2 or replace(c.phone,' ','') ilike $2 or c.name ilike $3)
         order by o.created_at desc limit 300`,
-      [stage || null, needle],
+      [stage || null, needle, text],
     );
   }
 
@@ -146,15 +148,16 @@ export class AdminOpsController {
   @UseGuards(AnyStaff)
   customers(@Query('q') q?: string) {
     const needle = q?.trim() ? `%${q.trim().replace(/\s+/g, '')}%` : null;
+    const text = q?.trim() ? `%${q.trim().replace(/\s+/g, ' ')}%` : null;
     return db.many(
       `select c.id, c.name, c.phone, c.email, c.language, c.created_at,
               (select count(*)::int from orders o where o.customer_id = c.id and o.paid_at is not null) as orders,
               (select coalesce(sum(total),0)::float from orders o where o.customer_id = c.id and o.paid_at is not null and o.stage <> 'cancelled') as spent,
               (select coalesce(sum(points),0)::int from points_ledger p where p.customer_id = c.id) as points
          from customers c
-        where c.deleted_at is null and ($1::text is null or replace(c.phone,' ','') ilike $1 or c.name ilike $1 or c.email ilike $1)
+        where c.deleted_at is null and ($1::text is null or replace(c.phone,' ','') ilike $1 or c.name ilike $2 or c.email ilike $1)
         order by c.created_at desc limit 200`,
-      [needle],
+      [needle, text],
     );
   }
 

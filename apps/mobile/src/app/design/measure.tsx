@@ -18,6 +18,7 @@ export default function MeasureStep() {
   const family = useFamily();
   const member = family.data?.find((m) => m.id === state.memberId);
   const branch = cat.data?.branches[0];
+  const manyBranches = (cat.data?.branches.length ?? 0) > 1;
   const fee = cat.data?.settings.home_visit_fee ?? 50;
   const hasSaved = Boolean(member?.measured_at);
 
@@ -93,7 +94,7 @@ export default function MeasureStep() {
             </Touch>
           ) : null,
         )}
-        {option('branch', Store, t('design.visitBranch'), t('design.visitBranchBody', { branch: f.name(branch) }), t('common.free'))}
+        {option('branch', Store, t('design.visitBranch'), t(manyBranches ? 'design.visitBranchBodyAny' : 'design.visitBranchBody', { branch: f.name(branch) }), t('common.free'))}
         {option('home', MapPin, t('design.homeVisit'), t('design.homeVisitBody'), `+ ${f.money(fee)}`)}
       </View>
       {member?.measurement_stale ? <Note icon={Info} tone="gold">{t('design.stale', { months: cat.data?.settings.measurements_valid_months ?? 12 })}</Note> : null}

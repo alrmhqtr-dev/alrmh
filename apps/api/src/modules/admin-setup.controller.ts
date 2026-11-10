@@ -2,7 +2,8 @@ import { Body, Controller, Get, NotFoundException, Param, Patch, Post, UseGuards
 import { db, type Queryable } from '../db.js';
 import { DEFAULT_SETTINGS, fail, getSettings, need } from '../lib.js';
 import { AnyStaff, CurrentStaff, Managers, audit, type StaffUser } from '../staff.js';
-import { CATEGORIES } from './catalogue.controller.js';
+import { COLLAR_SHAPES } from './catalogue.controller.js';
+import { MEDIA_PATH } from './media.controller.js';
 
 const slug = (s: string) =>
   String(s)
@@ -23,6 +24,31 @@ const int = (v: unknown, field: string, min: number, max: number) => {
   return n;
 };
 const text = (v: unknown, field: string, max = 120) => String(need(v as any, field)).trim().slice(0, max);
+const dateOrNull = (v: unknown, field: string) => {
+  if (v === undefined || v === null || v === '') return null;
+  const d = new Date(String(v));
+  if (Number.isNaN(d.getTime())) fail('invalid_date', { field });
+  return d.toISOString();
+};
+/** A product photo is either one uploaded here or a secure address elsewhere. */
+const imageOrNull = (v: unknown) => {
+  if (v === undefined || v === null || v === '') return null;
+  const s = String(v).trim();
+  if (!MEDIA_PATH.test(s) && !/^https:\/\/[^\s]+$/.test(s)) fail('invalid_image');
+  return s.slice(0, 500);
+};
+const coordOrNull = (v: unknown, field: string, max: number) => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || Math.abs(n) > max) fail('invalid_number', { field });
+  return n;
+};
+async function categoryId(v: unknown) {
+  const row = await db.one<{ id: string }>('select id from categories where id = $1', [String(v ?? '')]);
+  if (!row) fail('invalid_category');
+  return row.id;
+}
+const limitOrNull = (v: unknown, field: string) => (v === undefined || v === null || v === '' ? null : int(Number(v), field, 1, 1000000));
 
 async function uniqueId(table: string, base: string, client: Queryable = db.pool) {
   let id = slug(base);
@@ -45,15 +71,17 @@ export class AdminSetupController {
   @Get('catalogue')
   @UseGuards(AnyStaff)
   async catalogue() {
-    const [collars, fabrics, colours, links, products] = await Promise.all([
+    const [collars, fabrics, colours, links, products, categories] = await Promise.all([
       db.many('select * from collars order by sort, name_en'),
       db.many('select * from fabrics order by sort, name_en'),
       db.many('select * from colours order by sort, name_en'),
       db.many('select * from fabric_colours'),
       db.many('select * from products order by category, sort, name_en'),
+      db.many('select c.*, (select count(*)::int from products p where p.category = c.id) as product_count from categories c order by c.sort, c.name_en'),
     ]);
     return {
-      categories: CATEGORIES,
+      categories,
+      collarShapes: COLLAR_SHAPES,
       collars,
       colours,
       products,
@@ -64,12 +92,12 @@ export class AdminSetupController {
   @Post('products')
   @UseGuards(Managers)
   async addProduct(@CurrentStaff() me: StaffUser, @Body() b: any) {
-    if (!CATEGORIES.includes(b?.category)) fail('invalid_category');
+    const category = await categoryId(b?.category);
     const id = await uniqueId('products', b.name_en ?? '');
     await db.pool.query(
       `insert into products (id, category, name_en, name_ar, description_en, description_ar, price, sizes, image_url, active, sort)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,(select coalesce(max(sort),0)+1 from products))`,
-      [id, b.category, text(b.name_en, 'name_en'), text(b.name_ar, 'name_ar'), String(b.description_en ?? '').slice(0, 400), String(b.description_ar ?? '').slice(0, 400), money(b.price, 'price'), cleanSizes(b.sizes), b.image_url || null, b.active !== false],
+      [id, category, text(b.name_en, 'name_en'), text(b.name_ar, 'name_ar'), String(b.description_en ?? '').slice(0, 400), String(b.description_ar ?? '').slice(0, 400), money(b.price, 'price'), cleanSizes(b.sizes), imageOrNull(b.image_url), b.active !== false],
     );
     await audit(me, 'create', 'product', id, b);
     return { id };
@@ -78,27 +106,54 @@ export class AdminSetupController {
   @Patch('products/:id')
   @UseGuards(Managers)
   async updateProduct(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
-    if (b.category !== undefined && !CATEGORIES.includes(b.category)) fail('invalid_category');
     await patchRow('products', id, {
-      category: b.category,
+      category: b.category !== undefined ? await categoryId(b.category) : undefined,
       name_en: b.name_en !== undefined ? text(b.name_en, 'name_en') : undefined,
       name_ar: b.name_ar !== undefined ? text(b.name_ar, 'name_ar') : undefined,
       description_en: b.description_en !== undefined ? String(b.description_en).slice(0, 400) : undefined,
       description_ar: b.description_ar !== undefined ? String(b.description_ar).slice(0, 400) : undefined,
       price: b.price !== undefined ? money(b.price, 'price') : undefined,
       sizes: b.sizes !== undefined ? cleanSizes(b.sizes) : undefined,
-      image_url: b.image_url !== undefined ? b.image_url || null : undefined,
+      image_url: b.image_url !== undefined ? imageOrNull(b.image_url) : undefined,
       active: typeof b.active === 'boolean' ? b.active : undefined,
     });
     await audit(me, 'update', 'product', id, b);
     return { ok: true };
   }
 
+  @Post('categories')
+  @UseGuards(Managers)
+  async addCategory(@CurrentStaff() me: StaffUser, @Body() b: any) {
+    const id = await uniqueId('categories', b?.name_en ?? '');
+    await db.pool.query('insert into categories (id, name_en, name_ar, sort) values ($1,$2,$3,(select coalesce(max(sort),0)+1 from categories))', [id, text(b.name_en, 'name_en', 40), text(b.name_ar, 'name_ar', 40)]);
+    await audit(me, 'create', 'category', id, b);
+    return { id };
+  }
+
+  @Patch('categories/:id')
+  @UseGuards(Managers)
+  async updateCategory(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
+    await patchRow('categories', id, {
+      name_en: b.name_en !== undefined ? text(b.name_en, 'name_en', 40) : undefined,
+      name_ar: b.name_ar !== undefined ? text(b.name_ar, 'name_ar', 40) : undefined,
+      active: typeof b.active === 'boolean' ? b.active : undefined,
+    });
+    await audit(me, 'update', 'category', id, b);
+    return { ok: true };
+  }
+
   @Post('collars')
   @UseGuards(Managers)
   async addCollar(@CurrentStaff() me: StaffUser, @Body() b: any) {
+    if (b?.shape !== undefined && !COLLAR_SHAPES.includes(b.shape)) fail('invalid_shape');
     const id = await uniqueId('collars', b?.name_en ?? '');
-    await db.pool.query('insert into collars (id, name_en, name_ar, sort) values ($1,$2,$3,(select coalesce(max(sort),0)+1 from collars))', [id, text(b.name_en, 'name_en'), text(b.name_ar, 'name_ar')]);
+    await db.pool.query('insert into collars (id, name_en, name_ar, shape, active, sort) values ($1,$2,$3,$4,$5,(select coalesce(max(sort),0)+1 from collars))', [
+      id,
+      text(b.name_en, 'name_en'),
+      text(b.name_ar, 'name_ar'),
+      b.shape ?? 'classic-qatari',
+      b.active !== false,
+    ]);
     await audit(me, 'create', 'collar', id, b);
     return { id };
   }
@@ -106,9 +161,11 @@ export class AdminSetupController {
   @Patch('collars/:id')
   @UseGuards(Managers)
   async updateCollar(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
+    if (b.shape !== undefined && !COLLAR_SHAPES.includes(b.shape)) fail('invalid_shape');
     await patchRow('collars', id, {
       name_en: b.name_en !== undefined ? text(b.name_en, 'name_en') : undefined,
       name_ar: b.name_ar !== undefined ? text(b.name_ar, 'name_ar') : undefined,
+      shape: b.shape,
       active: typeof b.active === 'boolean' ? b.active : undefined,
     });
     await audit(me, 'update', 'collar', id, b);
@@ -180,11 +237,13 @@ export class AdminSetupController {
   @Post('branches')
   @UseGuards(Managers)
   async addBranch(@CurrentStaff() me: StaffUser, @Body() b: any) {
+    const extra = branchSlotFields(b ?? {});
     const r = await db.one(
       `insert into branches (name_en, name_ar, address_en, address_ar, phone, whatsapp, hours_en, hours_ar, sort)
        values ($1,$2,$3,$4,$5,$6,$7,$8,(select coalesce(max(sort),0)+1 from branches)) returning id`,
-      [text(b?.name_en, 'name_en'), text(b.name_ar, 'name_ar'), text(b.address_en, 'address_en'), text(b.address_ar, 'address_ar'), text(b.phone, 'phone'), text(b.whatsapp ?? b.phone, 'whatsapp'), text(b.hours_en, 'hours_en'), text(b.hours_ar, 'hours_ar')],
+      [text(b?.name_en, 'name_en'), text(b.name_ar, 'name_ar'), text(b.address_en, 'address_en'), text(b.address_ar, 'address_ar'), text(b.phone, 'phone'), text(b.whatsapp || b.phone, 'whatsapp'), text(b.hours_en, 'hours_en'), text(b.hours_ar, 'hours_ar')],
     );
+    await patchRow('branches', r!.id, extra);
     await audit(me, 'create', 'branch', r!.id, b);
     return r;
   }
@@ -192,9 +251,9 @@ export class AdminSetupController {
   @Patch('branches/:id')
   @UseGuards(Managers)
   async updateBranch(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
-    const open = b.open_minute !== undefined ? int(b.open_minute, 'open_minute', 0, 1440) : undefined;
-    const close = b.close_minute !== undefined ? int(b.close_minute, 'close_minute', 0, 1440) : undefined;
-    if (open !== undefined && close !== undefined && close <= open) fail('close_before_open');
+    const cur = await db.one('select open_minute, close_minute from branches where id = $1', [id]);
+    if (!cur) throw new NotFoundException({ code: 'not_found' });
+    const slots = branchSlotFields(b, cur);
     await patchRow('branches', id, {
       name_en: b.name_en !== undefined ? text(b.name_en, 'name_en') : undefined,
       name_ar: b.name_ar !== undefined ? text(b.name_ar, 'name_ar') : undefined,
@@ -204,12 +263,7 @@ export class AdminSetupController {
       whatsapp: b.whatsapp !== undefined ? text(b.whatsapp, 'whatsapp') : undefined,
       hours_en: b.hours_en !== undefined ? text(b.hours_en, 'hours_en') : undefined,
       hours_ar: b.hours_ar !== undefined ? text(b.hours_ar, 'hours_ar') : undefined,
-      open_minute: open,
-      close_minute: close,
-      slot_minutes: b.slot_minutes !== undefined ? int(b.slot_minutes, 'slot_minutes', 15, 240) : undefined,
-      slot_capacity: b.slot_capacity !== undefined ? int(b.slot_capacity, 'slot_capacity', 1, 50) : undefined,
-      closed_weekdays: b.closed_weekdays !== undefined ? cleanWeekdays(b.closed_weekdays) : undefined,
-      active: typeof b.active === 'boolean' ? b.active : undefined,
+      ...slots,
     });
     await audit(me, 'update', 'branch', id, b);
     return { ok: true };
@@ -330,13 +384,20 @@ export class AdminSetupController {
     const code = String(need(b?.code, 'code')).trim().toUpperCase();
     if (!/^[A-Z0-9]{3,20}$/.test(code)) fail('invalid_code');
     if (await db.one('select 1 from coupons where upper(code) = $1', [code])) fail('code_taken');
-    await db.pool.query('insert into coupons (code, percent, max_discount, starts_at, expires_at, active) values ($1,$2,$3,$4,$5,true)', [
-      code,
-      int(b.percent, 'percent', 1, 100),
-      b.max_discount ? money(b.max_discount, 'max_discount') : null,
-      b.starts_at || null,
-      b.expires_at || null,
-    ]);
+    await db.pool.query(
+      `insert into coupons (code, percent, max_discount, starts_at, expires_at, active, per_customer_limit, max_uses, min_subtotal) values ($1,$2,$3,$4,$5,true,$6,$7,$8)`,
+      [
+        code,
+        int(b.percent, 'percent', 1, 100),
+        b.max_discount ? money(b.max_discount, 'max_discount') : null,
+        dateOrNull(b.starts_at, 'starts_at'),
+        dateOrNull(b.expires_at, 'expires_at'),
+        // One use per customer unless the form says otherwise (an empty value means no limit).
+        b.per_customer_limit === undefined ? 1 : limitOrNull(b.per_customer_limit, 'per_customer_limit'),
+        limitOrNull(b.max_uses, 'max_uses'),
+        b.min_subtotal ? money(b.min_subtotal, 'min_subtotal') : null,
+      ],
+    );
     await audit(me, 'create', 'coupon', code, b);
     return { code };
   }
@@ -352,8 +413,11 @@ export class AdminSetupController {
     };
     if (b.percent !== undefined) add('percent', int(b.percent, 'percent', 1, 100));
     if (b.max_discount !== undefined) add('max_discount', b.max_discount ? money(b.max_discount, 'max_discount') : null);
-    if (b.expires_at !== undefined) add('expires_at', b.expires_at || null);
-    if (b.starts_at !== undefined) add('starts_at', b.starts_at || null);
+    if (b.expires_at !== undefined) add('expires_at', dateOrNull(b.expires_at, 'expires_at'));
+    if (b.starts_at !== undefined) add('starts_at', dateOrNull(b.starts_at, 'starts_at'));
+    if (b.per_customer_limit !== undefined) add('per_customer_limit', limitOrNull(b.per_customer_limit, 'per_customer_limit'));
+    if (b.max_uses !== undefined) add('max_uses', limitOrNull(b.max_uses, 'max_uses'));
+    if (b.min_subtotal !== undefined) add('min_subtotal', b.min_subtotal ? money(b.min_subtotal, 'min_subtotal') : null);
     if (typeof b.active === 'boolean') add('active', b.active);
     if (sets.length) {
       const r = await db.pool.query(`update coupons set ${sets.join(', ')} where upper(code) = $1`, vals);
@@ -362,6 +426,23 @@ export class AdminSetupController {
     await audit(me, 'update', 'coupon', code, b);
     return { ok: true };
   }
+}
+
+/** Booking times, map position and visibility of a branch. Opening must stay before closing, also when only one of them changes. */
+function branchSlotFields(b: any, current: { open_minute: number; close_minute: number } = { open_minute: 960, close_minute: 1260 }) {
+  const open = b.open_minute !== undefined ? int(b.open_minute, 'open_minute', 0, 1440) : undefined;
+  const close = b.close_minute !== undefined ? int(b.close_minute, 'close_minute', 0, 1440) : undefined;
+  if ((open !== undefined || close !== undefined) && (close ?? current.close_minute) <= (open ?? current.open_minute)) fail('close_before_open');
+  return {
+    open_minute: open,
+    close_minute: close,
+    slot_minutes: b.slot_minutes !== undefined ? int(b.slot_minutes, 'slot_minutes', 15, 240) : undefined,
+    slot_capacity: b.slot_capacity !== undefined ? int(b.slot_capacity, 'slot_capacity', 1, 50) : undefined,
+    closed_weekdays: b.closed_weekdays !== undefined ? cleanWeekdays(b.closed_weekdays) : undefined,
+    lat: b.lat !== undefined ? coordOrNull(b.lat, 'lat', 90) : undefined,
+    lng: b.lng !== undefined ? coordOrNull(b.lng, 'lng', 180) : undefined,
+    active: typeof b.active === 'boolean' ? b.active : undefined,
+  };
 }
 
 function cleanSizes(v: unknown): string[] {

@@ -1,6 +1,8 @@
-import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { useState } from 'react';
+import { Image, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Circle, Ellipse, Line, Path, Rect } from 'react-native-svg';
 import { ImageIcon } from 'lucide-react-native';
+import { mediaUrl } from '@/api/client';
 import { colors } from '@/theme/tokens';
 import { Icon, Text } from './primitives';
 
@@ -63,7 +65,16 @@ export function CollarGlyph({ collar, size = 44 }: { collar: string; size?: numb
   );
 }
 
-export function ProductArt({ label, style, small }: { label?: string; style?: StyleProp<ViewStyle>; small?: boolean }) {
+/** The product's photo when it has one (and it loads); the placeholder tile otherwise. */
+export function ProductArt({ label, style, small, uri }: { label?: string; style?: StyleProp<ViewStyle>; small?: boolean; uri?: string | null }) {
+  const src = mediaUrl(uri);
+  const [failed, setFailed] = useState<string | null>(null);
+  if (src && failed !== src)
+    return (
+      <View style={[{ backgroundColor: colors.subtle, borderRadius: 16, aspectRatio: 1, overflow: 'hidden' }, style]}>
+        <Image testID="product-photo" source={{ uri: src }} resizeMode="cover" onError={() => setFailed(src)} style={{ width: '100%', height: '100%' }} />
+      </View>
+    );
   return (
     <View style={[{ backgroundColor: colors.subtle, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 6, aspectRatio: 1 }, style]}>
       <Icon icon={ImageIcon} size={small ? 20 : 28} color={colors.textMuted} />

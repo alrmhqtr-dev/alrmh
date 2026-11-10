@@ -7,7 +7,8 @@ import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
 import { useSession } from '@/state/session';
 import { useMe } from '@/api/hooks';
-import { Avatar, Button, Card, Divider, EmptyState, ListRow, Loading, Overline, Text } from '@/ui/primitives';
+import { errorText } from '@/lib/errors';
+import { Avatar, Button, Card, Divider, EmptyState, ListRow, Loading, Note, Overline, Text } from '@/ui/primitives';
 import { Screen, Sheet } from '@/ui/layout';
 import { colors } from '@/theme/tokens';
 
@@ -18,6 +19,7 @@ export default function Account() {
   const me = useMe();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const group = (title: string, rows: React.ReactNode[]) => (
     <View style={{ gap: 10 }}>
@@ -81,7 +83,7 @@ export default function Account() {
           ])}
           {support}
           <Button testID="logout" label={t('account.logout')} kind="secondary" icon={LogOut} onPress={signOut} />
-          <Button label={t('account.delete')} kind="ghost" icon={Trash2} onPress={() => setConfirmDelete(true)} />
+          <Button label={t('account.delete')} kind="ghost" icon={Trash2} onPress={() => { setDeleteError(null); setConfirmDelete(true); }} />
         </>
       )}
       <Sheet visible={confirmDelete} onClose={() => setConfirmDelete(false)}>
@@ -89,22 +91,29 @@ export default function Account() {
         <Text variant="body" color={colors.textSecondary} style={{ marginTop: 8 }}>
           {t('account.deleteQ')}
         </Text>
+        {deleteError ? <View style={{ marginTop: 12 }}><Note tone="error">{deleteError}</Note></View> : null}
         <View style={{ gap: 6, marginTop: 20 }}>
           <Button
+            testID="delete-confirm"
             label={t('account.deleteCta')}
             kind="danger"
             loading={deleting}
             onPress={async () => {
               setDeleting(true);
+              setDeleteError(null);
               try {
                 await api('/me', { method: 'DELETE' });
-              } finally {
+              } catch (e) {
+                // Still signed in and nothing was deleted: say why instead of pretending it worked.
+                setDeleteError(errorText(t, e));
                 setDeleting(false);
-                setConfirmDelete(false);
-                qc.clear();
-                await signOut();
-                router.replace('/onboarding/welcome');
+                return;
               }
+              setDeleting(false);
+              setConfirmDelete(false);
+              qc.clear();
+              await signOut();
+              router.replace('/onboarding/welcome');
             }}
           />
           <Button label={t('common.cancel')} kind="ghost" onPress={() => setConfirmDelete(false)} />

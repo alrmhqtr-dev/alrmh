@@ -39,9 +39,51 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   return data as T;
 }
 
+/** Photos uploaded here are stored as a path on the API; anything else is already a full address. */
+export const mediaUrl = (url: string | null | undefined) => (!url ? '' : url.startsWith('/') ? `${API_URL}${url}` : url);
+
+/** Sends a photo as the request body and returns where it now lives. */
+export async function uploadImage(blob: Blob): Promise<{ id: string; url: string }> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/v1/admin/media`, { method: 'POST', headers: { 'Content-Type': blob.type, ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: blob });
+  } catch {
+    throw new ApiError('network', 0);
+  }
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    if (res.status === 401 && token) onUnauthorized?.();
+    throw new ApiError(data?.code ?? `http_${res.status}`, res.status, data ?? {});
+  }
+  return data;
+}
+
+/**
+ * Phone photos are far larger than the app needs. Anything big is redrawn at
+ * 1400 px on its longer side and saved as JPEG before it is uploaded.
+ */
+export async function shrinkImage(file: File, maxSide = 1400): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  if (scale === 1 && file.size <= 400_000) return file;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new ApiError('invalid_image', 0))), 'image/jpeg', 0.86));
+}
+
 const MESSAGES: Record<string, string> = {
   network: "Can't reach the AlRmh API. Check the connection.",
   invalid_login: 'Wrong email or password.',
+  account_locked: 'Too many wrong passwords. This account is locked for 15 minutes.',
+  too_many_requests: 'Too many tries. Wait a few minutes and try again.',
+  invalid_date: 'Check the date.',
+  invalid_input: 'Check the values and try again.',
   forbidden: "Your role can't do this.",
   stage_not_forward: 'Orders can only move forward.',
   cannot_cancel: "This order can't be cancelled at its current stage.",
@@ -52,6 +94,9 @@ const MESSAGES: Record<string, string> = {
   email_taken: 'A staff member with that email already exists.',
   password_too_short: 'Passwords need at least 10 characters.',
   invalid_hex: 'Use a colour like #F3EBDC.',
+  invalid_image: 'Use a JPEG, PNG or WebP photo.',
+  too_large: 'That photo is too large (2 MB at most).',
+  invalid_category: 'Pick a category.',
   close_before_open: 'Closing time must be after opening time.',
   colours_required: 'Pick at least one colour for this fabric.',
   cannot_demote_self: "You can't remove your own owner access.",

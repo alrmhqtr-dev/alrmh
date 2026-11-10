@@ -3,16 +3,17 @@ import { api } from './client';
 import { useSession } from '@/state/session';
 
 export type Bi = { name_en: string; name_ar: string };
-export type Collar = Bi & { id: string };
+export type Collar = Bi & { id: string; shape?: string };
+export type Category = Bi & { id: string };
 export type Fabric = Bi & { id: string; note_en: string; note_ar: string; price: number; colour_ids: string[] };
 export type Colour = Bi & { id: string; hex: string };
 export type Product = Bi & { id: string; category: string; description_en: string; description_ar: string; price: number; sizes: string[]; image_url: string | null };
-export type Branch = Bi & { id: string; address_en: string; address_ar: string; phone: string; whatsapp: string; hours_en: string; hours_ar: string; closed_weekdays: number[]; lat: number; lng: number };
+export type Branch = Bi & { id: string; address_en: string; address_ar: string; phone: string; whatsapp: string; hours_en: string; hours_ar: string; closed_weekdays: number[]; lat: number | null; lng: number | null };
 export type Catalogue = {
   collars: Collar[];
   fabrics: Fabric[];
   colours: Colour[];
-  categories: string[];
+  categories: Category[];
   products: Product[];
   branches: Branch[];
   settings: {
@@ -69,7 +70,7 @@ export type BasketLine = {
   unitPrice: number;
   lineTotal: number;
   points: number;
-  product?: Bi & { id: string; category: string };
+  product?: Bi & { id: string; category: string; image_url?: string | null };
   size?: string | null;
   thobe?: { collar: Collar; fabric: Fabric; colour: Colour };
   member?: { id: string; name: string; relation: string; size: string };
@@ -97,7 +98,7 @@ export type Quote = Basket & {
   discountLabel: string | null;
   total: number;
   address: Address | null;
-  coupon: null | { code: string; percent?: number; maxDiscount?: number | null; error?: string };
+  coupon: null | { code: string; percent?: number; maxDiscount?: number | null; error?: string; min?: number };
   couponReplacesVoucher: boolean;
   appliedVoucher: Voucher | null;
   rewardItem: (Bi & { product_id: string }) | null;
@@ -109,6 +110,7 @@ export type OrderSummary = {
   stage: string;
   total: number;
   created_at: string;
+  closed_at: string | null;
   expected_delivery: string | null;
   item_count: number;
   thobe_count: number;
@@ -167,15 +169,32 @@ export type Slots = { closedWeekdays: number[]; days: { date: string; weekday: n
 
 const authed = () => ({ enabled: useSession().signedIn });
 
-export const useCatalogue = () => useQuery({ queryKey: ['catalogue'], queryFn: () => api<Catalogue>('/catalogue', { auth: false }), staleTime: 5 * 60_000 });
-export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me'), ...authed() });
+// Short-lived, so a change made in the admin shows the next time a screen opens or the app comes back to the front.
+export const useCatalogue = () => useQuery({ queryKey: ['catalogue'], queryFn: () => api<Catalogue>('/catalogue', { auth: false }), staleTime: 30_000 });
+
+/*
+ * "live" keeps a screen current while it is open and in front: it asks again
+ * every few seconds. React Query pauses these while the app is in the
+ * background, and screens pass `useIsFocused()` so hidden screens stay quiet.
+ */
+const CLOSED_STAGES = ['delivered', 'cancelled'];
+export const useMe = (live = false) => useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me'), ...authed(), refetchInterval: live ? 30_000 : false });
 export const useFamily = () => useQuery({ queryKey: ['family'], queryFn: () => api<Member[]>('/family'), ...authed() });
 export const useMember = (id: string) =>
   useQuery({ queryKey: ['member', id], queryFn: () => api<{ id: string; name: string; relation: string; size: string; latest: Measurement | null; history: Measurement[] }>(`/family/${id}`), ...authed() });
 export const useAddresses = () => useQuery({ queryKey: ['addresses'], queryFn: () => api<Address[]>('/addresses'), ...authed() });
 export const useBasket = () => useQuery({ queryKey: ['basket'], queryFn: () => api<Basket>('/basket'), ...authed() });
-export const useOrders = () => useQuery({ queryKey: ['orders'], queryFn: () => api<{ active: OrderSummary[]; past: OrderSummary[] }>('/orders'), ...authed() });
-export const useOrder = (id: string) => useQuery({ queryKey: ['order', id], queryFn: () => api<OrderDetail>(`/orders/${id}`), ...authed() });
+export const useOrders = (live = false) =>
+  useQuery({ queryKey: ['orders'], queryFn: () => api<{ active: OrderSummary[]; past: OrderSummary[] }>('/orders'), ...authed(), refetchInterval: live ? 20_000 : false });
+export const useOrder = (id: string, live = false) =>
+  useQuery({
+    queryKey: ['order', id],
+    queryFn: () => api<OrderDetail>(`/orders/${id}`),
+    ...authed(),
+    // Opening the tracking screen always asks for the current stage, then keeps asking until the order is closed.
+    ...(live ? { staleTime: 0 } : {}),
+    refetchInterval: (q) => (live && !CLOSED_STAGES.includes(q.state.data?.stage ?? '') ? 10_000 : false),
+  });
 export const useAppointments = () => useQuery({ queryKey: ['appointments'], queryFn: () => api<Appointment[]>('/appointments'), ...authed() });
 export const useRewards = () => useQuery({ queryKey: ['rewards'], queryFn: () => api<Rewards>('/rewards'), ...authed() });
 export const useRewardHistory = (filter: string) =>

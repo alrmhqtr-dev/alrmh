@@ -13,18 +13,22 @@ import { ThobeArt } from '@/ui/art';
 import { colors, radius, type as typeScale } from '@/theme/tokens';
 
 export default function Shop() {
-  const { t, isRTL } = useLocale();
+  const { t, f, isRTL } = useLocale();
   const cat = useCatalogue();
   const builder = useBuilder();
   const [filter, setFilter] = useState<string>('all');
   const [q, setQ] = useState('');
 
+  const categories = cat.data?.categories ?? [];
+  const catName = (id: string) => f.name(categories.find((c) => c.id === id)) || id;
   const products = useMemo(() => {
     const list = cat.data?.products ?? [];
+    const cats = cat.data?.categories ?? [];
     const needle = q.trim().toLowerCase();
-    return list.filter(
-      (p) => (filter === 'all' || filter === 'thobes' || p.category === filter) && (!needle || `${p.name_en} ${p.name_ar} ${p.category}`.toLowerCase().includes(needle)),
-    );
+    return list.filter((p) => {
+      const c = cats.find((x) => x.id === p.category);
+      return (filter === 'all' || filter === 'thobes' || p.category === filter) && (!needle || `${p.name_en} ${p.name_ar} ${c?.name_en ?? p.category} ${c?.name_ar ?? ''}`.toLowerCase().includes(needle));
+    });
   }, [cat.data, filter, q]);
 
   const startDesign = () => {
@@ -32,7 +36,7 @@ export default function Shop() {
     router.push('/design/collar');
   };
 
-  const filters = ['all', 'thobes', ...(cat.data?.categories ?? [])];
+  const filters = ['all', 'thobes', ...categories.map((c) => c.id)];
 
   return (
     <Screen contentStyle={{ paddingTop: 8, gap: 20 }}>
@@ -57,7 +61,7 @@ export default function Shop() {
           <Chip
             key={key}
             testID={`filter-${key}`}
-            label={key === 'all' ? t('shop.all') : key === 'thobes' ? t('shop.thobes') : t(`cat.${key}` as any)}
+            label={key === 'all' ? t('shop.all') : key === 'thobes' ? t('shop.thobes') : catName(key)}
             selected={filter === key}
             onPress={() => setFilter(key)}
           />
@@ -84,7 +88,7 @@ export default function Shop() {
 
       {filter !== 'thobes' ? (
         <View style={{ gap: 14 }}>
-          <Text variant="h2">{filter === 'all' ? t('shop.accessories') : t(`cat.${filter}` as any)}</Text>
+          <Text variant="h2">{filter === 'all' ? t('shop.accessories') : catName(filter)}</Text>
           {cat.isLoading ? (
             <Loading />
           ) : cat.isError ? (

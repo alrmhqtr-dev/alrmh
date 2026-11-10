@@ -13,7 +13,9 @@ export default function Help() {
   const cat = useCatalogue();
   const [open, setOpen] = useState<number | null>(null);
   const support = cat.data?.settings.support;
-  const branch = cat.data?.branches[0];
+  const branches = cat.data?.branches ?? [];
+  const s = cat.data?.settings;
+  const facts = { days: s?.lead_working_days ?? 7, months: s?.points.expiry_months ?? 12, warn: s?.points.warn_days ?? 30 };
 
   return (
     <Screen header={<Header title={t('help.title')} />} contentStyle={{ gap: 20, paddingTop: 8 }}>
@@ -29,19 +31,24 @@ export default function Help() {
           <Button label={t('help.call')} icon={Phone} kind="secondary" style={{ flex: 1 }} onPress={() => support && call(support.phone)} />
         </View>
       </Card>
-      {branch ? (
+      {branches.length ? (
         <View style={{ gap: 10 }}>
-          <Overline>{t('help.branch')}</Overline>
-          <Card style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <IconTile icon={Store} />
-            <View style={{ flex: 1 }}>
-              <Text variant="bodyStrong">{f.name(branch)}</Text>
-              <Text variant="small" color={colors.textSecondary}>
-                {f.name(branch, 'hours')}
-              </Text>
-            </View>
-            <Button label={t('help.directions')} icon={Navigation} kind="subtle" small onPress={() => openMaps(branch.lat, branch.lng)} />
-          </Card>
+          <Overline>{branches.length > 1 ? t('help.branches') : t('help.branch')}</Overline>
+          {branches.map((branch) => {
+            const { lat, lng } = branch;
+            return (
+              <Card key={branch.id} testID={`help-branch-${branch.id}`} style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                <IconTile icon={Store} />
+                <View style={{ flex: 1 }}>
+                  <Text variant="bodyStrong">{f.name(branch)}</Text>
+                  <Text variant="small" color={colors.textSecondary}>
+                    {f.name(branch, 'hours')}
+                  </Text>
+                </View>
+                {lat != null && lng != null ? <Button label={t('help.directions')} icon={Navigation} kind="subtle" small onPress={() => openMaps(lat, lng)} /> : null}
+              </Card>
+            );
+          })}
         </View>
       ) : null}
       <View style={{ gap: 10 }}>
@@ -61,7 +68,7 @@ export default function Help() {
                 </View>
                 {open === i ? (
                   <Text variant="small" color={colors.textSecondary}>
-                    {t(`help.a${i}` as StringKey)}
+                    {t(`help.a${i}` as StringKey, facts)}
                   </Text>
                 ) : null}
               </Touch>
