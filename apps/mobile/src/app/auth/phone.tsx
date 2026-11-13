@@ -15,7 +15,7 @@ export function QatarPrefix() {
         <View style={{ width: 9, backgroundColor: '#FFFFFF' }} />
         <View style={{ flex: 1, backgroundColor: '#8A1538' }} />
       </View>
-      <Text variant="body">+974</Text>
+      <Text variant="body" style={{ writingDirection: 'ltr' }}>+974</Text>
       <View style={{ width: 1, height: 24, backgroundColor: colors.border, marginStart: 4 }} />
     </View>
   );
@@ -76,7 +76,7 @@ export default function PhoneScreen() {
           onSubmitEditing={submit}
           error={error}
           hint={t('phone.hint')}
-          style={{ textAlign: 'left' }}
+          style={{ textAlign: 'left', writingDirection: 'ltr' }}
         />
       </View>
       <Text variant="small" color={colors.textMuted} style={{ marginTop: 24 }}>

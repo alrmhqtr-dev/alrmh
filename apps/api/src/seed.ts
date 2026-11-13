@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
 import { migrate } from './migrate.js';
 import { DEFAULT_SETTINGS, qatarDateString } from './lib.js';
@@ -43,6 +46,13 @@ const products = [
   ['leather-sandals', 'sandals', 'Leather sandals', 'نعال جلد', 'Full-grain leather with a cushioned sole.', 'جلد طبيعي بنعل مريح.', 260, ['40', '41', '42', '43', '44', '45']],
   ['oud-50', 'fragrance', 'Oud perfume 50 ml', 'عطر عود 50 مل', 'A warm oud blend that lasts all day.', 'مزيج عود دافئ يدوم طوال اليوم.', 180, []],
   ['cufflinks', 'accessories', 'Cufflink set', 'طقم أزرار أكمام', 'Polished cufflinks with a matching collar stud.', 'أزرار أكمام لامعة مع زر ياقة مطابق.', 75, []],
+  ['sandals-embossed-brown', 'sandals', 'Embossed brown sandals', 'نعال بني منقوش', 'Dark brown leather with an embossed pattern and a cushioned sole.', 'جلد بني داكن بنقشة بارزة ونعل مريح.', 290, ['40', '41', '42', '43', '44', '45']],
+  ['sandals-woven-burgundy', 'sandals', 'Woven burgundy sandals', 'نعال عنابي منسوج', 'Hand-woven burgundy leather strap on a tan leather footbed.', 'حزام من الجلد العنابي المنسوج يدوياً على قاعدة من الجلد البني الفاتح.', 320, ['40', '41', '42', '43', '44', '45']],
+  ['sandals-beige-buckle', 'sandals', 'Beige buckle sandals', 'نعال بيج بإبزيم', 'Soft beige leather with a side buckle.', 'جلد بيج ناعم بإبزيم جانبي.', 280, ['40', '41', '42', '43', '44', '45']],
+  ['sandals-blue', 'sandals', 'Blue leather sandals', 'نعال جلد أزرق', 'Pebbled blue leather with a cushioned sole.', 'جلد أزرق محبب بنعل مريح.', 270, ['40', '41', '42', '43', '44', '45']],
+  ['card-holder-black', 'accessories', 'Leather card holder, black', 'حافظة بطاقات جلدية سوداء', 'Slim card holder in textured leather, gift boxed.', 'حافظة بطاقات رفيعة من جلد محبب، تأتي في علبة هدية.', 165, []],
+  ['card-holder-lime', 'accessories', 'Leather card holder, lime', 'حافظة بطاقات جلدية خضراء', 'Slim card holder in textured leather with a lime front, gift boxed.', 'حافظة بطاقات رفيعة من جلد محبب بواجهة خضراء ليمونية، تأتي في علبة هدية.', 165, []],
+  ['card-holder-red', 'accessories', 'Leather card holder, red', 'حافظة بطاقات جلدية حمراء', 'Slim card holder in textured leather with a red front, gift boxed.', 'حافظة بطاقات رفيعة من جلد محبب بواجهة حمراء، تأتي في علبة هدية.', 165, []],
 ];
 
 const rewardOptions = [
@@ -92,11 +102,44 @@ export async function seed({ demo = false } = {}) {
       await c.query('insert into reward_options (id, kind, percent, product_id, cost_points, sort) values ($1,$2,$3,$4,$5,$6) on conflict (id) do nothing', [...r, i]);
     }
   });
+  await seedProductPhotos();
   if (demo) {
     // Sample coupons are demo data: a real launch must not start with a live 20% code.
     await db.pool.query(`insert into coupons (code, percent, max_discount, expires_at) values ('EID20', 20, 100, now() + interval '1 year') on conflict do nothing`);
     await db.pool.query(`insert into coupons (code, percent, max_discount, expires_at) values ('SUMMER24', 15, null, '2024-09-30') on conflict do nothing`);
     await seedDemoCustomer();
+  }
+}
+
+/*
+ * Photos for the sample products, from apps/api/seed/products/<product id>.jpg
+ * (or .jpeg, .png, .webp): square photos, about 1000 px, under 2 MB.
+ * Each product gets its photo once: only while it has none, so a photo uploaded
+ * in the admin is never replaced, and never again after that, so a photo someone
+ * removed in the admin stays removed. The settings key records which were done.
+ */
+const photoDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'seed', 'products');
+
+const PHOTO_TYPES = [['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['png', 'image/png'], ['webp', 'image/webp']] as const;
+
+async function seedProductPhotos() {
+  for (const product of products) {
+    const id = product[0] as string;
+    const found = PHOTO_TYPES.map(([ext, type]) => [join(photoDir, `${id}.${ext}`), type] as const).find(([f]) => existsSync(f));
+    if (!found) continue;
+    const [file, type] = found;
+    await db.tx(async (c) => {
+      await c.query(`insert into settings (key, value) values ('seed.product_photos', '[]') on conflict (key) do nothing`);
+      const done = (await c.query(`select value from settings where key = 'seed.product_photos' for update`)).rows[0].value as string[];
+      if (done.includes(id)) return;
+      const p = await c.query('select image_url from products where id = $1', [id]);
+      if (p.rowCount && !p.rows[0].image_url) {
+        const bytes = readFileSync(file);
+        const m = await c.query('insert into media (content_type, bytes, size) values ($1, $2, $3) returning id', [type, bytes, bytes.length]);
+        await c.query('update products set image_url = $2 where id = $1', [id, `/v1/media/${m.rows[0].id}`]);
+      }
+      if (p.rowCount) await c.query(`update settings set value = $1 where key = 'seed.product_photos'`, [JSON.stringify([...done, id])]);
+    });
   }
 }
 

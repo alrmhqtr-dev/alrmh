@@ -392,6 +392,9 @@ export function Field({
   prefix,
   multiline,
   counter,
+  style,
+  onFocus,
+  onBlur,
   ...input
 }: TextInputProps & { label?: string; hint?: string; error?: string | null; right?: string; prefix?: ReactNode; counter?: string }) {
   const { isRTL } = useLocale();
@@ -412,8 +415,8 @@ export function Field({
           minHeight: multiline ? 112 : 54,
           borderRadius: 14,
           borderWidth: 1,
-          borderColor: error ? colors.error : colors.border,
-          backgroundColor: colors.surface,
+          borderColor: error ? colors.error : 'transparent',
+          backgroundColor: colors.subtle,
           flexDirection: 'row',
           alignItems: multiline ? 'flex-start' : 'center',
           paddingHorizontal: 16,
@@ -436,8 +439,11 @@ export function Field({
               writingDirection: isRTL ? 'rtl' : 'ltr',
               textAlignVertical: multiline ? 'top' : 'center',
             },
-            Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : null,
+            Platform.OS === 'web' ? ({ outlineStyle: 'none', borderWidth: 0, backgroundColor: 'transparent', minWidth: 0 } as any) : null,
+            style,
           ]}
+          onFocus={onFocus}
+          onBlur={onBlur}
           {...input}
         />
         {counter ? (

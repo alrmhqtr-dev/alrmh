@@ -42,7 +42,7 @@ Regression checks for the money, booking, points and sign-in rules (needs `psql`
 
 Browser checks (need Google Chrome and `pip install playwright`; the app served on 8081 and the admin on 5174 against a fresh database):
 - `tests/e2e/journey.py` signs up, designs, books, pays and follows an order through every stage in the admin, in English and Arabic, and checks the crash screens.
-- `tests/e2e/a11y.py` runs axe-core over 25 screens in both languages; set `AXE` to the path of `axe.min.js` (`npm install --prefix /tmp/axe axe-core@4`).
+- `tests/e2e/a11y.py` runs axe-core over 26 screens in both languages; set `AXE` to the path of `axe.min.js` (`npm install --prefix /tmp/axe axe-core@4`).
 
 CI runs all of these on every push.
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View } from 'react-native';
+import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { BellRing, Share } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
@@ -61,6 +62,8 @@ export function PushCard({ compact }: { compact?: boolean }) {
           onPress={toggle}
           style={{ alignSelf: 'flex-start' }}
         />
+      ) : state === 'install' ? (
+        <Button testID="push-howto" label={t('push.howTo')} kind="secondary" small onPress={() => router.push('/install')} style={{ alignSelf: 'flex-start' }} />
       ) : null}
       {failed ? <Note tone="error">{t('push.failed')}</Note> : null}
     </Card>

@@ -28,7 +28,8 @@ export const DEFAULT_SETTINGS: Settings = {
 export async function getSettings(client: Queryable = db.pool): Promise<Settings> {
   const rows = await db.many<{ key: string; value: any }>('select key, value from settings', [], client);
   const out: any = structuredClone(DEFAULT_SETTINGS);
-  for (const r of rows) out[r.key] = r.value;
+  // `seed.*` rows are the seed's own bookkeeping, not settings.
+  for (const r of rows) if (!r.key.startsWith('seed.')) out[r.key] = r.value;
   return out as Settings;
 }
 

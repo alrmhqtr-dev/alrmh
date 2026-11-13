@@ -120,7 +120,7 @@ export default function Verify() {
           autoFocus
           maxLength={6}
           caretHidden
-          style={{ position: 'absolute', opacity: 0.01, width: '100%', height: 56, fontFamily: fonts.regular }}
+          style={[{ position: 'absolute', opacity: 0.01, width: '100%', height: 56, fontFamily: fonts.regular }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : null]}
         />
       </Pressable>
 

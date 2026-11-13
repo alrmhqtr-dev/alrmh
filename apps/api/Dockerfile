@@ -41,6 +41,8 @@ COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 # The SQL migrations that dist/migrate.js applies (Railway's pre-deploy command).
 COPY --from=build /app/apps/api/sql ./apps/api/sql
+# Photos for the sample products, added by the seed when a product has none.
+COPY --from=build /app/apps/api/seed ./apps/api/seed
 
 RUN chmod -R a+rX /app
 USER app

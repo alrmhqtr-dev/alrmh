@@ -15,6 +15,7 @@ import { BuilderProvider } from '@/state/builder';
 import { colors } from '@/theme/tokens';
 import { ApiError } from '@/api/client';
 import { CrashScreen, useRememberPath } from '@/ui/crash';
+import '@/lib/install';
 
 // Any screen that fails to draw shows this instead of a blank page.
 export const ErrorBoundary = CrashScreen;

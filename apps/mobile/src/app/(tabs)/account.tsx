@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { View } from 'react-native';
+import { Platform, View } from 'react-native';
 import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Bell, FileText, Globe, LogOut, MapPin, MessageCircle, ScrollText, Trash2, User, Users } from 'lucide-react-native';
+import { Bell, Download, FileText, Globe, LogOut, MapPin, MessageCircle, ScrollText, Trash2, User, Users } from 'lucide-react-native';
+import { installInfo } from '@/lib/install';
 import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
 import { useSession } from '@/state/session';
@@ -38,7 +39,11 @@ export default function Account() {
   const prefs = group(t('account.preferences'), [
     <ListRow key="lang" icon={Globe} title={t('account.language')} subtitle={lang === 'ar' ? 'العربية' : 'English'} onPress={() => router.push('/account/language')} testID="row-language" />,
   ]);
+  const showInstall = Platform.OS === 'web' && !installInfo().installed;
   const support = group(t('account.support'), [
+    ...(showInstall
+      ? [<ListRow key="install" icon={Download} title={t('account.install')} subtitle={t('account.installSub')} onPress={() => router.push('/install')} testID="row-install" />]
+      : []),
     <ListRow key="help" icon={MessageCircle} title={t('account.help')} subtitle={t('account.helpSub')} onPress={() => router.push('/account/help')} />,
     <ListRow key="terms" icon={ScrollText} title={t('account.terms')} onPress={() => router.push('/account/terms')} />,
   ]);

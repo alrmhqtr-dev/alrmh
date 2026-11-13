@@ -44,7 +44,7 @@ export default function Shop() {
         <Text variant="h1">{t('shop.title')}</Text>
         <BagButton />
       </View>
-      <View style={{ height: 50, borderRadius: 14, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10 }}>
+      <View style={{ height: 50, borderRadius: 14, backgroundColor: colors.subtle, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10 }}>
         <Icon icon={Search} size={18} color={colors.textMuted} />
         <TextInput
           testID="shop-search"

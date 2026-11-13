@@ -1,4 +1,4 @@
-"""Accessibility check: axe-core on 25 screens of the customer app, in English and Arabic.
+"""Accessibility check: axe-core on 26 screens of the customer app, in English and Arabic.
 
 Signs in as the demo customer (SEED_DEMO=true, OTP_MODE=preview). Fails on any issue
 axe finds. Automated checks catch roughly a third of real problems; try the app with
@@ -26,7 +26,7 @@ orders = json.loads(urllib.request.urlopen(urllib.request.Request(API + "/orders
 family = json.loads(urllib.request.urlopen(urllib.request.Request(API + "/family", headers={"Authorization": "Bearer " + tok})).read())
 order = (orders["active"] + orders["past"])[0]["id"]
 
-SIGNED_OUT = ["/onboarding/language", "/onboarding/welcome", "/auth/phone"]
+SIGNED_OUT = ["/onboarding/language", "/onboarding/welcome", "/auth/phone", "/install"]
 SIGNED_IN = ["/home", "/shop", "/product/white-ghutra", "/design/collar", "/design/fabric", "/design/colour", "/design/for-whom", "/design/measure",
              "/book?mode=standalone&kind=branch", "/basket", "/checkout", "/orders", f"/orders/{order}", "/rewards", "/rewards/redeem", "/account",
              "/account/notifications", "/account/help", "/account/profile", "/account/addresses", "/account/family", f"/account/member/{family[0]['id']}"]

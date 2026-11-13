@@ -189,7 +189,7 @@ export default function Checkout() {
         </Card>
       ) : (
         <View style={{ gap: 8 }}>
-          <View style={{ height: 54, borderRadius: 14, borderWidth: 1, borderColor: q.coupon?.error ? colors.error : colors.border, flexDirection: 'row', alignItems: 'center', paddingStart: 16, paddingEnd: 6, gap: 8 }}>
+          <View style={{ height: 54, borderRadius: 14, borderWidth: 1, borderColor: q.coupon?.error ? colors.error : 'transparent', backgroundColor: colors.subtle, flexDirection: 'row', alignItems: 'center', paddingStart: 16, paddingEnd: 6, gap: 8 }}>
             <TextInput
               testID="coupon-input"
               value={couponInput}
