@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Bell, CalendarCheck, Clock, Scissors, Star } from 'lucide-react-native';
+import { Bell, CalendarCheck, CalendarClock, Clock, Scissors, Star } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
 import { useNotifications } from '@/api/hooks';
@@ -43,7 +43,7 @@ export default function Notifications() {
             <View key={n.id}>
               {i ? <Divider /> : null}
               <Touch onPress={() => n.link && router.push(n.link as any)} style={{ flexDirection: 'row', gap: 14, padding: 16, backgroundColor: n.read_at ? colors.surface : colors.goldSoft }}>
-                <IconTile icon={n.kind === 'points' ? (n.title_en.includes('expire') ? Clock : Star) : n.kind === 'appointment' ? CalendarCheck : n.kind === 'measurement' ? CalendarCheck : Scissors} gold={n.kind === 'points'} />
+                <IconTile icon={n.kind === 'points' ? (n.title_en.includes('expire') ? Clock : Star) : n.kind === 'appointment' ? CalendarCheck : n.kind === 'reminder' ? CalendarClock : n.kind === 'measurement' ? CalendarCheck : Scissors} gold={n.kind === 'points'} />
                 <View style={{ flex: 1, gap: 2 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
                     <Text variant="bodyStrong" style={{ flex: 1 }}>

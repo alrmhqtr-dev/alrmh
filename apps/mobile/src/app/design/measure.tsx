@@ -38,7 +38,7 @@ export default function MeasureStep() {
     const on = state.method === method;
     const disabled = method === 'saved' && !hasSaved;
     return (
-      <Card testID={`measure-${method}`} selected={on} onPress={disabled ? undefined : () => choose(method)} style={{ padding: 16, gap: 12, opacity: disabled ? 0.5 : 1 }}>
+      <Card testID={`measure-${method}`} selected={on} disabled={disabled} onPress={() => choose(method)} style={{ padding: 16, gap: 12, opacity: disabled ? 0.5 : 1 }}>
         <View style={{ flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
           <IconTile icon={icon} dark={on} />
           <View style={{ flex: 1, gap: 2 }}>

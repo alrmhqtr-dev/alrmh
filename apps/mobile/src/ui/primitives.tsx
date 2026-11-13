@@ -169,7 +169,8 @@ export function IconButton({ icon, onPress, badge, flip, label, dark }: { icon: 
     <Touch
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={label}
+      // A badge's number is visible, so it is read out too.
+      accessibilityLabel={badge ? `${label} ${badge}` : label}
       style={{
         width: 42,
         height: 42,
@@ -210,7 +211,7 @@ export function IconButton({ icon, onPress, badge, flip, label, dark }: { icon: 
 
 /* ---------- surfaces ---------- */
 
-export function Card({ children, style, selected, onPress, dashed, testID }: { children: ReactNode; style?: StyleProp<ViewStyle>; selected?: boolean; onPress?: () => void; dashed?: boolean; testID?: string }) {
+export function Card({ children, style, selected, onPress, dashed, testID, disabled }: { children: ReactNode; style?: StyleProp<ViewStyle>; selected?: boolean; onPress?: () => void; dashed?: boolean; testID?: string; disabled?: boolean }) {
   const base: ViewStyle = {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
@@ -219,9 +220,10 @@ export function Card({ children, style, selected, onPress, dashed, testID }: { c
     borderStyle: dashed ? 'dashed' : 'solid',
     overflow: 'hidden',
   };
-  if (onPress)
+  // An option that can't be chosen right now still shows, dimmed, and says so to screen readers.
+  if (onPress || disabled)
     return (
-      <Touch testID={testID} onPress={onPress} accessibilityState={{ selected }} style={[base, style]}>
+      <Touch testID={testID} onPress={onPress} disabled={disabled} accessibilityState={{ selected, disabled }} style={[base, style]}>
         {children}
       </Touch>
     );
@@ -420,6 +422,7 @@ export function Field({
       >
         {prefix}
         <TextInput
+          accessibilityLabel={label ?? input.placeholder}
           placeholderTextColor={colors.textMuted}
           multiline={multiline}
           style={[
@@ -457,11 +460,12 @@ export function Field({
 }
 
 export function Stepper({ value, onChange, min = 1, max = 20, compact }: { value: number; onChange: (n: number) => void; min?: number; max?: number; compact?: boolean }) {
+  const { t } = useLocale();
   const size = compact ? 28 : 36;
   const btn = (label: string, next: number, disabled: boolean) => (
     <Touch
       accessibilityRole="button"
-      accessibilityLabel={label === '−' ? 'Decrease' : 'Increase'}
+      accessibilityLabel={label === '−' ? t('a11y.decrease') : t('a11y.increase')}
       disabled={disabled}
       onPress={() => onChange(next)}
       style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: compact ? colors.surface : colors.subtle, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.35 : 1 }}

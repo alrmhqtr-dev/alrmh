@@ -1,6 +1,6 @@
 import { StrictMode, useState, type FormEvent, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CalendarDays, ClipboardList, Gift, History, KeyRound, LayoutDashboard, LogOut, Settings2, Shirt, Store, Users, UserCog } from 'lucide-react';
 import '@fontsource/readex-pro/400.css';
@@ -10,7 +10,7 @@ import '@fontsource/aref-ruqaa/400.css';
 import './styles.css';
 import { AuthProvider, useAuth, type Role } from './lib/auth';
 import { api, errorMessage } from './lib/api';
-import { Field, Input, Loading, Modal, ToastProvider, useToast } from './ui';
+import { Field, Input, Loading, Modal, PageErrorBoundary, ToastProvider, useToast } from './ui';
 import Overview from './pages/Overview';
 import Orders from './pages/Orders';
 import OrderDetail from './pages/OrderDetail';
@@ -140,6 +140,7 @@ function Guard({ roles, children }: { roles: Role[]; children: ReactNode }) {
 function Shell() {
   const { staff, ready, logout, can } = useAuth();
   const [changePassword, setChangePassword] = useState(false);
+  const location = useLocation();
   if (!ready) return <Loading />;
   if (!staff) return <Login />;
   return (
@@ -181,6 +182,7 @@ function Shell() {
       </aside>
       {changePassword ? <PasswordModal onClose={() => setChangePassword(false)} /> : null}
       <main className="main">
+        <PageErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/orders" element={<Orders />} />
@@ -196,6 +198,7 @@ function Shell() {
           <Route path="/audit" element={<Guard roles={MANAGERS}><Audit /></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </PageErrorBoundary>
       </main>
     </div>
   );

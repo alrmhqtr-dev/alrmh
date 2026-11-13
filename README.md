@@ -38,7 +38,13 @@ pnpm dev
 
 API smoke test (creates a customer, books, pays and delivers an order; signs in as the owner from `ADMIN_EMAIL`/`ADMIN_PASSWORD`): `API=http://localhost:4000 python3 apps/api/scripts/smoke.py 55559999`
 
-Regression checks for the money, booking, points and sign-in rules (needs `psql`, and the API started with `RATE_LIMITS=off`, `SEED_DEMO=true` and `CORS_ORIGINS=http://localhost:8081`): `API=http://localhost:4000 python3 apps/api/scripts/regress.py`
+Regression checks for the money, booking, points and sign-in rules (needs `psql`, and the API started with `RATE_LIMITS=off`, `SEED_DEMO=true`, `HOUSEKEEPING_SECONDS=5`, `QUIET_HOURS=off` and `CORS_ORIGINS=http://localhost:8081`): `API=http://localhost:4000 python3 apps/api/scripts/regress.py`
+
+Browser checks (need Google Chrome and `pip install playwright`; the app served on 8081 and the admin on 5174 against a fresh database):
+- `tests/e2e/journey.py` signs up, designs, books, pays and follows an order through every stage in the admin, in English and Arabic, and checks the crash screens.
+- `tests/e2e/a11y.py` runs axe-core over 25 screens in both languages; set `AXE` to the path of `axe.min.js` (`npm install --prefix /tmp/axe axe-core@4`).
+
+CI runs all of these on every push.
 
 ## Deployment
 
@@ -78,6 +84,8 @@ Staff sign in with email and password. The first owner is created from `ADMIN_EM
 - **Staying current:** an open tracking screen asks for the stage every 10 seconds, the orders list and home every 20 to 30, and the catalogue is re-read after 30 seconds when a screen opens or the app returns to the front.
 - **Push notifications:** every in-app notification is also sent to the customer's phones that turned notifications on (Account > Notifications, or after an order). Only known push services are accepted as addresses.
 - **Checkout:** a payment page left open over 30 minutes can no longer be paid; every 10 minutes the API also closes such checkouts, releases unused held times and clears expired sign-ins.
+- **Reminders:** a visit inside the next 24 hours gets one reminder (not when it was booked less than 6 hours ahead), and points expiring within the warning period in Settings get one notice. Nothing is sent during quiet hours (`QUIET_HOURS`, default 22-8 Doha time); they go out after.
+- **Crashes:** a screen that fails shows a bilingual recovery screen with Try again and Home; in the admin only the page area is replaced and the menu keeps working.
 - **Refunds:** staff record refunds made in SADAD on the order (in parts if needed, never more than was paid); cancelled paid orders are listed as refunds due on the overview, and the customer is notified.
 - **Exports:** managers download paid orders (by date) and customers as CSV from the Orders and Customers pages.
 - **Home visits booked on their own:** the fee is recorded on the visit and marked as collected by staff.

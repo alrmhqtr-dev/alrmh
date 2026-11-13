@@ -90,7 +90,7 @@ async function bootstrap() {
   if (config.production && config.paymentMode === 'mock') console.warn('PAYMENT_MODE=mock: orders are marked paid on the test page. Not for real customers.');
   const tidy = () => housekeeping().catch((e) => console.error('housekeeping', e));
   tidy();
-  setInterval(tidy, 10 * 60_000);
+  setInterval(tidy, config.housekeepingSeconds * 1000);
   if (pushEnabled) setInterval(sendPendingPushes, 3_000);
   else console.log('Push notifications are off: set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to turn them on.');
 }

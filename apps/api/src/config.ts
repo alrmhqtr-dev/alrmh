@@ -23,6 +23,13 @@ export const config = {
   rateLimits: env.RATE_LIMITS !== 'off',
   // How many proxies sit in front of the API (Railway: one). Needed to see the caller's real address.
   trustProxy: Number(env.TRUST_PROXY ?? (production ? 1 : 0)),
+  // How often housekeeping and reminders run.
+  housekeepingSeconds: Math.max(5, Number(env.HOUSEKEEPING_SECONDS ?? 600)),
+  // Qatar hours with no reminders, as "22-8"; "off" sends at any hour.
+  quietHours: ((v) => {
+    const m = /^(\d{1,2})-(\d{1,2})$/.exec(v);
+    return v === 'off' || !m ? null : { from: Number(m[1]), to: Number(m[2]) };
+  })(env.QUIET_HOURS ?? '22-8'),
   // Push notifications. Generate the pair once with `npx web-push generate-vapid-keys`; unset means push is off.
   vapidPublicKey: env.VAPID_PUBLIC_KEY || null,
   vapidPrivateKey: env.VAPID_PRIVATE_KEY || null,

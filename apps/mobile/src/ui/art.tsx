@@ -3,6 +3,7 @@ import { Image, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Circle, Ellipse, Line, Path, Rect } from 'react-native-svg';
 import { ImageIcon } from 'lucide-react-native';
 import { mediaUrl } from '@/api/client';
+import { useLocale } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import { Icon, Text } from './primitives';
 
@@ -26,11 +27,12 @@ function collarPath(collar: string) {
 }
 
 export function ThobeArt({ fill = '#F3EBDC', collar = 'classic-qatari', height = 200 }: { fill?: string; collar?: string; height?: number }) {
+  const { t } = useLocale();
   const dark = isDark(fill);
   const stroke = dark ? '#6E6E6E' : '#B9B1A2';
   const detail = dark ? '#8C8C8C' : '#CFC7B8';
   return (
-    <Svg width={height * 0.5} height={height} viewBox="0 0 120 240" accessibilityLabel="Thobe preview">
+    <Svg width={height * 0.5} height={height} viewBox="0 0 120 240" accessibilityLabel={t('a11y.thobePreview')}>
       <Ellipse cx="60" cy="232" rx="34" ry="3.5" fill="#000" opacity={0.08} />
       <Path
         d="M46 18 L36 25 Q26 30 22 40 L12 120 Q11 124 15 124.5 L23 125 Q26 125 26.5 121 L33 66 L30 226 Q30 229 33 229 L87 229 Q90 229 90 226 L87 66 L93.5 121 Q94 125 97 125 L105 124.5 Q109 124 108 120 L98 40 Q94 30 84 25 L74 18 Q60 26 46 18 Z"

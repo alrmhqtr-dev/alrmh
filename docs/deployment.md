@@ -64,6 +64,8 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request: frozen inst
 | `VAPID_PUBLIC_KEY` | from `npx web-push generate-vapid-keys` | Push notifications. Create once and keep; changing it means every phone turns notifications on again |
 | `VAPID_PRIVATE_KEY` | from the same command | Secret |
 | `VAPID_SUBJECT` | `mailto:` + a support email | Shown to push services if they need to reach you |
+| `QUIET_HOURS` | leave unset | Defaults to `22-8`: visit and points reminders wait until 8 am Doha time |
+| `HOUSEKEEPING_SECONDS` | leave unset | Defaults to 600 (every 10 minutes) |
 
 `PORT` is set by Railway; do not add it.
 

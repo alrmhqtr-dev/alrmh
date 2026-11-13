@@ -1,5 +1,6 @@
 import { db } from './db.js';
 import { expirePoints } from './lib.js';
+import { sendReminders } from './reminders.js';
 
 /** How long a checkout stays payable. Matches how long a measurement time is held. */
 export const CHECKOUT_MINUTES = 30;
@@ -10,7 +11,8 @@ export const CHECKOUT_MINUTES = 30;
  *   visit whose time has since gone to someone else;
  * - held times that never reached an order are released after a day;
  * - expired sign-in sessions and codes are removed;
- * - points past their date are expired.
+ * - points past their date are expired;
+ * - visit and points-expiry reminders are sent.
  */
 export async function housekeeping() {
   await db.pool.query(
@@ -30,4 +32,5 @@ export async function housekeeping() {
   await db.pool.query('delete from staff_sessions where expires_at < now()');
   await db.pool.query(`delete from otp_codes where expires_at < now() - interval '1 day'`);
   await expirePoints(null);
+  await sendReminders();
 }

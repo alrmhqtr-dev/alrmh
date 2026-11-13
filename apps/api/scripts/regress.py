@@ -1,8 +1,9 @@
 """Regression checks for the November 2026 audit fixes.
 
-Runs against a live API with SEED_DEMO=true, OTP_MODE=preview, PAYMENT_MODE=mock
-RATE_LIMITS=off (the checks fire many requests from one address) and
-CORS_ORIGINS set to the app's address (the return-address check needs it). It needs
+Runs against a live API with SEED_DEMO=true, OTP_MODE=preview, PAYMENT_MODE=mock,
+RATE_LIMITS=off (the checks fire many requests from one address), CORS_ORIGINS
+set to the app's address (the return-address check needs it), and
+HOUSEKEEPING_SECONDS=5 with QUIET_HOURS=off (for the reminder checks). It needs
 `psql` and DATABASE_URL to set up states the API cannot reach on its own, such
 as a hold that is 31 minutes old.
 
@@ -374,6 +375,34 @@ ok = call("POST", "/admin/me/password", {"current": "correct-horse-battery", "ne
 check("staff password: needs the current one; other sessions end, this one stays",
       wrong == "wrong_password" and ok == 200 and call("GET", "/admin/me", token=t_b)[0] == 401 and call("GET", "/admin/me", token=t_a)[0] == 200
       and call("POST", "/admin/auth/login", {"email": "lock-test@alrmh.qa", "password": "a-new-password-1"})[0] == 200, f"{wrong} {ok}")
+
+# ---- reminders (needs HOUSEKEEPING_SECONDS=5 and QUIET_HOURS=off) -------------------------
+tz = login("55570015", "Reminder Tester")
+mz, az = home_setup(tz)
+visit = call("POST", "/appointments", {"kind": "home", "addressId": az, "memberId": mz, "startsAt": free_home_slots(tz)[0], "standalone": True}, tz)[1]
+# a visit 20 hours away (today or tomorrow in Doha), booked yesterday; and one in 3 hours booked just now (no reminder: the confirmation covers it)
+sql(f"update appointments set starts_at = now() + interval '20 hours', created_at = now() - interval '1 day' where id = '{visit['id']}'")
+late = call("POST", "/family", {"name": "Late", "relation": "son", "size": "child"}, tz)[1]["id"]
+v2 = call("POST", "/appointments", {"kind": "home", "addressId": az, "memberId": late, "startsAt": free_home_slots(tz)[1], "standalone": True}, tz)[1]
+sql(f"update appointments set starts_at = now() + interval '3 hours', created_at = now() where id = '{v2['id']}'")
+cz = call("GET", "/me", token=tz)[1]["id"]
+sql(f"insert into points_ledger (customer_id, kind, points, remaining, expires_at, label) values ('{cz}','earn',120,120, now() + interval '10 days','Regress'), ('{cz}','earn',80,80, now() + interval '200 days','Regress later')")
+def reminders():
+    return [n for n in call("GET", "/notifications", token=tz)[1] if n["kind"] == "reminder" or "expire" in n["title_en"]]
+for _ in range(60):
+    if len(reminders()) >= 2:
+        break
+    time.sleep(0.5)
+time.sleep(6)
+got = reminders()
+titles = sorted(n["title_en"] for n in got)
+doha = lambda hours: time.strftime("%Y-%m-%d", time.gmtime(time.time() + (3 + hours) * 3600))
+same_day = doha(0) == doha(20)
+day_en, day_ar = ("today", "اليوم") if same_day else ("tomorrow", "غداً")
+check("reminders: one for the visit within a day, one for points expiring within the warning period, each once",
+      len(got) == 2 and any(t.startswith(f"Measurement visit {day_en} at ") for t in titles) and any(t.startswith("120 points expire on ") for t in titles)
+      and any(n["title_ar"].startswith(f"موعد المقاسات {day_ar}") for n in got),
+      str(titles))
 
 # ---- push notifications ------------------------------------------------------------------
 # Push services are HTTPS. The checks run a local HTTPS receiver; the API must

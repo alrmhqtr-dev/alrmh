@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AppState, Platform, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -14,11 +14,16 @@ import { SessionProvider } from '@/state/session';
 import { BuilderProvider } from '@/state/builder';
 import { colors } from '@/theme/tokens';
 import { ApiError } from '@/api/client';
+import { CrashScreen, useRememberPath } from '@/ui/crash';
+
+// Any screen that fails to draw shows this instead of a blank page.
+export const ErrorBoundary = CrashScreen;
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function Shell() {
   const { isRTL } = useLocale();
+  useRememberPath(usePathname());
   return (
     <View style={{ flex: 1, direction: isRTL ? 'rtl' : 'ltr', backgroundColor: Platform.OS === 'web' ? '#EDEAE4' : colors.canvas }}>
       <View
