@@ -6,6 +6,7 @@ import { CustomerGuard, Me, type Customer } from '../auth.js';
 import { fail } from '../lib.js';
 import { quote, type QuoteInput } from '../pricing.js';
 import { closePayment, createOrder, markPaid, stagesFor } from '../orders.js';
+import { CHECKOUT_MINUTES } from '../housekeeping.js';
 
 /**
  * Where the customer goes after paying. Only the app's own addresses are
@@ -71,7 +72,8 @@ export class OrdersController {
   @UseGuards(CustomerGuard)
   async detail(@Me() me: Customer, @Param('id') id: string) {
     const order = await db.one(
-      `select o.*, (select status from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_status
+      `select o.*, (select status from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_status,
+              (select coalesce(sum(amount),0)::float from refunds r where r.order_id = o.id) as refunded
          from orders o where o.id = $1 and o.customer_id = $2`,
       [id, me.id],
     );
@@ -116,11 +118,12 @@ ${p.status === 'pending' ? `<button class="pay" name="result" value="paid">Pay Q
   async mockComplete(@Param('paymentId') paymentId: string, @Query('return') ret: string, @Body() body: { result?: string }, @Res() res: Response) {
     mockOnly();
     const base = allowedReturn(ret);
-    const p = await db.one('select order_id, status from payments where id = $1', [paymentId]);
+    const p = await db.one(`select order_id, status, created_at < now() - ($2 || ' minutes')::interval as expired from payments where id = $1`, [paymentId, String(CHECKOUT_MINUTES)]);
     if (!p) return res.status(404).send('Payment not found');
     if (body?.result === 'paid') {
-      // A checkout that was replaced by a newer one can no longer be paid.
-      if (p.status !== 'pending' && p.status !== 'paid') return res.redirect(303, `${base}/checkout?payment=cancelled`);
+      // A checkout that was replaced by a newer one, or left open too long, can no longer be paid.
+      if (p.status === 'pending' && p.expired) await closePayment(paymentId, 'cancelled');
+      if ((p.status !== 'pending' && p.status !== 'paid') || (p.status === 'pending' && p.expired)) return res.redirect(303, `${base}/checkout?payment=cancelled`);
       const orderId = await markPaid(paymentId, `MOCK-${Date.now()}`);
       return res.redirect(303, `${base}/order-placed/${orderId}`);
     }

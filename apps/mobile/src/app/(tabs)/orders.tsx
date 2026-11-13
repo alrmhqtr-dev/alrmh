@@ -133,7 +133,7 @@ export default function Orders() {
             <View style={{ flex: 1 }}>
               <Text variant="bodyStrong">{t(appt.kind === 'home' ? 'orders.homeVisitFor' : 'orders.branchVisitFor', { name: appt.member_name })}</Text>
               <Text variant="small" color={colors.textSecondary}>
-                {`${f.when(appt.starts_at)} · ${appt.kind === 'home' ? appt.area : f.name(appt, 'branch_name')}`}
+                {`${f.when(appt.starts_at)} · ${appt.kind === 'home' ? appt.area : f.name(appt, 'branch_name')}${appt.fee ? ` · ${t('orders.feeAtVisit', { fee: f.money(appt.fee) })}` : ''}`}
               </Text>
             </View>
             <View style={{ alignItems: 'flex-end', gap: 10 }}>

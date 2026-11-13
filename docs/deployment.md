@@ -61,6 +61,9 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request: frozen inst
 | `SEED_ON_START` | `true` | Loads the sample catalogue, branch and settings if missing. Replace them with the real ones in the admin before launch |
 | `SEED_DEMO` | `true` for preview, `false` for launch | Demo customer `5555 1234` with orders and points, and the coupons `EID20` and `SUMMER24`. Only `true` loads them |
 | `MIGRATE_ON_START` | `false` | Migrations run in the pre-deploy step instead |
+| `VAPID_PUBLIC_KEY` | from `npx web-push generate-vapid-keys` | Push notifications. Create once and keep; changing it means every phone turns notifications on again |
+| `VAPID_PRIVATE_KEY` | from the same command | Secret |
+| `VAPID_SUBJECT` | `mailto:` + a support email | Shown to push services if they need to reach you |
 
 `PORT` is set by Railway; do not add it.
 

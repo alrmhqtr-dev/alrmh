@@ -1,11 +1,30 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { db } from '../db.js';
 import { STAGES, expirePoints, fail, getSettings, need, notify, pointsBalance, spendPoints, type Stage } from '../lib.js';
 import { setStage, stagesFor } from '../orders.js';
 import { addMonthsSql } from '../sql-helpers.js';
 import { AnyStaff, CurrentStaff, Managers, Workshop, audit, type StaffUser } from '../staff.js';
+import { toCsv } from '../csv.js';
+import { assertSlotFree, slotLockKey } from './booking.controller.js';
+import { round2 } from '../lib.js';
 
 const FIELDS = ['length_cm', 'shoulder_cm', 'chest_cm', 'waist_cm', 'sleeve_cm', 'neck_cm', 'cuff_cm'] as const;
+
+/** Qatar dates in the form 2026-11-01; the default is the current month so far. */
+function dateRange(from?: string, to?: string) {
+  const ok = (d?: string) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) ? d : null);
+  const today = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+  const range = { from: ok(from) ?? `${today.slice(0, 8)}01`, to: ok(to) ?? today };
+  if (range.from > range.to) fail('invalid_date', { field: 'from' });
+  return range;
+}
+
+function sendCsv(res: Response, filename: string, body: string) {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(body);
+}
 
 @Controller('v1/admin')
 export class AdminOpsController {
@@ -42,7 +61,7 @@ export class AdminOpsController {
       [id],
     );
     if (!o) throw new NotFoundException({ code: 'not_found' });
-    const [items, events, appointments] = await Promise.all([
+    const [items, events, appointments, refunds] = await Promise.all([
       db.many('select id, kind, snapshot, qty, unit_price, line_total from order_items where order_id = $1 order by kind desc', [id]),
       db.many(`select e.stage, e.at, e.note, u.name as staff_name from order_events e left join staff_users u on u.id = e.staff_id where e.order_id = $1 order by e.at, array_position(array['confirmed','measured','cutting','stitching','ready','out_for_delivery','delivered','cancelled'], e.stage)`, [id]),
       db.many(
@@ -51,6 +70,7 @@ export class AdminOpsController {
           where a.order_id = $1 order by a.starts_at`,
         [id],
       ),
+      db.many('select r.id, r.amount::float as amount, r.reference, r.note, r.created_at, u.name as staff_name from refunds r left join staff_users u on u.id = r.staff_id where r.order_id = $1 order by r.created_at', [id]),
     ]);
     const memberIds = [...new Set(items.filter((i) => i.kind === 'thobe').map((i) => i.snapshot.member?.id).filter(Boolean))];
     const measurements = memberIds.length
@@ -60,7 +80,7 @@ export class AdminOpsController {
           [memberIds],
         )
       : [];
-    return { ...o, items, events, appointments, measurements, stages: stagesFor(items) };
+    return { ...o, items, events, appointments, measurements, refunds, refunded: round2(refunds.reduce((s, r) => s + r.amount, 0)), stages: stagesFor(items) };
   }
 
   @Post('orders/:id/stage')
@@ -101,6 +121,78 @@ export class AdminOpsController {
     });
   }
 
+  /** Records a refund already made in SADAD. Payment is not sent back from here. */
+  @Post('orders/:id/refunds')
+  @UseGuards(Managers)
+  async refund(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() body: { amount?: number; reference?: string; note?: string }) {
+    return db.tx(async (c) => {
+      const o = await db.one('select id, number, customer_id, total::float as total, paid_at from orders where id = $1 for update', [id], c);
+      if (!o) throw new NotFoundException({ code: 'not_found' });
+      if (!o.paid_at) fail('not_paid');
+      const done = await db.one<{ sum: number }>('select coalesce(sum(amount),0)::float as sum from refunds where order_id = $1', [id], c);
+      const left = round2(o.total - done!.sum);
+      const amount = round2(Number(body?.amount));
+      if (!(amount > 0)) fail('invalid_number', { field: 'amount' });
+      if (amount > left) fail('refund_too_large', { left });
+      const reference = body?.reference ? String(body.reference).trim().slice(0, 80) : null;
+      await c.query('insert into refunds (order_id, amount, reference, note, staff_id) values ($1,$2,$3,$4,$5)', [id, amount, reference, body?.note ? String(body.note).slice(0, 300) : null, me.id]);
+      await notify(
+        o.customer_id,
+        'order',
+        {
+          en: { title: 'Refund on its way', body: `#${o.number} · QAR ${amount.toFixed(2)} is being returned to your card. Banks can take a few working days.` },
+          ar: { title: 'تم إصدار الاسترداد', body: `#${o.number} · يُعاد مبلغ ${amount.toFixed(2)} ر.ق إلى بطاقتك. قد يستغرق البنك بضعة أيام عمل.` },
+        },
+        `/orders/${id}`,
+        c,
+      );
+      await audit(me, 'refund', 'order', id, { amount, reference }, c);
+      return { ok: true, refunded: round2(done!.sum + amount), left: round2(left - amount) };
+    });
+  }
+
+  /* ---------- exports ---------- */
+
+  @Get('export/orders.csv')
+  @UseGuards(Managers)
+  async exportOrders(@CurrentStaff() me: StaffUser, @Query('from') from: string | undefined, @Query('to') to: string | undefined, @Res() res: Response) {
+    const range = dateRange(from, to);
+    const rows = await db.many(
+      `select o.number, o.created_at, o.paid_at, o.stage, c.name, c.phone, o.subtotal, o.delivery_fee, o.home_visit_fee, o.discount, o.discount_label, o.total,
+              coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0) as refunded,
+              (select coalesce(sum(qty),0) from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobes,
+              (select coalesce(sum(qty),0) from order_items i where i.order_id = o.id and i.kind = 'product') as products,
+              o.address->>'area' as area, o.expected_delivery
+         from orders o join customers c on c.id = o.customer_id
+        where o.paid_at is not null and (o.paid_at at time zone 'Asia/Qatar')::date between $1::date and $2::date
+        order by o.paid_at`,
+      [range.from, range.to],
+    );
+    await audit(me, 'export', 'orders', null, range);
+    sendCsv(res, `alrmh-orders-${range.from}-to-${range.to}.csv`, toCsv(
+      ['Order', 'Placed', 'Paid', 'Stage', 'Customer', 'Mobile', 'Subtotal', 'Delivery', 'Home visit', 'Discount', 'Discount code', 'Total', 'Refunded', 'Thobes', 'Products', 'Area', 'Due'],
+      rows.map((r) => [r.number, r.created_at, r.paid_at, r.stage, r.name, r.phone, r.subtotal, r.delivery_fee, r.home_visit_fee, r.discount, r.discount_label?.split(':')[1] ?? '', r.total, r.refunded, r.thobes, r.products, r.area, r.expected_delivery]),
+    ));
+  }
+
+  @Get('export/customers.csv')
+  @UseGuards(Managers)
+  async exportCustomers(@CurrentStaff() me: StaffUser, @Res() res: Response) {
+    const rows = await db.many(
+      `select c.name, c.phone, c.email, c.language, c.created_at,
+              (select count(*) from orders o where o.customer_id = c.id and o.paid_at is not null) as orders,
+              (select coalesce(sum(total),0) from orders o where o.customer_id = c.id and o.paid_at is not null and o.stage <> 'cancelled') as spent,
+              (select coalesce(sum(points),0) from points_ledger p where p.customer_id = c.id) as points,
+              (select max(paid_at) from orders o where o.customer_id = c.id) as last_order
+         from customers c where c.deleted_at is null order by c.created_at`,
+    );
+    await audit(me, 'export', 'customers', null, { rows: rows.length });
+    sendCsv(res, `alrmh-customers-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(
+      ['Name', 'Mobile', 'Email', 'Language', 'Joined', 'Paid orders', 'Spent', 'Points', 'Last order'],
+      rows.map((r) => [r.name, r.phone, r.email, r.language, r.created_at, r.orders, r.spent, r.points, r.last_order]),
+    ));
+  }
+
   /* ---------- appointments ---------- */
 
   @Get('appointments')
@@ -108,7 +200,7 @@ export class AdminOpsController {
   appointments(@Query('from') from?: string, @Query('days') days?: string, @Query('kind') kind?: string) {
     const start = from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : null;
     return db.many(
-      `select a.id, a.kind, a.starts_at, a.status, a.order_id, o.number as order_number, a.member_id, f.name as member_name, f.relation, f.size,
+      `select a.id, a.kind, a.starts_at, a.status, a.order_id, a.fee::float as fee, a.fee_paid_at, o.number as order_number, a.member_id, f.name as member_name, f.relation, f.size,
               c.id as customer_id, c.name as customer_name, c.phone, ad.line1, ad.area, ad.notes as address_notes, b.name_en as branch_name,
               exists (select 1 from measurements m where m.member_id = a.member_id and m.taken_at >= a.created_at) as measured
          from appointments a join family_members f on f.id = a.member_id join customers c on c.id = a.customer_id
@@ -126,8 +218,17 @@ export class AdminOpsController {
   @UseGuards(Workshop)
   async apptStatus(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() body: { status: 'done' | 'cancelled' | 'confirmed' }) {
     if (!['done', 'cancelled', 'confirmed'].includes(body?.status)) fail('invalid_status');
-    const a = await db.one('update appointments set status = $2 where id = $1 returning id, customer_id, kind, starts_at', [id, body.status]);
-    if (!a) throw new NotFoundException({ code: 'not_found' });
+    const a = await db.tx(async (c) => {
+      const cur = await db.one('select id, kind, branch_id, starts_at, status from appointments where id = $1 for update', [id], c);
+      if (!cur) throw new NotFoundException({ code: 'not_found' });
+      // Bringing a visit back takes its place again, so the time must still have room.
+      if (body.status === 'confirmed' && cur.status !== 'confirmed') {
+        const startsAt = new Date(cur.starts_at);
+        await c.query('select pg_advisory_xact_lock(hashtext($1))', [slotLockKey(cur.kind, cur.branch_id, startsAt)]);
+        await assertSlotFree(cur.kind, cur.branch_id, startsAt, c, id);
+      }
+      return db.one('update appointments set status = $2 where id = $1 returning id, customer_id, kind, starts_at', [id, body.status], c);
+    });
     if (body.status === 'cancelled')
       await notify(
         a.customer_id,
@@ -139,6 +240,16 @@ export class AdminOpsController {
         '/orders',
       );
     await audit(me, 'status', 'appointment', id, { status: body.status });
+    return { ok: true };
+  }
+
+  /** The home-visit fee for a visit booked on its own is collected at the door. */
+  @Post('appointments/:id/fee-paid')
+  @UseGuards(Workshop)
+  async feePaid(@CurrentStaff() me: StaffUser, @Param('id') id: string) {
+    const a = await db.one('update appointments set fee_paid_at = now() where id = $1 and fee > 0 and fee_paid_at is null returning id, fee::float as fee', [id]);
+    if (!a) fail('no_fee_due');
+    await audit(me, 'fee_paid', 'appointment', id, { fee: a.fee });
     return { ok: true };
   }
 

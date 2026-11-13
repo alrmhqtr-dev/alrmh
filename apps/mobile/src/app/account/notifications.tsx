@@ -8,6 +8,7 @@ import { api } from '@/api/client';
 import { useNotifications } from '@/api/hooks';
 import { Card, Divider, EmptyState, IconTile, Loading, Text, Touch } from '@/ui/primitives';
 import { Header, Screen } from '@/ui/layout';
+import { PushCard } from '@/ui/push';
 import { colors } from '@/theme/tokens';
 
 export default function Notifications() {
@@ -30,7 +31,8 @@ export default function Notifications() {
   };
 
   return (
-    <Screen header={<Header title={t('notifications.title')} />} contentStyle={{ paddingTop: 8 }}>
+    <Screen header={<Header title={t('notifications.title')} />} contentStyle={{ paddingTop: 8, gap: 14 }}>
+      <PushCard />
       {list.isLoading ? (
         <Loading />
       ) : !list.data?.length ? (

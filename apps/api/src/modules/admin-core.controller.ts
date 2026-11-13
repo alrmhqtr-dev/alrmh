@@ -52,11 +52,28 @@ export class AdminCoreController {
     return staff;
   }
 
+  @Post('me/password')
+  @HttpCode(200)
+  @UseGuards(AnyStaff)
+  async changeOwnPassword(@CurrentStaff() me: StaffUser, @Req() req: any, @Body() body: { current?: string; next?: string }) {
+    const row = await db.one('select password_hash from staff_users where id = $1', [me.id]);
+    if (!(await verifyPassword(String(body?.current ?? ''), row.password_hash))) fail('wrong_password');
+    const next = String(body?.next ?? '');
+    if (next.length < 10) fail('password_too_short');
+    if (next === body?.current) fail('same_password');
+    await db.pool.query('update staff_users set password_hash = $2, failed_logins = 0, locked_until = null where id = $1', [me.id, await hashPassword(next)]);
+    // Signed out everywhere else; this browser stays signed in.
+    const header: string = req.headers['authorization'] ?? '';
+    await db.pool.query('delete from staff_sessions where staff_id = $1 and token_hash <> $2', [me.id, sha256(header.slice(7))]);
+    await audit(me, 'password', 'staff', me.id);
+    return { ok: true };
+  }
+
   @Get('overview')
   @UseGuards(AnyStaff)
   async overview() {
     const settings = await getSettings();
-    const [stages, today, sales, customers, points, expiring, attention] = await Promise.all([
+    const [stages, today, sales, customers, points, expiring, attention, refunds] = await Promise.all([
       db.many(`select stage, count(*)::int as n from orders where stage not in ('pending_payment','payment_failed') group by stage`),
       db.many(
         `select a.id, a.kind, a.starts_at, a.status, f.name as member_name, c.name as customer_name, c.phone, ad.area, b.name_en as branch_name, o.number as order_number
@@ -85,8 +102,16 @@ export class AdminCoreController {
             and o.expected_delivery is not null and o.expected_delivery <= (now() at time zone 'Asia/Qatar')::date + 1
           order by o.expected_delivery limit 20`,
       ),
+      db.many(
+        `select o.id, o.number, o.total::float as total, c.name as customer_name,
+                (o.total - coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0))::float as due
+           from orders o join customers c on c.id = o.customer_id
+          where o.stage = 'cancelled' and o.paid_at is not null
+            and o.total > coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0)
+          order by o.created_at limit 20`,
+      ),
     ]);
-    return { stages, today, sales, customers, points: { outstanding: points!.outstanding, expiring }, attention };
+    return { stages, today, sales, customers, points: { outstanding: points!.outstanding, expiring }, attention, refunds };
   }
 
   @Get('staff')

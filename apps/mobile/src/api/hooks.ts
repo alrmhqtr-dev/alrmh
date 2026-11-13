@@ -127,6 +127,7 @@ export type OrderDetail = OrderSummary & {
   points_to_earn: number;
   points_awarded: boolean;
   payment_status: string;
+  refunded: number;
   items: OrderItem[];
   events: { stage: string; at: string; note: string | null }[];
   appointments: { id: string; kind: string; starts_at: string; status: string; member_name: string; branch_name_en: string | null; branch_name_ar: string | null; area: string | null }[];
@@ -138,6 +139,7 @@ export type Appointment = {
   starts_at: string;
   status: string;
   order_id: string | null;
+  fee: number;
   member_name: string;
   area: string | null;
   branch_id: string | null;
@@ -181,7 +183,7 @@ const CLOSED_STAGES = ['delivered', 'cancelled'];
 export const useMe = (live = false) => useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me'), ...authed(), refetchInterval: live ? 30_000 : false });
 export const useFamily = () => useQuery({ queryKey: ['family'], queryFn: () => api<Member[]>('/family'), ...authed() });
 export const useMember = (id: string) =>
-  useQuery({ queryKey: ['member', id], queryFn: () => api<{ id: string; name: string; relation: string; size: string; latest: Measurement | null; history: Measurement[] }>(`/family/${id}`), ...authed() });
+  useQuery({ queryKey: ['member', id], queryFn: () => api<{ id: string; name: string; relation: string; size: string; latest: Measurement | null; history: Measurement[] }>(`/family/${id}`), enabled: useSession().signedIn && Boolean(id) });
 export const useAddresses = () => useQuery({ queryKey: ['addresses'], queryFn: () => api<Address[]>('/addresses'), ...authed() });
 export const useBasket = () => useQuery({ queryKey: ['basket'], queryFn: () => api<Basket>('/basket'), ...authed() });
 export const useOrders = (live = false) =>

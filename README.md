@@ -76,6 +76,11 @@ Staff sign in with email and password. The first owner is created from `ADMIN_EM
 - **Catalogue:** categories, collars (each with one of the app's four collar drawings), fabrics, colours, products and their photos are managed in the admin. Photos are JPEG, PNG or WebP up to 2 MB; the admin shrinks large ones first.
 - **Branches:** several branches can be live; customers pick one when booking. A branch needs its map position for the Directions button.
 - **Staying current:** an open tracking screen asks for the stage every 10 seconds, the orders list and home every 20 to 30, and the catalogue is re-read after 30 seconds when a screen opens or the app returns to the front.
+- **Push notifications:** every in-app notification is also sent to the customer's phones that turned notifications on (Account > Notifications, or after an order). Only known push services are accepted as addresses.
+- **Checkout:** a payment page left open over 30 minutes can no longer be paid; every 10 minutes the API also closes such checkouts, releases unused held times and clears expired sign-ins.
+- **Refunds:** staff record refunds made in SADAD on the order (in parts if needed, never more than was paid); cancelled paid orders are listed as refunds due on the overview, and the customer is notified.
+- **Exports:** managers download paid orders (by date) and customers as CSV from the Orders and Customers pages.
+- **Home visits booked on their own:** the fee is recorded on the visit and marked as collected by staff.
 - **Delete account:** removes the profile, family, measurements, addresses, points and notifications; past orders stay as sales records. Refused while an order is in progress.
 
 ## What's not real yet
@@ -84,7 +89,7 @@ Staff sign in with email and password. The first owner is created from `ADMIN_EM
 | --- | --- | --- |
 | SMS login | Fixed preview code | Set `OTP_MODE=sms` and plug the Qatar SMS provider into `sendSms` in `apps/api/src/modules/auth.controller.ts`. Until then SMS mode refuses to issue codes |
 | Payment | Test SADAD page (only reachable while `PAYMENT_MODE=mock`) | SADAD merchant credentials and callback verification; set `PAYMENT_MODE=sadad` |
-| Push notifications | In-app list only | Expo push tokens + FCM/APNs once the store builds exist |
+| Push notifications | Web Push for the installed app (Android, and iPhone once added to the Home Screen), when `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set | Expo push tokens + FCM/APNs for the native builds |
 | Native apps | PWA only | EAS builds from `apps/mobile/eas.json` once the Apple and Google accounts exist |
 | Product images | Uploaded per product in the admin (Catalogue > Products) and kept in the database; products without one show a placeholder | The client's photos. Move to object storage if the catalogue grows into the hundreds |
 | POS and operational dashboards | Not started | Waiting for the specs |

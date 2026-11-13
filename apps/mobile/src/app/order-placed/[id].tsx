@@ -7,6 +7,7 @@ import { useLocale } from '@/i18n';
 import { useOrder } from '@/api/hooks';
 import { Button, Card, Divider, IconTile, Loading, Text } from '@/ui/primitives';
 import { BottomBar, Screen } from '@/ui/layout';
+import { PushCard } from '@/ui/push';
 import { colors } from '@/theme/tokens';
 
 export default function OrderPlaced() {
@@ -77,6 +78,7 @@ export default function OrderPlaced() {
               </View>
             ))}
           </Card>
+          <PushCard compact />
         </>
       )}
     </Screen>

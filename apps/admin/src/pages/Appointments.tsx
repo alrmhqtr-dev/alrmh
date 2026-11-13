@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Ruler } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { addDays, day, phone, time, todayQatar } from '../lib/format';
+import { addDays, day, money, phone, time, todayQatar } from '../lib/format';
 import { MeasureModal } from '../measure';
 import { Empty, Loading, PageHead, Tabs, useToast } from '../ui';
 
@@ -26,6 +26,8 @@ type Appt = {
   address_notes: string | null;
   branch_name: string | null;
   measured: boolean;
+  fee: number;
+  fee_paid_at: string | null;
 };
 
 export default function Appointments() {
@@ -40,6 +42,15 @@ export default function Appointments() {
     mutationFn: ({ id, s }: { id: string; s: string }) => api(`/appointments/${id}/status`, { body: { status: s } }),
     onSuccess: (_, v) => {
       toast(v.s === 'cancelled' ? 'Visit cancelled. The customer was notified.' : 'Visit marked as done.');
+      qc.invalidateQueries({ queryKey: ['appointments'] });
+    },
+    onError: (e) => toast(errorMessage(e), 'error'),
+  });
+
+  const feePaid = useMutation({
+    mutationFn: (id: string) => api(`/appointments/${id}/fee-paid`, { body: {} }),
+    onSuccess: () => {
+      toast('Fee marked as collected.');
       qc.invalidateQueries({ queryKey: ['appointments'] });
     },
     onError: (e) => toast(errorMessage(e), 'error'),
@@ -79,14 +90,27 @@ export default function Appointments() {
                             {a.kind === 'home' ? `Home visit · ${a.line1}, ${a.area}${a.address_notes ? ` · ${a.address_notes}` : ''}` : `Branch · ${a.branch_name}`}
                           </div>
                         </td>
-                        <td>{a.order_number ? <Link className="badge outline" to={`/orders/${a.order_id}`}>#{a.order_number}</Link> : <span className="badge outline">Measurement only</span>}</td>
+                        <td>
+                          {a.order_number ? <Link className="badge outline" to={`/orders/${a.order_id}`}>#{a.order_number}</Link> : <span className="badge outline">Measurement only</span>}
+                          {a.fee ? (
+                            <div style={{ marginTop: 4 }}>
+                              {a.fee_paid_at ? <span className="badge ok">Fee collected</span> : <span className="badge gold" data-testid={`fee-due-${a.member_name}`}>Collect {money(a.fee)}</span>}
+                            </div>
+                          ) : null}
+                        </td>
                         <td>{a.status === 'done' || a.measured ? <span className="badge ok">Measured</span> : <span className="badge">Booked</span>}</td>
                         <td className="right">
+                          {can('owner', 'manager', 'tailor') && a.status === 'done' && a.fee && !a.fee_paid_at ? (
+                            <button className="btn sm secondary" data-testid={`fee-paid-${a.member_name}`} onClick={() => feePaid.mutate(a.id)}>Fee paid</button>
+                          ) : null}
                           {can('owner', 'manager', 'tailor') && a.status !== 'done' ? (
                             <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
                               <button className="btn sm" data-testid={`appt-measure-${a.member_name}`} onClick={() => setMeasure({ id: a.member_id, name: a.member_name })}>
                                 <Ruler size={14} /> Record
                               </button>
+                              {a.fee && !a.fee_paid_at ? (
+                                <button className="btn sm secondary" data-testid={`fee-paid-${a.member_name}`} onClick={() => feePaid.mutate(a.id)}>Fee paid</button>
+                              ) : null}
                               <button className="btn sm secondary" onClick={() => status.mutate({ id: a.id, s: 'done' })}>Done</button>
                               <button className="btn sm ghost" onClick={() => confirm(`Cancel ${a.member_name}'s visit? The customer will be notified.`) && status.mutate({ id: a.id, s: 'cancelled' })}>Cancel</button>
                             </div>

@@ -8,7 +8,8 @@ as a hold that is 31 minutes old.
 
     API=http://localhost:4000 python3 apps/api/scripts/regress.py
 """
-import base64, json, os, subprocess, sys, urllib.request, urllib.error
+import base64, json, os, ssl, subprocess, sys, threading, time, urllib.request, urllib.error
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from concurrent.futures import ThreadPoolExecutor
 
 B = os.environ.get("API", "http://localhost:4000") + "/v1"
@@ -275,6 +276,154 @@ call("PATCH", f"/admin/branches/{bid}", {"active": False}, owner)
 call("PATCH", f"/admin/products/{pid}", {"active": False}, owner)
 call("PATCH", f"/admin/categories/{cid}", {"active": False}, owner)
 call("PATCH", f"/admin/collars/{shape}", {"active": False}, owner)
+
+# ---- customers edit their own details ----------------------------------------------
+te = login("55570010", "Edit Tester")
+fam = call("GET", "/family", token=te)[1]
+me_member = fam[0]["id"]
+s, r, _ = call("PATCH", f"/family/{me_member}", {"name": "Someone else"}, te)
+check("self-service: your own entry is edited through your details", s == 400 and r.get("code") == "cannot_edit_self", f"{s} {r}")
+son = call("POST", "/family", {"name": "Saad", "relation": "son", "size": "child"}, te)[1]["id"]
+s, r, _ = call("PATCH", f"/family/{son}", {"name": "Saad Ali", "relation": "brother", "size": "adult"}, te)
+check("self-service: a family member can be renamed and changed", r.get("name") == "Saad Ali" and r.get("relation") == "brother" and r.get("size") == "adult", str(r))
+addr = call("POST", "/addresses", {"label": "Home", "line1": "Villa 1", "area": "Al Sadd"}, te)[1]["id"]
+addr2 = call("POST", "/addresses", {"label": "Office", "line1": "Tower 2", "area": "West Bay"}, te)[1]["id"]
+call("PATCH", f"/addresses/{addr}", {"line1": "Villa 11, Street 4", "notes": "Blue gate"}, te)
+a = next(x for x in call("GET", "/addresses", token=te)[1] if x["id"] == addr)
+check("self-service: an address can be edited", a["line1"] == "Villa 11, Street 4" and a["notes"] == "Blue gate" and a["area"] == "Al Sadd", str(a))
+slot = free_home_slots(te)[0]
+visit = call("POST", "/appointments", {"kind": "home", "addressId": addr, "memberId": son, "startsAt": slot, "standalone": True}, te)[1]
+refused = {"remove booked person": call("DELETE", f"/family/{son}", token=te)[1].get("code"), "remove booked address": call("DELETE", f"/addresses/{addr}", token=te)[1].get("code")}
+check("self-service: a person or address with a booked visit cannot be removed", refused == {"remove booked person": "member_has_booking", "remove booked address": "address_has_booking"}, str(refused))
+call("DELETE", f"/appointments/{visit['id']}", token=te)
+s1 = call("DELETE", f"/family/{son}", token=te)[0]
+s2 = call("DELETE", f"/addresses/{addr}", token=te)[0]
+left = call("GET", "/addresses", token=te)[1]
+check("self-service: removed once the visit is cancelled; the other address becomes the default", s1 == 200 and s2 == 200 and len(left) == 1 and left[0]["id"] == addr2 and left[0]["is_default"], f"{s1} {s2} {left}")
+
+# ---- home-visit fee for a visit booked on its own ----------------------------------
+mem = call("GET", "/family", token=te)[1][0]["id"]
+visit = call("POST", "/appointments", {"kind": "home", "addressId": addr2, "memberId": mem, "startsAt": free_home_slots(te)[1], "standalone": True}, te)[1]
+fee_due = float(visit.get("fee") or 0)
+first = call("POST", f"/admin/appointments/{visit['id']}/fee-paid", {}, owner)[0]
+again = call("POST", f"/admin/appointments/{visit['id']}/fee-paid", {}, owner)[1].get("code")
+check("fee: a home visit booked on its own is charged at the visit, and collected once", fee_due == 50 and first == 201 and again == "no_fee_due", f"{fee_due} {first} {again}")
+
+# ---- a cancelled visit only comes back if its time still has room --------------------
+tr1, tr2 = login("55570011"), login("55570012")
+m1, a1 = home_setup(tr1)
+m2, a2 = home_setup(tr2)
+t0 = free_home_slots(tr1)[5]
+v1 = call("POST", "/appointments", {"kind": "home", "addressId": a1, "memberId": m1, "startsAt": t0, "standalone": True}, tr1)[1]
+call("POST", f"/admin/appointments/{v1['id']}/status", {"status": "cancelled"}, owner)
+call("POST", "/appointments", {"kind": "home", "addressId": a2, "memberId": m2, "startsAt": t0, "standalone": True}, tr2)
+s, r, _ = call("POST", f"/admin/appointments/{v1['id']}/status", {"status": "confirmed"}, owner)
+check("staff: re-confirming a cancelled visit checks the time is still free", s == 400 and r.get("code") == "slot_taken", f"{s} {r}")
+
+# ---- refunds -------------------------------------------------------------------------
+tf = login("55570013")
+call("POST", "/addresses", {"label": "Home", "line1": "Villa 2", "area": "Lusail"}, tf)
+call("POST", "/basket/items", {"kind": "product", "productId": "white-ghutra", "size": "56"}, tf)
+unpaid = call("POST", "/orders", {}, tf)[1]
+s, r, _ = call("POST", f"/admin/orders/{unpaid['orderId']}/refunds", {"amount": 10}, owner)
+check("refund: refused on an order that was never paid", r.get("code") == "not_paid", str(r))
+call("POST", "/basket/items", {"kind": "product", "productId": "white-ghutra", "size": "56"}, tf)
+paid = call("POST", "/orders", {}, tf)[1]
+pay(paid)
+call("POST", f"/admin/orders/{paid['orderId']}/cancel", {"reason": "regress"}, owner)
+total = call("GET", f"/orders/{paid['orderId']}", token=tf)[1]["total"]
+due = [x for x in call("GET", "/admin/overview", token=owner)[1]["refunds"] if x["id"] == paid["orderId"]]
+part = call("POST", f"/admin/orders/{paid['orderId']}/refunds", {"amount": 50, "reference": "SADAD-1"}, owner)[1]
+over = call("POST", f"/admin/orders/{paid['orderId']}/refunds", {"amount": total - 50 + 1}, owner)[1].get("code")
+rest = call("POST", f"/admin/orders/{paid['orderId']}/refunds", {"amount": total - 50}, owner)[1]
+detail = call("GET", f"/orders/{paid['orderId']}", token=tf)[1]
+still_due = [x for x in call("GET", "/admin/overview", token=owner)[1]["refunds"] if x["id"] == paid["orderId"]]
+told = any("Refund" in n["title_en"] for n in call("GET", "/notifications", token=tf)[1])
+check("refund: listed as due, recorded in parts, never more than was paid, shown to the customer",
+      len(due) == 1 and due[0]["due"] == total and part.get("left") == total - 50 and over == "refund_too_large" and rest.get("left") == 0 and detail["refunded"] == total and not still_due and told,
+      f"{due} {part} {over} {rest} {detail.get('refunded')} {still_due} {told}")
+
+# ---- unpaid checkouts close after 30 minutes -----------------------------------------
+call("POST", "/basket/items", {"kind": "product", "productId": "cufflinks"}, tf)
+late = call("POST", "/orders", {}, tf)[1]
+sql(f"update payments set created_at = now() - interval '31 minutes' where id = '{late['paymentId']}'")
+loc = pay(late)[1].get("location", "")
+check("checkout: a payment page left open over 30 minutes cannot be paid", "checkout?payment=cancelled" in loc and sql(f"select stage from orders where id = '{late['orderId']}'") == "payment_failed", loc)
+
+# ---- exports -------------------------------------------------------------------------
+call("PATCH", "/me", {"name": "=HYPERLINK(\"http://x\")"}, tf)
+req = urllib.request.Request(B + "/admin/export/customers.csv", headers={"Authorization": "Bearer " + owner})
+with urllib.request.urlopen(req) as r:
+    body, ctype = r.read().decode("utf-8"), r.headers.get("Content-Type", "")
+check("export: customers CSV opens safely in Excel (BOM, formulas shown as text)", ctype.startswith("text/csv") and body.startswith("\ufeffName,Mobile") and "'=HYPERLINK" in body and "\n=HYPERLINK" not in body, body[:120])
+req = urllib.request.Request(B + "/admin/export/orders.csv?from=2020-01-01&to=2099-12-31", headers={"Authorization": "Bearer " + owner})
+with urllib.request.urlopen(req) as r:
+    rows = r.read().decode("utf-8").strip().split("\r\n")
+number = call("GET", f"/orders/{paid['orderId']}", token=tf)[1]["number"]
+line = next((r.split(",") for r in rows if r.startswith(number + ",")), [])
+check("export: orders CSV lists paid orders with their refunds", rows[0].startswith("\ufeffOrder,") and len(line) == 17 and float(line[11]) == total and float(line[12]) == total, f"{rows[0][:60]} {line}")
+sql("insert into staff_users (email, name, role, password_hash) select 'support-x@alrmh.qa', 'Support X', 'support', password_hash from staff_users where email = 'lock-test@alrmh.qa' on conflict (email) do nothing")
+support = staff("support-x@alrmh.qa", "correct-horse-battery")
+check("export: support staff cannot export", call("GET", "/admin/export/customers.csv", token=support)[0] == 403)
+
+# ---- staff change their own password ---------------------------------------------------
+t_a = staff("lock-test@alrmh.qa", "correct-horse-battery")
+t_b = staff("lock-test@alrmh.qa", "correct-horse-battery")
+wrong = call("POST", "/admin/me/password", {"current": "nope", "next": "a-new-password-1"}, t_a)[1].get("code")
+ok = call("POST", "/admin/me/password", {"current": "correct-horse-battery", "next": "a-new-password-1"}, t_a)[0]
+check("staff password: needs the current one; other sessions end, this one stays",
+      wrong == "wrong_password" and ok == 200 and call("GET", "/admin/me", token=t_b)[0] == 401 and call("GET", "/admin/me", token=t_a)[0] == 200
+      and call("POST", "/admin/auth/login", {"email": "lock-test@alrmh.qa", "password": "a-new-password-1"})[0] == 200, f"{wrong} {ok}")
+
+# ---- push notifications ------------------------------------------------------------------
+# Push services are HTTPS. The checks run a local HTTPS receiver; the API must
+# trust its certificate (NODE_EXTRA_CA_CERTS) and list 127.0.0.1 in PUSH_HOSTS.
+key = call("GET", "/push/key")[1].get("key")
+cert, cert_key = os.environ.get("PUSH_TEST_CERT"), os.environ.get("PUSH_TEST_KEY")
+if not key or not cert:
+    print("skip push checks: VAPID keys or PUSH_TEST_CERT not set")
+else:
+    received = []
+
+    class Receiver(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            received.append((self.path, dict(self.headers), body))
+            self.send_response(410 if self.path.endswith("/gone") else 201)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Receiver)
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.load_cert_chain(cert, cert_key)
+    server.socket = tls.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    # A test phone key (public half only). Real phones create their own.
+    keys = {"p256dh": "BMNh2OhSlnIrysQcvv4HANyB8fnv9khOYNfPFlUJTK8CNBtFlSugA4eTyjV5FUrQ7S0lKaefCkdUI72hz1gn8yA", "auth": "oSEGoPH_hv4DQKBxNkfrnA"}
+    tq = login("55570014", "Push Tester")
+    bad = [call("POST", "/push/subscriptions", {"endpoint": e, "keys": keys}, tq)[1].get("code") for e in ("https://evil.example/push/1", f"http://127.0.0.1:{port}/push/plain")]
+    check("push: subscriptions to an unknown service, or without HTTPS, are refused", bad == ["invalid_subscription"] * 2, str(bad))
+    ok1 = call("POST", "/push/subscriptions", {"endpoint": f"https://127.0.0.1:{port}/push/phone", "keys": keys}, tq)[0]
+    ok2 = call("POST", "/push/subscriptions", {"endpoint": f"https://127.0.0.1:{port}/push/gone", "keys": keys}, tq)[0]
+    member = call("GET", "/family", token=tq)[1][0]["id"]
+    call("POST", f"/admin/members/{member}/measurements", {"length_cm": 150, "shoulder_cm": 46, "chest_cm": 110, "waist_cm": 100, "sleeve_cm": 61, "neck_cm": 40, "cuff_cm": 24}, owner)
+    for _ in range(40):
+        if len(received) >= 2:
+            break
+        time.sleep(0.25)
+    phone_hit = next((h for p, h, b in received if p.endswith("/phone")), {})
+    check("push: a new notification is delivered, encrypted and signed, within seconds",
+          ok1 == ok2 == 200 and phone_hit.get("Content-Encoding") == "aes128gcm" and phone_hit.get("Authorization", "").startswith("vapid t=") and phone_hit.get("TTL") == "3600",
+          f"{ok1} {ok2} {[(p, h.get('Content-Encoding')) for p, h, b in received]}")
+    time.sleep(0.5)
+    check("push: a phone that left (410) is forgotten", sql(f"select count(*) from push_subscriptions where endpoint like '%/push/gone'") == "0")
+    sent_once = len([1 for p, h, b in received if p.endswith('/phone')])
+    time.sleep(3.5)
+    check("push: each notification is sent once", sent_once == 1 and len([1 for p, h, b in received if p.endswith('/phone')]) == 1, str(sent_once))
+    server.shutdown()
 
 # ---- response headers -----------------------------------------------------------
 h = call("GET", "/catalogue")[2]

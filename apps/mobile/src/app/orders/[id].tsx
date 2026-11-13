@@ -134,6 +134,16 @@ export default function Tracking() {
           <Text variant="bodyStrong">{t('checkout.total')}</Text>
           <Text variant="bodyStrong">{f.money(o.total, true)}</Text>
         </View>
+        {o.refunded ? (
+          <View testID="refunded" style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text variant="small" color={colors.goldInk}>
+              {t('track.refunded')}
+            </Text>
+            <Text variant="smallStrong" color={colors.goldInk}>
+              {`− ${f.money(o.refunded, true)}`}
+            </Text>
+          </View>
+        ) : null}
       </Card>
     </Screen>
   );

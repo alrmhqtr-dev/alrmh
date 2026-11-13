@@ -4,7 +4,7 @@ import { Lock, Ruler } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { useMember } from '@/api/hooks';
 import { measuredWhere, memberTitle } from '@/lib/people';
-import { Button, Card, Divider, EmptyState, Icon, Loading, Overline, Text } from '@/ui/primitives';
+import { Button, Card, Divider, EmptyState, Icon, Loading, Overline, Text, Touch } from '@/ui/primitives';
 import { BottomBar, Header, Screen } from '@/ui/layout';
 import { colors, radius } from '@/theme/tokens';
 
@@ -19,7 +19,22 @@ export default function MemberScreen() {
 
   return (
     <Screen
-      header={<Header title={m ? memberTitle(m, t) : ''} />}
+      header={
+        <Header
+          title={m ? memberTitle(m, t) : ''}
+          right={
+            m && m.relation !== 'self' ? (
+              <Touch testID="member-edit" onPress={() => router.push({ pathname: '/account/add-member', params: { id } })} hitSlop={10}>
+                <Text variant="smallStrong">{t('common.edit')}</Text>
+              </Touch>
+            ) : m ? (
+              <Touch testID="member-edit-self" onPress={() => router.push('/account/profile')} hitSlop={10}>
+                <Text variant="smallStrong">{t('common.edit')}</Text>
+              </Touch>
+            ) : undefined
+          }
+        />
+      }
       footer={
         <BottomBar>
           <Button testID="member-book" label={t('member.bookNew')} icon={Ruler} onPress={() => router.push({ pathname: '/book', params: { mode: 'standalone', memberId: id } })} />

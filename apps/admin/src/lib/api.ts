@@ -77,9 +77,40 @@ export async function shrinkImage(file: File, maxSide = 1400): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new ApiError('invalid_image', 0))), 'image/jpeg', 0.86));
 }
 
+/** Downloads a CSV the API builds (the request needs the sign-in token, so a plain link would not work). */
+export async function downloadCsv(path: string, fallbackName: string) {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/v1/admin${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    throw new ApiError('network', 0);
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && token) onUnauthorized?.();
+    throw new ApiError(data?.code ?? `http_${res.status}`, res.status, data ?? {});
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 const MESSAGES: Record<string, string> = {
   network: "Can't reach the AlRmh API. Check the connection.",
   invalid_login: 'Wrong email or password.',
+  wrong_password: "That isn't your current password.",
+  same_password: 'Choose a password different from the current one.',
+  refund_too_large: 'That is more than is left to refund on this order.',
+  not_paid: 'This order was never paid, so there is nothing to refund.',
+  no_fee_due: 'There is no fee to collect for this visit.',
+  slot_taken: 'That time is full.',
+  slot_in_past: 'That time has passed.',
   account_locked: 'Too many wrong passwords. This account is locked for 15 minutes.',
   too_many_requests: 'Too many tries. Wait a few minutes and try again.',
   invalid_date: 'Check the date.',

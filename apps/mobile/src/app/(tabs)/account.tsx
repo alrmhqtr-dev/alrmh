@@ -63,7 +63,7 @@ export default function Account() {
         <Loading />
       ) : (
         <>
-          <Card style={{ padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <Card testID="profile-card" onPress={() => router.push('/account/profile')} style={{ padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <Avatar name={m.name ?? '?'} dark size={56} />
             <View style={{ flex: 1 }}>
               <Text variant="title">{m.name}</Text>
@@ -71,6 +71,7 @@ export default function Account() {
                 {f.phone(m.phone)}
               </Text>
             </View>
+            <Text variant="smallStrong">{t('common.edit')}</Text>
           </Card>
           {group(t('account.tailoring'), [
             <ListRow key="fam" icon={Users} title={t('account.family')} subtitle={t('account.familySub', { n: m.counts.family })} onPress={() => router.push('/account/family')} testID="row-family" />,

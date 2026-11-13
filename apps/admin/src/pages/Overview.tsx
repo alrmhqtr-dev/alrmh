@@ -12,6 +12,7 @@ type OverviewData = {
   customers: { total: number; week: number };
   points: { outstanding: number; expiring: { points: number; customers: number } };
   attention: { id: string; number: string; stage: string; expected_delivery: string; customer_name: string }[];
+  refunds: { id: string; number: string; total: number; due: number; customer_name: string }[];
 };
 
 export default function Overview() {
@@ -50,6 +51,26 @@ export default function Overview() {
           </div>
         </div>
       </div>
+
+      {d.refunds.length ? (
+        <div className="card" data-testid="refunds-due">
+          <div className="row spread" style={{ padding: '16px 18px 8px' }}>
+            <h2>Refunds due</h2>
+            <span className="small muted">Cancelled after payment. Refund in SADAD, then record it on the order.</span>
+          </div>
+          <table>
+            <tbody>
+              {d.refunds.map((r) => (
+                <tr key={r.id} className="click" onClick={() => nav(`/orders/${r.id}`)}>
+                  <td className="strong">#{r.number}</td>
+                  <td className="secondary">{r.customer_name}</td>
+                  <td className="right num strong">{money(r.due)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       <div className="card pad stack">
         <div className="row spread">

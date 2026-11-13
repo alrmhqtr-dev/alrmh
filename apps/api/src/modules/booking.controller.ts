@@ -123,9 +123,10 @@ export class BookingController {
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [slotLockKey(kind, branchId, startsAt)]);
       await assertSlotFree(kind, branchId, startsAt, c);
       const appt = await db.one(
-        `insert into appointments (customer_id, member_id, kind, branch_id, address_id, starts_at, status) values ($1,$2,$3,$4,$5,$6,$7)
-         returning id, kind, branch_id, address_id, member_id, starts_at, status`,
-        [me.id, body.memberId, kind, branchId, kind === 'home' ? body.addressId : null, startsAt, standalone ? 'confirmed' : 'held'],
+        `insert into appointments (customer_id, member_id, kind, branch_id, address_id, starts_at, status, fee) values ($1,$2,$3,$4,$5,$6,$7,$8)
+         returning id, kind, branch_id, address_id, member_id, starts_at, status, fee`,
+        // A home visit that is part of an order is paid at checkout; one booked on its own is paid at the visit.
+        [me.id, body.memberId, kind, branchId, kind === 'home' ? body.addressId : null, startsAt, standalone ? 'confirmed' : 'held', standalone && kind === 'home' ? (await getSettings(c)).home_visit_fee : 0],
         c,
       );
       if (standalone) {
@@ -147,7 +148,7 @@ export class BookingController {
   @Get('appointments')
   upcoming(@Me() me: Customer) {
     return db.many(
-      `select a.id, a.kind, a.starts_at, a.status, a.order_id, f.name as member_name, ad.area, ad.label as address_label,
+      `select a.id, a.kind, a.starts_at, a.status, a.order_id, a.fee::float as fee, f.name as member_name, ad.area, ad.label as address_label,
               b.name_en as branch_name_en, b.name_ar as branch_name_ar, a.branch_id
          from appointments a join family_members f on f.id = a.member_id
          left join addresses ad on ad.id = a.address_id left join branches b on b.id = a.branch_id

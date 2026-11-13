@@ -5,7 +5,9 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { NextFunction, Request, Response } from 'express';
 import { config } from './config.js';
 import { db } from './db.js';
-import { expirePoints } from './lib.js';
+import { housekeeping } from './housekeeping.js';
+import { pushEnabled, sendPendingPushes } from './push.js';
+import { PushController } from './modules/push.controller.js';
 import { migrate } from './migrate.js';
 import { seed } from './seed.js';
 import { AuthController } from './modules/auth.controller.js';
@@ -51,6 +53,7 @@ class HealthController {
     AdminOpsController,
     AdminSetupController,
     MediaController,
+    PushController,
   ],
 })
 class AppModule {}
@@ -76,6 +79,8 @@ async function bootstrap() {
   app.enableCors({
     origin: config.corsOrigins.includes('*') ? true : config.corsOrigins,
     allowedHeaders: ['Content-Type', 'Authorization'],
+    // Lets the admin name downloaded exports after the file the API sends.
+    exposedHeaders: ['Content-Disposition'],
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   app.enableShutdownHooks();
@@ -83,7 +88,11 @@ async function bootstrap() {
   console.log(`AlRmh API on :${config.port} (login: ${config.otpMode}, payment: ${config.paymentMode})`);
   if (config.production && config.otpMode === 'preview') console.warn('OTP_MODE=preview: every number signs in with the preview code. Not for real customers.');
   if (config.production && config.paymentMode === 'mock') console.warn('PAYMENT_MODE=mock: orders are marked paid on the test page. Not for real customers.');
-  setInterval(() => expirePoints(null).catch((e) => console.error('expiry job', e)), 60 * 60_000);
+  const tidy = () => housekeeping().catch((e) => console.error('housekeeping', e));
+  tidy();
+  setInterval(tidy, 10 * 60_000);
+  if (pushEnabled) setInterval(sendPendingPushes, 3_000);
+  else console.log('Push notifications are off: set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to turn them on.');
 }
 
 bootstrap();
