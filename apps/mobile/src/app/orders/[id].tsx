@@ -1,5 +1,5 @@
 import { View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useIsFocused, useLocalSearchParams } from 'expo-router';
 import { Check, Gift, MessageCircle, Package, Shirt } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { useCatalogue, useOrder } from '@/api/hooks';
@@ -16,7 +16,7 @@ function discountLabel(label: string | null, t: (k: any, p?: any) => string) {
 export default function Tracking() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t, f } = useLocale();
-  const order = useOrder(id);
+  const order = useOrder(id, useIsFocused());
   const cat = useCatalogue();
   const support = cat.data?.settings.support.whatsapp ?? '';
   const o = order.data;
@@ -134,6 +134,16 @@ export default function Tracking() {
           <Text variant="bodyStrong">{t('checkout.total')}</Text>
           <Text variant="bodyStrong">{f.money(o.total, true)}</Text>
         </View>
+        {o.refunded ? (
+          <View testID="refunded" style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text variant="small" color={colors.goldInk}>
+              {t('track.refunded')}
+            </Text>
+            <Text variant="smallStrong" color={colors.goldInk}>
+              {`− ${f.money(o.refunded, true)}`}
+            </Text>
+          </View>
+        ) : null}
       </Card>
     </Screen>
   );

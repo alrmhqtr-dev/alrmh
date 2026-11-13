@@ -18,8 +18,11 @@ function TabBar() {
   const { t } = useLocale();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  // The bar is the app's navigation; inside it, one tab per section.
   return (
+    <View role="navigation" aria-label={t('a11y.tabs')}>
     <View
+      role="tablist"
       style={{
         flexDirection: 'row',
         borderTopWidth: 1,
@@ -50,6 +53,7 @@ function TabBar() {
           </Touch>
         );
       })}
+    </View>
     </View>
   );
 }

@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { BadRequestException } from '@nestjs/common';
 import { db, type Queryable } from './db.js';
 import { QATAR_OFFSET_MINUTES } from './config.js';
@@ -36,6 +36,7 @@ export const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 export const newToken = () => randomBytes(32).toString('base64url');
+export const sameHash = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 export const sixDigits = () => String(randomInt(0, 1_000_000)).padStart(6, '0');
 
 export function need<T>(value: T | undefined | null, field: string): T {
@@ -110,19 +111,20 @@ export const STAGE_TEXT: Record<Stage, Bilingual> = {
 /* ---------- points ---------- */
 
 export async function expirePoints(customerId: string | null, client: Queryable = db.pool) {
-  const due = await db.many<{ id: string; customer_id: string; remaining: number; label: string | null }>(
-    `select id, customer_id, remaining, label from points_ledger
-      where kind = 'earn' and remaining > 0 and expires_at <= now() ${customerId ? 'and customer_id = $1' : ''}`,
+  // One statement, so two requests arriving together cannot both expire the
+  // same award: the second waits on the row lock, then sees remaining = 0.
+  await client.query(
+    `with due as (
+       select id, customer_id, remaining, label from points_ledger
+        where kind = 'earn' and remaining > 0 and expires_at <= now() ${customerId ? 'and customer_id = $1' : ''}
+        for update
+     ), zeroed as (
+       update points_ledger p set remaining = 0 from due where p.id = due.id
+     )
+     insert into points_ledger (customer_id, kind, points, label)
+     select customer_id, 'expire', -remaining, case when label is null then 'Expired points' else 'Expired: ' || label end from due`,
     customerId ? [customerId] : [],
-    client,
   );
-  for (const e of due) {
-    await client.query('update points_ledger set remaining = 0 where id = $1', [e.id]);
-    await client.query(
-      `insert into points_ledger (customer_id, kind, points, label) values ($1, 'expire', $2, $3)`,
-      [e.customer_id, -e.remaining, e.label ? `Expired: ${e.label}` : 'Expired points'],
-    );
-  }
   await client.query(`update vouchers set status = 'expired' where status = 'active' and expires_at <= now() ${customerId ? 'and customer_id = $1' : ''}`, customerId ? [customerId] : []);
 }
 

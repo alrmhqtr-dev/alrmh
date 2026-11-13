@@ -3,6 +3,7 @@ import { db, type Queryable } from './db.js';
 import { addMonthsSql } from './sql-helpers.js';
 import { STAGES, STAGE_TEXT, addWorkingDays, fail, getSettings, notify, qatarDateString, type Stage } from './lib.js';
 import { quote, type QuoteInput } from './pricing.js';
+import { assertSlotFree, slotLockKey } from './modules/booking.controller.js';
 
 export function stagesFor(items: { kind: string }[]): Stage[] {
   return items.some((i) => i.kind === 'thobe') ? [...STAGES] : ['confirmed', 'ready', 'out_for_delivery', 'delivered'];
@@ -11,16 +12,43 @@ export function stagesFor(items: { kind: string }[]): Stage[] {
 export async function createOrder(customerId: string, input: QuoteInput) {
   return db.tx(async (c) => {
     await c.query('select pg_advisory_xact_lock(hashtext($1))', [`checkout:${customerId}`]);
+    // One open checkout per customer: starting a new one closes any earlier unpaid
+    // attempt, so the same voucher, coupon or basket cannot be paid for twice.
+    const stale = await db.many<{ order_id: string }>(
+      `update payments p set status = 'cancelled', completed_at = now() from orders o
+        where o.id = p.order_id and o.customer_id = $1 and p.status = 'pending' returning p.order_id`,
+      [customerId],
+      c,
+    );
+    if (stale.length) await c.query(`update orders set stage = 'payment_failed' where id = any($1::uuid[]) and stage = 'pending_payment'`, [stale.map((s) => s.order_id)]);
     const q = await quote(customerId, input, c);
     if (!q.items.length) fail('basket_empty');
     if (!q.address) fail('address_required');
-    if (q.coupon?.error) fail(q.coupon.error);
+    if (q.coupon?.error) fail(q.coupon.error, q.coupon.min != null ? { min: q.coupon.min } : {});
+    // Every measurement visit in the basket must still be bookable.
+    const holds = new Map<string, { itemId: string; kind: string; branchId: string | null; startsAt: Date; key: string }>();
     for (const i of q.items as any[]) {
-      if (i.kind === 'thobe' && i.measureMethod !== 'saved') {
-        const ok = await db.one(`select 1 from appointments where id = $1 and (status = 'confirmed' or (status = 'held' and starts_at > now()))`, [i.appointment?.id], c);
-        if (!ok) fail('appointment_expired', { itemId: i.id });
-        await c.query(`update appointments set created_at = now() where id = $1 and status = 'held'`, [i.appointment.id]);
+      if (i.kind !== 'thobe' || i.measureMethod === 'saved') continue;
+      const apptId: string | undefined = i.appointment?.id;
+      if (!apptId) fail('appointment_expired', { itemId: i.id });
+      if (holds.has(apptId)) continue;
+      const a = await db.one('select id, kind, branch_id, starts_at, status from appointments where id = $1 and customer_id = $2 for update', [apptId, customerId], c);
+      if (!a || (a.status !== 'held' && a.status !== 'confirmed')) fail('appointment_expired', { itemId: i.id });
+      if (a.status !== 'held') continue;
+      const startsAt = new Date(a.starts_at);
+      holds.set(apptId, { itemId: i.id, kind: a.kind, branchId: a.branch_id, startsAt, key: slotLockKey(a.kind, a.branch_id, startsAt) });
+    }
+    // A hold lapses after 30 minutes and someone else may have the time by now,
+    // so check each one again before taking payment. Slots are locked in a fixed
+    // order so two checkouts can never wait on each other.
+    for (const [apptId, h] of [...holds].sort((x, y) => x[1].key.localeCompare(y[1].key))) {
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [h.key]);
+      try {
+        await assertSlotFree(h.kind, h.branchId, h.startsAt, c, apptId);
+      } catch {
+        fail('appointment_expired', { itemId: h.itemId });
       }
+      await c.query('update appointments set created_at = now() where id = $1', [apptId]);
     }
     const number = `AR-${(await db.one<{ n: number }>(`select nextval('order_number_seq')::int as n`, [], c))!.n}`;
     const order = await db.one(
@@ -110,7 +138,8 @@ export async function closePayment(paymentId: string, status: 'failed' | 'cancel
 
 export async function setStage(orderId: string, stage: Stage, client?: Queryable, staffId: string | null = null) {
   const run = async (c: Queryable) => {
-    const order = await db.one('select * from orders where id = $1', [orderId], c);
+    // Locked, so two staff pressing the same button cannot both move the order (and both award the points).
+    const order = await db.one('select * from orders where id = $1 for update', [orderId], c);
     if (!order) throw new NotFoundException({ code: 'order_not_found' });
     const items = await db.many('select kind from order_items where order_id = $1', [orderId], c);
     const flow = stagesFor(items);

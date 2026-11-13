@@ -12,3 +12,4 @@ apps/mobile/android/
 .turbo/
 .vercel/
 _to_delete/
+__pycache__/

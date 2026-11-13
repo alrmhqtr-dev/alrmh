@@ -1,21 +1,40 @@
-import { Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { db } from '../db.js';
 import { fail, getSettings, need, newToken, sha256 } from '../lib.js';
 import { AnyStaff, CurrentStaff, Managers, OwnerOnly, ROLES, audit, hashPassword, verifyPassword, type Role, type StaffUser } from '../staff.js';
 
+import { rateLimit } from '../ratelimit.js';
+
 const SESSION_HOURS = 12;
+const MAX_FAILED_LOGINS = 10;
+const LOCK_MINUTES = 15;
+// Checked when the email is unknown, so a wrong email takes as long as a wrong password.
+const dummyHash = hashPassword('not-a-real-password');
 
 @Controller('v1/admin')
 export class AdminCoreController {
   @Post('auth/login')
   @HttpCode(200)
+  @UseGuards(rateLimit('staff-login', 20, 600))
   async login(@Body() body: { email: string; password: string }) {
     const email = String(need(body?.email, 'email')).trim().toLowerCase();
-    const user = await db.one('select * from staff_users where email = $1 and active', [email]);
-    if (!user || !(await verifyPassword(String(body.password ?? ''), user.password_hash))) fail('invalid_login');
+    const user = await db.one(`select *, greatest(0, ceil(extract(epoch from locked_until - now())))::int as locked_for from staff_users where email = $1 and active`, [email]);
+    if (user?.locked_for > 0) throw new HttpException({ code: 'account_locked', retryIn: user.locked_for }, HttpStatus.TOO_MANY_REQUESTS);
+    const ok = await verifyPassword(String(body.password ?? ''), user ? user.password_hash : await dummyHash);
+    if (!user || !ok) {
+      if (user)
+        await db.pool.query(
+          `update staff_users set
+             failed_logins = case when locked_until is not null then 1 else failed_logins + 1 end,
+             locked_until = case when locked_until is null and failed_logins + 1 >= $2 then now() + ($3 || ' minutes')::interval else null end
+           where id = $1`,
+          [user.id, MAX_FAILED_LOGINS, String(LOCK_MINUTES)],
+        );
+      fail('invalid_login');
+    }
     const token = newToken();
     await db.pool.query(`insert into staff_sessions (token_hash, staff_id, expires_at) values ($1, $2, now() + ($3 || ' hours')::interval)`, [sha256(token), user.id, String(SESSION_HOURS)]);
-    await db.pool.query('update staff_users set last_login_at = now() where id = $1', [user.id]);
+    await db.pool.query('update staff_users set last_login_at = now(), failed_logins = 0, locked_until = null where id = $1', [user.id]);
     return { token, staff: { id: user.id, email: user.email, name: user.name, role: user.role, branch_id: user.branch_id } };
   }
 
@@ -33,11 +52,28 @@ export class AdminCoreController {
     return staff;
   }
 
+  @Post('me/password')
+  @HttpCode(200)
+  @UseGuards(AnyStaff)
+  async changeOwnPassword(@CurrentStaff() me: StaffUser, @Req() req: any, @Body() body: { current?: string; next?: string }) {
+    const row = await db.one('select password_hash from staff_users where id = $1', [me.id]);
+    if (!(await verifyPassword(String(body?.current ?? ''), row.password_hash))) fail('wrong_password');
+    const next = String(body?.next ?? '');
+    if (next.length < 10) fail('password_too_short');
+    if (next === body?.current) fail('same_password');
+    await db.pool.query('update staff_users set password_hash = $2, failed_logins = 0, locked_until = null where id = $1', [me.id, await hashPassword(next)]);
+    // Signed out everywhere else; this browser stays signed in.
+    const header: string = req.headers['authorization'] ?? '';
+    await db.pool.query('delete from staff_sessions where staff_id = $1 and token_hash <> $2', [me.id, sha256(header.slice(7))]);
+    await audit(me, 'password', 'staff', me.id);
+    return { ok: true };
+  }
+
   @Get('overview')
   @UseGuards(AnyStaff)
   async overview() {
     const settings = await getSettings();
-    const [stages, today, sales, customers, points, expiring, attention] = await Promise.all([
+    const [stages, today, sales, customers, points, expiring, attention, refunds] = await Promise.all([
       db.many(`select stage, count(*)::int as n from orders where stage not in ('pending_payment','payment_failed') group by stage`),
       db.many(
         `select a.id, a.kind, a.starts_at, a.status, f.name as member_name, c.name as customer_name, c.phone, ad.area, b.name_en as branch_name, o.number as order_number
@@ -66,8 +102,16 @@ export class AdminCoreController {
             and o.expected_delivery is not null and o.expected_delivery <= (now() at time zone 'Asia/Qatar')::date + 1
           order by o.expected_delivery limit 20`,
       ),
+      db.many(
+        `select o.id, o.number, o.total::float as total, c.name as customer_name,
+                (o.total - coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0))::float as due
+           from orders o join customers c on c.id = o.customer_id
+          where o.stage = 'cancelled' and o.paid_at is not null
+            and o.total > coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0)
+          order by o.created_at limit 20`,
+      ),
     ]);
-    return { stages, today, sales, customers, points: { outstanding: points!.outstanding, expiring }, attention };
+    return { stages, today, sales, customers, points: { outstanding: points!.outstanding, expiring }, attention, refunds };
   }
 
   @Get('staff')
@@ -112,6 +156,7 @@ export class AdminCoreController {
       [id, body.name ?? null, body.role ?? null, body.active ?? null, body.branchId !== undefined, body.branchId || null, body.password ? await hashPassword(body.password) : null],
     );
     if (body.active === false || body.password) await db.pool.query('delete from staff_sessions where staff_id = $1', [id]);
+    if (body.password) await db.pool.query('update staff_users set failed_logins = 0, locked_until = null where id = $1', [id]);
     await audit(me, 'update', 'staff', id, { ...body, password: body.password ? '(changed)' : undefined });
     return { ok: true };
   }

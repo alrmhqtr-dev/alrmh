@@ -68,6 +68,41 @@ async function asset(request) {
   return res
 }
 
+self.addEventListener('push', (event) => {
+  let d = {}
+  try {
+    d = event.data ? event.data.json() : {}
+  } catch {}
+  event.waitUntil(
+    self.registration.showNotification(d.title || 'AlRmh', {
+      body: d.body || '',
+      tag: d.tag,
+      lang: d.lang,
+      dir: d.dir || 'auto',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      data: { link: d.link || '/' },
+    }),
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  // Only screens of this app are opened.
+  let url = new URL('/', self.location.origin)
+  try {
+    const target = new URL((event.notification.data && event.notification.data.link) || '/', self.location.origin)
+    if (target.origin === self.location.origin) url = target
+  } catch {}
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const open = list.find((c) => c.url.startsWith(self.location.origin))
+      if (open) return open.focus().then((c) => (c && 'navigate' in c ? c.navigate(url.href) : c))
+      return self.clients.openWindow(url.href)
+    }),
+  )
+})
+
 self.addEventListener('fetch', (event) => {
   const { request } = event
   if (request.method !== 'GET') return

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useQueryClient } from '@tanstack/react-query';
 import { api, setToken, setUnauthorizedHandler } from '@/api/client';
 import { storage } from '@/lib/storage';
+import { relinkPush, unlinkPush } from '@/lib/push';
 
 type Ctx = {
   ready: boolean;
@@ -35,6 +36,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    await unlinkPush();
     try {
       await api('/auth/logout', { method: 'POST' });
     } catch {}
@@ -61,6 +63,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setGuest(false);
       setSignedIn(true);
       qc.invalidateQueries();
+      relinkPush();
     },
     [qc],
   );

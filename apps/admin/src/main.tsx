@@ -1,16 +1,16 @@
 import { StrictMode, useState, type FormEvent, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { CalendarDays, ClipboardList, Gift, History, LayoutDashboard, LogOut, Settings2, Shirt, Store, Users, UserCog } from 'lucide-react';
+import { CalendarDays, ClipboardList, Gift, History, KeyRound, LayoutDashboard, LogOut, Settings2, Shirt, Store, Users, UserCog } from 'lucide-react';
 import '@fontsource/readex-pro/400.css';
 import '@fontsource/readex-pro/500.css';
 import '@fontsource/readex-pro/600.css';
 import '@fontsource/aref-ruqaa/400.css';
 import './styles.css';
 import { AuthProvider, useAuth, type Role } from './lib/auth';
-import { errorMessage } from './lib/api';
-import { Field, Input, Loading, ToastProvider } from './ui';
+import { api, errorMessage } from './lib/api';
+import { Field, Input, Loading, Modal, PageErrorBoundary, ToastProvider, useToast } from './ui';
 import Overview from './pages/Overview';
 import Orders from './pages/Orders';
 import OrderDetail from './pages/OrderDetail';
@@ -94,6 +94,44 @@ function Login() {
   );
 }
 
+function PasswordModal({ onClose }: { onClose: () => void }) {
+  const toast = useToast();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [again, setAgain] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (next !== again) return setError("The new passwords don't match.");
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/me/password', { body: { current, next } });
+      toast('Password changed. Other devices were signed out.');
+      onClose();
+    } catch (e) {
+      setError(errorMessage(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title="Change your password"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn secondary" onClick={onClose}>Cancel</button>
+          <button className="btn" data-testid="password-save" disabled={busy || !current || next.length < 10} onClick={save}>Change password</button>
+        </>
+      }
+    >
+      <Field label="Current password"><Input data-testid="password-current" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} autoFocus /></Field>
+      <Field label="New password" hint="At least 10 characters."><Input data-testid="password-next" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /></Field>
+      <Field label="New password again" error={error}><Input data-testid="password-again" type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} /></Field>
+    </Modal>
+  );
+}
+
 function Guard({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { can } = useAuth();
   return can(...roles) ? <>{children}</> : <Navigate to="/" replace />;
@@ -101,6 +139,8 @@ function Guard({ roles, children }: { roles: Role[]; children: ReactNode }) {
 
 function Shell() {
   const { staff, ready, logout, can } = useAuth();
+  const [changePassword, setChangePassword] = useState(false);
+  const location = useLocation();
   if (!ready) return <Loading />;
   if (!staff) return <Login />;
   return (
@@ -130,12 +170,19 @@ function Shell() {
         <div className="who">
           <div style={{ color: '#fff', fontWeight: 500 }}>{staff.name}</div>
           <div style={{ textTransform: 'capitalize', marginBottom: 8 }}>{staff.role}</div>
-          <button className="btn sm secondary" onClick={logout} data-testid="logout">
-            <LogOut size={14} /> Sign out
-          </button>
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn sm secondary" onClick={() => setChangePassword(true)} data-testid="change-password">
+              <KeyRound size={14} /> Password
+            </button>
+            <button className="btn sm secondary" onClick={logout} data-testid="logout">
+              <LogOut size={14} /> Sign out
+            </button>
+          </div>
         </div>
       </aside>
+      {changePassword ? <PasswordModal onClose={() => setChangePassword(false)} /> : null}
       <main className="main">
+        <PageErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/orders" element={<Orders />} />
@@ -151,6 +198,7 @@ function Shell() {
           <Route path="/audit" element={<Guard roles={MANAGERS}><Audit /></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </PageErrorBoundary>
       </main>
     </div>
   );

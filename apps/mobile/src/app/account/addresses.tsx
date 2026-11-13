@@ -1,7 +1,7 @@
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { MapPin, Plus, Trash2 } from 'lucide-react-native';
+import { ChevronRight, MapPin, Plus } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
 import { useAddresses } from '@/api/hooks';
@@ -24,7 +24,7 @@ export default function Addresses() {
         </Text>
       ) : null}
       {(addresses.data ?? []).map((a) => (
-        <Card key={a.id} style={{ padding: 16, flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
+        <Card key={a.id} testID={`address-${a.label}`} onPress={() => router.push({ pathname: '/account/add-address', params: { id: a.id } })} style={{ padding: 16, flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
           <IconTile icon={MapPin} />
           <View style={{ flex: 1, gap: 4 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -38,9 +38,7 @@ export default function Addresses() {
               </Touch>
             ) : null}
           </View>
-          <Touch accessibilityLabel={t('common.remove')} onPress={async () => { await api(`/addresses/${a.id}`, { method: 'DELETE' }); refresh(); }} hitSlop={10}>
-            <Icon icon={Trash2} size={18} color={colors.textMuted} />
-          </Touch>
+          <Icon icon={ChevronRight} size={18} color={colors.textMuted} flip />
         </Card>
       ))}
       <Card dashed testID="add-address" onPress={() => router.push('/account/add-address')} style={{ height: 64, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10 }}>

@@ -1,5 +1,11 @@
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 
+/** Photos uploaded in the admin are stored as a path on the API; anything else is already a full address. */
+export function mediaUrl(url: string | null | undefined) {
+  if (!url) return null;
+  return url.startsWith('/') ? `${API_URL}${url}` : url;
+}
+
 let token: string | null = null;
 let onUnauthorized: (() => void) | null = null;
 

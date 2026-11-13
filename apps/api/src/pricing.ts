@@ -6,7 +6,7 @@ export type QuoteInput = { addressId?: string; voucherId?: string | null; coupon
 export async function basketLines(customerId: string, client: Queryable = db.pool, settings?: Settings) {
   const s = settings ?? (await getSettings(client));
   const rows = await db.many(
-    `select bi.*, p.name_en as p_name_en, p.name_ar as p_name_ar, p.price as p_price, p.category as p_category,
+    `select bi.*, p.name_en as p_name_en, p.name_ar as p_name_ar, p.price as p_price, p.category as p_category, p.image_url as p_image_url,
             f.name as member_name, f.relation as member_relation, f.size as member_size,
             a.kind as appt_kind, a.starts_at as appt_starts_at, a.branch_id as appt_branch_id,
             b.name_en as appt_branch_en, b.name_ar as appt_branch_ar, ad.area as appt_area
@@ -21,7 +21,7 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
     client,
   );
   const [collars, fabrics, colours] = await Promise.all([
-    db.many('select id, name_en, name_ar from collars', [], client),
+    db.many('select id, name_en, name_ar, shape from collars', [], client),
     db.many('select id, name_en, name_ar, price from fabrics', [], client),
     db.many('select id, name_en, name_ar, hex from colours', [], client),
   ]);
@@ -36,7 +36,7 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
         unitPrice: r.p_price,
         lineTotal: line,
         points: Math.round(line * s.points.product_per_qar),
-        product: { id: r.product_id, name_en: r.p_name_en, name_ar: r.p_name_ar, category: r.p_category },
+        product: { id: r.product_id, name_en: r.p_name_en, name_ar: r.p_name_ar, category: r.p_category, image_url: r.p_image_url },
         size: r.size,
       };
     }
@@ -84,18 +84,30 @@ export async function quote(customerId: string, input: QuoteInput, client: Query
     client,
   );
 
-  let coupon: null | { code: string; percent?: number; maxDiscount?: number | null; error?: string } = null;
+  let coupon: null | { code: string; percent?: number; maxDiscount?: number | null; error?: string; min?: number } = null;
   if (input.couponCode) {
     const code = String(input.couponCode).trim().toUpperCase();
     const c = await db.one(
-      `select code, percent, max_discount, active, (expires_at is not null and expires_at < now()) as expired, (starts_at is not null and starts_at > now()) as early
+      `select code, percent, max_discount, active, per_customer_limit, max_uses, min_subtotal,
+              (expires_at is not null and expires_at < now()) as expired, (starts_at is not null and starts_at > now()) as early
          from coupons where upper(code) = $1`,
       [code],
       client,
     );
     if (!c || !c.active || c.early) coupon = { code, error: 'coupon_invalid' };
     else if (c.expired) coupon = { code, error: 'coupon_expired' };
-    else coupon = { code: c.code, percent: c.percent, maxDiscount: c.max_discount };
+    else {
+      const used = await db.one<{ mine: number; total: number }>(
+        `select count(*) filter (where customer_id = $2)::int as mine, count(*)::int as total
+           from orders where coupon_code = $1 and paid_at is not null and stage <> 'cancelled'`,
+        [c.code, customerId],
+        client,
+      );
+      if (c.max_uses != null && used!.total >= c.max_uses) coupon = { code, error: 'coupon_expired' };
+      else if (c.per_customer_limit != null && used!.mine >= c.per_customer_limit) coupon = { code, error: 'coupon_used' };
+      else if (c.min_subtotal != null && subtotal < c.min_subtotal) coupon = { code, error: 'coupon_min', min: c.min_subtotal };
+      else coupon = { code: c.code, percent: c.percent, maxDiscount: c.max_discount };
+    }
   }
 
   let discount = 0;

@@ -6,7 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { STAGE_LABEL, date, dateTime, money, phone } from '../lib/format';
 import { MeasureModal, MeasurementGrid, type Measurement } from '../measure';
-import { Field, Loading, Modal, PageHead, StageBadge, TextArea, useToast } from '../ui';
+import { Field, Input, Loading, Modal, PageHead, StageBadge, TextArea, useToast } from '../ui';
 import { nextStage } from './Orders';
 
 type Detail = {
@@ -34,6 +34,8 @@ type Detail = {
   events: { stage: string; at: string; note: string | null; staff_name: string | null }[];
   appointments: { id: string; kind: string; starts_at: string; status: string; member_id: string; member_name: string; branch_name: string | null; line1: string | null; area: string | null }[];
   measurements: (Measurement & { member_id: string })[];
+  refunds: { id: string; amount: number; reference: string | null; note: string | null; created_at: string; staff_name: string | null }[];
+  refunded: number;
   stages: string[];
 };
 
@@ -46,6 +48,18 @@ export default function OrderDetail() {
   const [measure, setMeasure] = useState<{ id: string; name: string } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState('');
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refund, setRefund] = useState({ amount: '', reference: '', note: '' });
+  const recordRefund = useMutation({
+    mutationFn: () => api<{ left: number }>(`/orders/${id}/refunds`, { body: { amount: Number(refund.amount), reference: refund.reference, note: refund.note } }),
+    onSuccess: (r) => {
+      toast(r.left ? `Refund recorded. ${money(r.left)} could still be refunded.` : 'Refund recorded. The customer was notified.');
+      setRefundOpen(false);
+      refresh();
+      qc.invalidateQueries({ queryKey: ['overview'] });
+    },
+    onError: (e) => toast(errorMessage(e), 'error'),
+  });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['order', id] });
     qc.invalidateQueries({ queryKey: ['orders'] });
@@ -74,6 +88,7 @@ export default function OrderDetail() {
   const thobes = o.items.filter((i) => i.kind === 'thobe');
   const next = nextStage(o.stage, thobes.length > 0);
   const discount = o.discount_label?.split(':') ?? [];
+  const refundable = Math.round((o.total - o.refunded) * 100) / 100;
 
   return (
     <div className="stack lg">
@@ -96,7 +111,15 @@ export default function OrderDetail() {
         {can('owner', 'manager') && !['delivered', 'cancelled', 'out_for_delivery'].includes(o.stage) ? (
           <button className="btn danger" onClick={() => setCancelOpen(true)}>Cancel order</button>
         ) : null}
+        {can('owner', 'manager') && o.paid_at && refundable > 0 ? (
+          <button className="btn secondary" data-testid="record-refund" onClick={() => { setRefund({ amount: o.stage === 'cancelled' ? String(refundable) : '', reference: '', note: '' }); setRefundOpen(true); }}>
+            Record refund
+          </button>
+        ) : null}
       </PageHead>
+      {o.stage === 'cancelled' && o.paid_at && refundable > 0 ? (
+        <div className="note gold" data-testid="refund-due">Refund due: {money(refundable)}. Make it in SADAD, then record it here so the customer is told.</div>
+      ) : null}
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(280px, 1fr)', alignItems: 'start' }}>
         <div className="stack lg">
@@ -192,6 +215,12 @@ export default function OrderDetail() {
             ))}
             <div className="divider" />
             <div className="row spread"><span className="strong">Total</span><span className="strong num">{money(o.total)}</span></div>
+            {o.refunds.map((r) => (
+              <div key={r.id} className="row spread small">
+                <span className="secondary">Refunded {date(r.created_at)}{r.reference ? ` · ${r.reference}` : ''}{r.staff_name ? ` · ${r.staff_name}` : ''}</span>
+                <span className="num">− {money(r.amount)}</span>
+              </div>
+            ))}
             <div className="small muted">SADAD · {o.payment_status}{o.payment_ref ? ` · ${o.payment_ref}` : ''}</div>
             <div className="small muted">{o.points_awarded ? `${o.points_to_earn} points awarded` : `${o.points_to_earn} points on delivery`}</div>
           </div>
@@ -214,6 +243,23 @@ export default function OrderDetail() {
 
       {measure ? (
         <MeasureModal memberId={measure.id} memberName={measure.name} previous={o.measurements.find((m) => m.member_id === measure.id)} onClose={() => setMeasure(null)} onSaved={refresh} />
+      ) : null}
+      {refundOpen ? (
+        <Modal
+          title={`Record a refund on #${o.number}`}
+          onClose={() => setRefundOpen(false)}
+          footer={
+            <>
+              <button className="btn secondary" onClick={() => setRefundOpen(false)}>Cancel</button>
+              <button className="btn" data-testid="refund-save" disabled={recordRefund.isPending || !(Number(refund.amount) > 0)} onClick={() => recordRefund.mutate()}>Record refund</button>
+            </>
+          }
+        >
+          <div className="note">This records a refund you have already made in SADAD. It does not send money. Up to {money(refundable)} is left on this order.</div>
+          <Field label="Amount (QAR)"><Input data-testid="refund-amount" type="number" min={0} step="0.01" max={refundable} value={refund.amount} onChange={(e) => setRefund({ ...refund, amount: e.target.value })} /></Field>
+          <Field label="SADAD reference" hint="Optional"><Input data-testid="refund-reference" value={refund.reference} onChange={(e) => setRefund({ ...refund, reference: e.target.value })} /></Field>
+          <Field label="Note (internal)"><TextArea value={refund.note} onChange={(e) => setRefund({ ...refund, note: e.target.value })} /></Field>
+        </Modal>
       ) : null}
       {cancelOpen ? (
         <Modal

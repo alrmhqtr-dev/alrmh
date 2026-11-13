@@ -86,7 +86,7 @@ export default function Review() {
     >
       <Card>
         <View style={{ flexDirection: 'row', gap: 16, padding: 16, alignItems: 'center' }}>
-          <ThobeArt fill={colour?.hex} collar={state.collarId ?? undefined} height={90} />
+          <ThobeArt fill={colour?.hex} collar={collar?.shape ?? state.collarId ?? undefined} height={90} />
           <View style={{ flex: 1, gap: 4 }}>
             <Text variant="title">{t('review.custom')}</Text>
             {member ? (

@@ -30,7 +30,8 @@ export class BasketController {
 
   @Post('items')
   async add(@Me() me: Customer, @Body() body: AddBody) {
-    const qty = Math.max(1, Math.min(20, Number(body?.qty ?? 1)));
+    const qty = Number(body?.qty ?? 1);
+    if (!Number.isInteger(qty) || qty < 1 || qty > 20) fail('invalid_qty');
     if (body?.kind === 'product') {
       const p = await db.one('select id, sizes from products where id = $1 and active', [need(body.productId, 'productId')]);
       if (!p) throw new NotFoundException({ code: 'product_not_found' });

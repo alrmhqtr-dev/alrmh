@@ -7,7 +7,7 @@ import { date, money, num } from '../lib/format';
 import { Field, Input, Loading, Modal, PageHead, Select, useToast } from '../ui';
 
 type Option = { id: string; kind: 'discount' | 'product'; percent: number | null; product_id: string | null; product_name_en: string | null; cost_points: number; active: boolean; redeemed_count: number };
-type Coupon = { code: string; percent: number; max_discount: number | null; starts_at: string | null; expires_at: string | null; active: boolean; uses: number };
+type Coupon = { code: string; percent: number; max_discount: number | null; starts_at: string | null; expires_at: string | null; active: boolean; uses: number; per_customer_limit: number | null; max_uses: number | null; min_subtotal: number | null };
 
 export default function Rewards() {
   const { can } = useAuth();
@@ -34,7 +34,15 @@ export default function Rewards() {
   });
   const saveCp = useMutation({
     mutationFn: () => {
-      const body = { percent: Number(cp!.percent), max_discount: cp!.max_discount ? Number(cp!.max_discount) : null, expires_at: cp!.expires_at || null, active: cp!.active };
+      const body = {
+        percent: Number(cp!.percent),
+        max_discount: cp!.max_discount ? Number(cp!.max_discount) : null,
+        expires_at: cp!.expires_at || null,
+        active: cp!.active,
+        per_customer_limit: cp!.per_customer_limit ? Number(cp!.per_customer_limit) : null,
+        max_uses: cp!.max_uses ? Number(cp!.max_uses) : null,
+        min_subtotal: cp!.min_subtotal ? Number(cp!.min_subtotal) : null,
+      };
       return cp!.isNew ? api('/coupons', { body: { ...body, code: cp!.code } }) : api(`/coupons/${cp!.code}`, { method: 'PATCH', body });
     },
     onSuccess: () => {
@@ -75,10 +83,10 @@ export default function Rewards() {
       <div className="card">
         <div className="row spread" style={{ padding: '16px 18px 6px' }}>
           <h2>Coupon codes</h2>
-          {editable ? <button className="btn sm" data-testid="add-coupon" onClick={() => setCp({ isNew: true, code: '', percent: 10, max_discount: null, expires_at: '', active: true })}><Plus size={14} /> Add coupon</button> : null}
+          {editable ? <button className="btn sm" data-testid="add-coupon" onClick={() => setCp({ isNew: true, code: '', percent: 10, max_discount: null, expires_at: '', active: true, per_customer_limit: 1, max_uses: null, min_subtotal: null })}><Plus size={14} /> Add coupon</button> : null}
         </div>
         <table>
-          <thead><tr><th>Code</th><th>Discount</th><th>Expires</th><th className="right">Uses</th><th>Status</th></tr></thead>
+          <thead><tr><th>Code</th><th>Discount</th><th>Limits</th><th>Expires</th><th className="right">Uses</th><th>Status</th></tr></thead>
           <tbody>
             {coupons.data.map((c) => {
               const expired = c.expires_at && c.expires_at < now;
@@ -86,8 +94,11 @@ export default function Rewards() {
                 <tr key={c.code} className={editable ? 'click' : ''} data-testid={`coupon-${c.code}`} onClick={() => editable && setCp({ ...c, expires_at: c.expires_at?.slice(0, 10) ?? '' })}>
                   <td className="strong num">{c.code}</td>
                   <td>{c.percent}%{c.max_discount ? ` up to ${money(c.max_discount)}` : ''}</td>
+                  <td className="small">
+                    {[c.per_customer_limit ? `${c.per_customer_limit} per customer` : null, c.max_uses ? `${num(c.max_uses)} in total` : null, c.min_subtotal ? `min ${money(c.min_subtotal)}` : null].filter(Boolean).join(' · ') || 'No limits'}
+                  </td>
                   <td className="small">{c.expires_at ? date(c.expires_at) : 'No end date'}</td>
-                  <td className="right num">{c.uses}</td>
+                  <td className="right num">{c.uses}{c.max_uses ? ` / ${num(c.max_uses)}` : ''}</td>
                   <td>{!c.active ? <span className="badge">Off</span> : expired ? <span className="badge error">Expired</span> : <span className="badge ok">Live</span>}</td>
                 </tr>
               );
@@ -132,6 +143,9 @@ export default function Rewards() {
             <Field label="Discount (%)"><Input data-testid="coupon-percent" type="number" min={1} max={100} value={cp.percent ?? ''} onChange={(e) => setCp({ ...cp, percent: e.target.value as any })} /></Field>
             <Field label="Maximum discount (QAR)" hint="Blank for no cap"><Input type="number" min={0} value={cp.max_discount ?? ''} onChange={(e) => setCp({ ...cp, max_discount: (e.target.value || null) as any })} /></Field>
             <Field label="Expires on" hint="Blank for no end date"><Input type="date" value={cp.expires_at ?? ''} onChange={(e) => setCp({ ...cp, expires_at: e.target.value })} /></Field>
+            <Field label="Uses per customer" hint="Blank for no limit"><Input data-testid="coupon-per-customer" type="number" min={1} value={cp.per_customer_limit ?? ''} onChange={(e) => setCp({ ...cp, per_customer_limit: (e.target.value || null) as any })} /></Field>
+            <Field label="Total uses" hint="Blank for no limit"><Input data-testid="coupon-max-uses" type="number" min={1} value={cp.max_uses ?? ''} onChange={(e) => setCp({ ...cp, max_uses: (e.target.value || null) as any })} /></Field>
+            <Field label="Minimum subtotal (QAR)" hint="Blank for none"><Input data-testid="coupon-min" type="number" min={0} value={cp.min_subtotal ?? ''} onChange={(e) => setCp({ ...cp, min_subtotal: (e.target.value || null) as any })} /></Field>
           </div>
           <label className="check"><input type="checkbox" checked={cp.active} onChange={(e) => setCp({ ...cp, active: e.target.checked })} /> Active</label>
         </Modal>

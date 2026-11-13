@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { router } from 'expo-router';
 import { Info, Star } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
-import { useRewardOptions, type RewardOption } from '@/api/hooks';
+import { useCatalogue, useRewardOptions, type RewardOption } from '@/api/hooks';
 import { Button, Card, Icon, Loading, Note, Text, Touch } from '@/ui/primitives';
 import { Header, Screen } from '@/ui/layout';
 import { ProductArt } from '@/ui/art';
@@ -27,6 +27,7 @@ export function BalanceBar({ balance }: { balance: number }) {
 export default function Redeem() {
   const { t, f } = useLocale();
   const options = useRewardOptions();
+  const cat = useCatalogue();
   const [tab, setTab] = useState<'discounts' | 'products'>('discounts');
   const data = options.data;
 
@@ -89,7 +90,7 @@ export default function Redeem() {
                 const ok = o.short === 0;
                 return (
                   <View key={o.id} style={{ width: '47%', flexGrow: 1, gap: 6 }}>
-                    <ProductArt label={t('shop.render')} />
+                    <ProductArt label={t('shop.render')} uri={cat.data?.products.find((p) => p.id === o.product_id)?.image_url} />
                     <Text variant="smallStrong" numberOfLines={1}>
                       {f.name(o, 'product_name')}
                     </Text>

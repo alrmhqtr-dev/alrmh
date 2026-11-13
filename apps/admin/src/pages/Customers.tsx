@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Search } from 'lucide-react';
-import { api } from '../lib/api';
+import { Download, Search } from 'lucide-react';
+import { api, downloadCsv, errorMessage } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { date, money, num, phone } from '../lib/format';
-import { Empty, Loading, PageHead } from '../ui';
+import { Empty, Loading, PageHead, useToast } from '../ui';
 
 type Row = { id: string; name: string | null; phone: string; email: string | null; language: string; created_at: string; orders: number; spent: number; points: number };
 
 export default function Customers() {
   const [q, setQ] = useState('');
   const nav = useNavigate();
+  const { can } = useAuth();
+  const toast = useToast();
   const list = useQuery({ queryKey: ['customers', q], queryFn: () => api<Row[]>(`/customers${q ? `?q=${encodeURIComponent(q)}` : ''}`) });
   return (
     <div className="stack lg">
@@ -19,6 +22,11 @@ export default function Customers() {
           <Search size={16} style={{ position: 'absolute', left: 12, color: 'var(--muted)' }} />
           <input className="input" data-testid="customer-search" placeholder="5555 1234 or name" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 34, width: 260 }} autoFocus />
         </div>
+        {can('owner', 'manager') ? (
+          <button className="btn secondary" data-testid="export-customers" onClick={() => downloadCsv('/export/customers.csv', 'alrmh-customers.csv').catch((e) => toast(errorMessage(e), 'error'))}>
+            <Download size={16} /> Export
+          </button>
+        ) : null}
       </PageHead>
       <div className="card table-wrap">
         {!list.data ? (

@@ -6,19 +6,35 @@ import { CustomerGuard, Me, type Customer } from '../auth.js';
 import { fail } from '../lib.js';
 import { quote, type QuoteInput } from '../pricing.js';
 import { closePayment, createOrder, markPaid, stagesFor } from '../orders.js';
+import { CHECKOUT_MINUTES } from '../housekeeping.js';
 
+/**
+ * Where the customer goes after paying. Only the app's own addresses are
+ * accepted: the web app's exact origin (or another allowed origin), or the
+ * native app's own link scheme. Anything else falls back to the web app.
+ */
 function allowedReturn(url: string | undefined) {
   if (!url) return config.appUrl;
   try {
     const u = new URL(url);
-    if (!/^https?:$/.test(u.protocol) && !u.protocol.startsWith('alrmh')) return config.appUrl;
-    if (config.corsOrigins.includes('*') || config.corsOrigins.includes(u.origin) || url.startsWith(config.appUrl)) return url.replace(/\/$/, '');
+    if (u.protocol === `${config.appScheme}:`) return `${config.appScheme}:/`;
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      const origins = new Set([new URL(config.appUrl).origin, ...config.corsOrigins.filter((o) => o !== '*')]);
+      const anyOrigin = !config.production && config.corsOrigins.includes('*');
+      if (origins.has(u.origin) || anyOrigin) return url.replace(/\/$/, '');
+    }
   } catch {}
   return config.appUrl;
 }
 
+/** The test payment page exists only in test mode; with real payments it is not there at all. */
+function mockOnly() {
+  if (config.paymentMode !== 'mock') throw new NotFoundException({ code: 'not_found' });
+}
+
 const ORDER_SUMMARY = `
   o.id, o.number, o.stage, o.total, o.created_at, o.expected_delivery, o.points_to_earn, o.points_awarded,
+  (select max(e.at) from order_events e where e.order_id = o.id and e.stage in ('delivered','cancelled')) as closed_at,
   (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id) as item_count,
   (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobe_count,
   (select array_agg(distinct i.snapshot->'member'->>'name') from order_items i where i.order_id = o.id and i.kind = 'thobe') as members`;
@@ -56,7 +72,8 @@ export class OrdersController {
   @UseGuards(CustomerGuard)
   async detail(@Me() me: Customer, @Param('id') id: string) {
     const order = await db.one(
-      `select o.*, (select status from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_status
+      `select o.*, (select status from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_status,
+              (select coalesce(sum(amount),0)::float from refunds r where r.order_id = o.id) as refunded
          from orders o where o.id = $1 and o.customer_id = $2`,
       [id, me.id],
     );
@@ -76,6 +93,7 @@ export class OrdersController {
 
   @Get('pay/mock/:paymentId')
   async mockPage(@Param('paymentId') paymentId: string, @Query('return') ret: string, @Res() res: Response) {
+    mockOnly();
     const p = await db.one('select p.id, p.amount, p.status, o.number from payments p join orders o on o.id = p.order_id where p.id = $1', [paymentId]);
     if (!p) return res.status(404).send('Payment not found');
     const action = `${config.apiUrl}/v1/pay/mock/${paymentId}?return=${encodeURIComponent(ret ?? '')}`;
@@ -98,10 +116,14 @@ ${p.status === 'pending' ? `<button class="pay" name="result" value="paid">Pay Q
 
   @Post('pay/mock/:paymentId')
   async mockComplete(@Param('paymentId') paymentId: string, @Query('return') ret: string, @Body() body: { result?: string }, @Res() res: Response) {
+    mockOnly();
     const base = allowedReturn(ret);
-    const p = await db.one('select order_id from payments where id = $1', [paymentId]);
+    const p = await db.one(`select order_id, status, created_at < now() - ($2 || ' minutes')::interval as expired from payments where id = $1`, [paymentId, String(CHECKOUT_MINUTES)]);
     if (!p) return res.status(404).send('Payment not found');
     if (body?.result === 'paid') {
+      // A checkout that was replaced by a newer one, or left open too long, can no longer be paid.
+      if (p.status === 'pending' && p.expired) await closePayment(paymentId, 'cancelled');
+      if ((p.status !== 'pending' && p.status !== 'paid') || (p.status === 'pending' && p.expired)) return res.redirect(303, `${base}/checkout?payment=cancelled`);
       const orderId = await markPaid(paymentId, `MOCK-${Date.now()}`);
       return res.redirect(303, `${base}/order-placed/${orderId}`);
     }

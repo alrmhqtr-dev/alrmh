@@ -56,7 +56,7 @@ const rewardOptions = [
   ['product-sandals', 'product', null, 'leather-sandals', 2600],
 ];
 
-export async function seed({ demo = true } = {}) {
+export async function seed({ demo = false } = {}) {
   await migrate();
   await db.tx(async (c) => {
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
@@ -71,7 +71,7 @@ export async function seed({ demo = true } = {}) {
       );
     }
     for (const [i, [id, en, ar]] of collars.entries()) {
-      await c.query('insert into collars (id, name_en, name_ar, sort) values ($1,$2,$3,$4) on conflict (id) do nothing', [id, en, ar, i]);
+      await c.query('insert into collars (id, name_en, name_ar, sort, shape) values ($1,$2,$3,$4,$1) on conflict (id) do nothing', [id, en, ar, i]);
     }
     for (const [i, f] of fabrics.entries()) {
       await c.query('insert into fabrics (id, name_en, name_ar, note_en, note_ar, price, sort) values ($1,$2,$3,$4,$5,$6,$7) on conflict (id) do nothing', [...f, i]);
@@ -91,10 +91,13 @@ export async function seed({ demo = true } = {}) {
     for (const [i, r] of rewardOptions.entries()) {
       await c.query('insert into reward_options (id, kind, percent, product_id, cost_points, sort) values ($1,$2,$3,$4,$5,$6) on conflict (id) do nothing', [...r, i]);
     }
-    await c.query(`insert into coupons (code, percent, max_discount, expires_at) values ('EID20', 20, 100, now() + interval '1 year') on conflict do nothing`);
-    await c.query(`insert into coupons (code, percent, max_discount, expires_at) values ('SUMMER24', 15, null, '2024-09-30') on conflict do nothing`);
   });
-  if (demo) await seedDemoCustomer();
+  if (demo) {
+    // Sample coupons are demo data: a real launch must not start with a live 20% code.
+    await db.pool.query(`insert into coupons (code, percent, max_discount, expires_at) values ('EID20', 20, 100, now() + interval '1 year') on conflict do nothing`);
+    await db.pool.query(`insert into coupons (code, percent, max_discount, expires_at) values ('SUMMER24', 15, null, '2024-09-30') on conflict do nothing`);
+    await seedDemoCustomer();
+  }
 }
 
 const DEMO_PHONE = '+97455551234';
@@ -195,7 +198,7 @@ async function seedDemoCustomer() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  seed({ demo: process.env.SEED_DEMO !== 'false' })
+  seed({ demo: process.env.SEED_DEMO === 'true' })
     .then(() => db.pool.end())
     .catch((e) => {
       console.error(e);

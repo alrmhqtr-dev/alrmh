@@ -14,7 +14,7 @@ import { BottomBar, Header, Screen, Sheet, goBack } from '@/ui/layout';
 import { colors, radius } from '@/theme/tokens';
 
 export default function Book() {
-  const params = useLocalSearchParams<{ kind?: string; memberId?: string; mode?: string; appointmentId?: string; standalone?: string; startsAt?: string }>();
+  const params = useLocalSearchParams<{ kind?: string; memberId?: string; mode?: string; appointmentId?: string; standalone?: string; startsAt?: string; branchId?: string }>();
   const mode = params.mode ?? (params.standalone ? 'standalone' : 'builder');
   const { t, f } = useLocale();
   const qc = useQueryClient();
@@ -24,7 +24,11 @@ export default function Book() {
   const addresses = useAddresses();
   const [kind, setKind] = useState<'branch' | 'home'>(params.kind === 'home' ? 'home' : 'branch');
   const [memberId, setMemberId] = useState<string | undefined>(params.memberId || undefined);
-  const branch = cat.data?.branches[0];
+  const branches = cat.data?.branches ?? [];
+  const [branchId, setBranchId] = useState<string | undefined>(params.branchId || undefined);
+  // A visit being rescheduled stays at its branch; otherwise the customer picks one when there are several.
+  const branch = branches.find((b) => b.id === branchId) ?? branches[0];
+  const canPickBranch = branches.length > 1 && mode !== 'reschedule';
   const [addressId, setAddressId] = useState<string | null>(null);
   const [pickAddress, setPickAddress] = useState(false);
   const slots = useSlots(kind, branch?.id);
@@ -114,15 +118,27 @@ export default function Book() {
       <View style={{ gap: 10 }}>
         <Text variant="bodyStrong">{kind === 'home' ? t('book.home') : t('book.branch')}</Text>
         {kind === 'branch' ? (
-          <Card selected style={{ padding: 14, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <IconTile icon={Store} />
-            <View style={{ flex: 1 }}>
-              <Text variant="bodyStrong">{f.name(branch)}</Text>
-              <Text variant="small" color={colors.textSecondary}>
-                {f.name(branch, 'address')}
-              </Text>
-            </View>
-          </Card>
+          (canPickBranch ? branches : branch ? [branch] : []).map((b) => {
+            const on = b.id === branch?.id;
+            return (
+              <Card
+                key={b.id}
+                testID={`branch-${b.id}`}
+                selected={on}
+                onPress={canPickBranch ? () => { setBranchId(b.id); setDate(null); setTime(null); } : undefined}
+                style={{ padding: 14, flexDirection: 'row', alignItems: 'center', gap: 14 }}
+              >
+                <IconTile icon={Store} dark={on && canPickBranch} />
+                <View style={{ flex: 1 }}>
+                  <Text variant="bodyStrong">{f.name(b)}</Text>
+                  <Text variant="small" color={colors.textSecondary}>
+                    {f.name(b, 'address')}
+                  </Text>
+                </View>
+                {canPickBranch ? <Radio on={on} /> : null}
+              </Card>
+            );
+          })
         ) : address ? (
           <Card selected style={{ padding: 14, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <IconTile icon={MapPin} />

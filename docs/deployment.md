@@ -20,12 +20,12 @@ Create the key and SSH alias:
 
 ```bash
 cd /Users/owaisiqbal
-ssh-keygen -t ed25519 -C "alrmh-deploy" -f /Users/owaisiqbal/.ssh/alrmh_ed25519 -N ""
+ssh-keygen -t ed25519 -C "alrmh-deploy" -f /Users/owaisiqbal/.ssh/alrmh_ed25519
 printf '\nHost github-alrmh\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/alrmh_ed25519\n  IdentitiesOnly yes\n' >> /Users/owaisiqbal/.ssh/config
 pbcopy < /Users/owaisiqbal/.ssh/alrmh_ed25519.pub
 ```
 
-Add the copied key in GitHub: repo > Settings > Deploy keys > Add deploy key, tick **Allow write access**.
+Set a passphrase when `ssh-keygen` asks. Add the copied key in GitHub: repo > Settings > Deploy keys > Add deploy key, tick **Allow write access**.
 
 Push:
 
@@ -55,12 +55,17 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request: frozen inst
 | `CORS_ORIGINS` | `https://app.alrmh.qa,https://admin.alrmh.qa` | Comma separated, no trailing slash. Add the `*.vercel.app` addresses until custom domains are live |
 | `ADMIN_EMAIL` | owner's email | First owner account, created on first start |
 | `ADMIN_PASSWORD` | a long random password | Change it after first sign-in |
-| `OTP_MODE` | `preview` | Login code is always `OTP_PREVIEW_CODE` until SMS is connected |
+| `OTP_MODE` | `preview` | Login code is always `OTP_PREVIEW_CODE` until SMS is connected. If unset in production the API uses `sms`, which refuses to issue codes until a provider is wired |
 | `OTP_PREVIEW_CODE` | `123456` | |
-| `PAYMENT_MODE` | `mock` | Test SADAD page until the merchant account is ready |
-| `SEED_ON_START` | `true` | Loads the catalogue if empty; safe to leave on |
-| `SEED_DEMO` | `true` for preview, `false` for launch | Demo customer `5555 1234` with orders and points |
+| `PAYMENT_MODE` | `mock` | Test SADAD page until the merchant account is ready. If unset in production the API uses `sadad` and the test page does not exist |
+| `SEED_ON_START` | `true` | Loads the sample catalogue, branch and settings if missing. Replace them with the real ones in the admin before launch |
+| `SEED_DEMO` | `true` for preview, `false` for launch | Demo customer `5555 1234` with orders and points, and the coupons `EID20` and `SUMMER24`. Only `true` loads them |
 | `MIGRATE_ON_START` | `false` | Migrations run in the pre-deploy step instead |
+| `VAPID_PUBLIC_KEY` | from `npx web-push generate-vapid-keys` | Push notifications. Create once and keep; changing it means every phone turns notifications on again |
+| `VAPID_PRIVATE_KEY` | from the same command | Secret |
+| `VAPID_SUBJECT` | `mailto:` + a support email | Shown to push services if they need to reach you |
+| `QUIET_HOURS` | leave unset | Defaults to `22-8`: visit and points reminders wait until 8 am Doha time |
+| `HOUSEKEEPING_SECONDS` | leave unset | Defaults to 600 (every 10 minutes) |
 
 `PORT` is set by Railway; do not add it.
 
@@ -129,6 +134,7 @@ Bundle identifier and Android package are both `qa.alrmh.app`.
 
 - Connect SMS: set `OTP_MODE` to the provider mode and its keys.
 - Connect SADAD: set `PAYMENT_MODE` and the merchant keys.
-- Set `SEED_DEMO=false` and remove demo data from the production database.
+- Set `SEED_DEMO=false` and remove demo data from the production database (the demo customer and the `EID20` and `SUMMER24` coupons).
+- Replace the sample catalogue, prices, branch details and support numbers in the admin.
 - Rotate `ADMIN_PASSWORD` and add staff from the admin Staff page.
 - Turn on Railway database backups.

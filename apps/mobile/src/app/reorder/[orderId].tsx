@@ -87,7 +87,7 @@ export default function Reorder() {
       </Text>
       <Card>
         <View style={{ flexDirection: 'row', gap: 16, padding: 16, alignItems: 'center' }}>
-          <ThobeArt fill={colour?.hex} collar={s.thobe.collar.id} height={90} />
+          <ThobeArt fill={colour?.hex} collar={s.thobe.collar.shape ?? s.thobe.collar.id} height={90} />
           <View style={{ flex: 1, gap: 4 }}>
             <Text variant="title">{t('review.custom')}</Text>
             <Text variant="small" color={colors.textSecondary}>

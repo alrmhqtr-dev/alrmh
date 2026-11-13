@@ -7,7 +7,8 @@ import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
 import { useSession } from '@/state/session';
 import { useMe } from '@/api/hooks';
-import { Avatar, Button, Card, Divider, EmptyState, ListRow, Loading, Overline, Text } from '@/ui/primitives';
+import { errorText } from '@/lib/errors';
+import { Avatar, Button, Card, Divider, EmptyState, ListRow, Loading, Note, Overline, Text } from '@/ui/primitives';
 import { Screen, Sheet } from '@/ui/layout';
 import { colors } from '@/theme/tokens';
 
@@ -18,6 +19,7 @@ export default function Account() {
   const me = useMe();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const group = (title: string, rows: React.ReactNode[]) => (
     <View style={{ gap: 10 }}>
@@ -61,7 +63,7 @@ export default function Account() {
         <Loading />
       ) : (
         <>
-          <Card style={{ padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <Card testID="profile-card" onPress={() => router.push('/account/profile')} style={{ padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <Avatar name={m.name ?? '?'} dark size={56} />
             <View style={{ flex: 1 }}>
               <Text variant="title">{m.name}</Text>
@@ -69,6 +71,7 @@ export default function Account() {
                 {f.phone(m.phone)}
               </Text>
             </View>
+            <Text variant="smallStrong">{t('common.edit')}</Text>
           </Card>
           {group(t('account.tailoring'), [
             <ListRow key="fam" icon={Users} title={t('account.family')} subtitle={t('account.familySub', { n: m.counts.family })} onPress={() => router.push('/account/family')} testID="row-family" />,
@@ -81,7 +84,7 @@ export default function Account() {
           ])}
           {support}
           <Button testID="logout" label={t('account.logout')} kind="secondary" icon={LogOut} onPress={signOut} />
-          <Button label={t('account.delete')} kind="ghost" icon={Trash2} onPress={() => setConfirmDelete(true)} />
+          <Button label={t('account.delete')} kind="ghost" icon={Trash2} onPress={() => { setDeleteError(null); setConfirmDelete(true); }} />
         </>
       )}
       <Sheet visible={confirmDelete} onClose={() => setConfirmDelete(false)}>
@@ -89,22 +92,29 @@ export default function Account() {
         <Text variant="body" color={colors.textSecondary} style={{ marginTop: 8 }}>
           {t('account.deleteQ')}
         </Text>
+        {deleteError ? <View style={{ marginTop: 12 }}><Note tone="error">{deleteError}</Note></View> : null}
         <View style={{ gap: 6, marginTop: 20 }}>
           <Button
+            testID="delete-confirm"
             label={t('account.deleteCta')}
             kind="danger"
             loading={deleting}
             onPress={async () => {
               setDeleting(true);
+              setDeleteError(null);
               try {
                 await api('/me', { method: 'DELETE' });
-              } finally {
+              } catch (e) {
+                // Still signed in and nothing was deleted: say why instead of pretending it worked.
+                setDeleteError(errorText(t, e));
                 setDeleting(false);
-                setConfirmDelete(false);
-                qc.clear();
-                await signOut();
-                router.replace('/onboarding/welcome');
+                return;
               }
+              setDeleting(false);
+              setConfirmDelete(false);
+              qc.clear();
+              await signOut();
+              router.replace('/onboarding/welcome');
             }}
           />
           <Button label={t('common.cancel')} kind="ghost" onPress={() => setConfirmDelete(false)} />

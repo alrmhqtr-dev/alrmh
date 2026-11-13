@@ -63,6 +63,38 @@ export class FamilyController {
     return { id: member.id, name: member.name, relation: member.relation, size: member.size, latest: history[0] ?? null, history };
   }
 
+  @Patch('family/:id')
+  async editMember(@Me() me: Customer, @Param('id') id: string, @Body() body: { name?: string; relation?: string; size?: string }) {
+    const member = await memberFor(me.id, id);
+    // The account holder's own entry follows the profile name.
+    if (member.relation === 'self') fail('cannot_edit_self');
+    const name = body?.name !== undefined ? String(body.name).trim().slice(0, 60) : member.name;
+    if (!name) fail('missing_field', { field: 'name' });
+    if (body?.relation !== undefined && !RELATIONS.includes(body.relation)) fail('invalid_relation');
+    const size = body?.size === undefined ? member.size : body.size === 'child' ? 'child' : 'adult';
+    return db.one('update family_members set name = $2, relation = $3, size = $4 where id = $1 returning id, name, relation, size', [id, name, body?.relation ?? member.relation, size]);
+  }
+
+  @Delete('family/:id')
+  async removeMember(@Me() me: Customer, @Param('id') id: string) {
+    const member = await memberFor(me.id, id);
+    if (member.relation === 'self') fail('cannot_edit_self');
+    // Removing a person removes their measurements, which the workshop still needs while an order is open.
+    const busy = await db.one(
+      `select
+         exists (select 1 from appointments where member_id = $1 and status in ('held','confirmed') and starts_at > now()) as booked,
+         exists (select 1 from basket_items where member_id = $1) as in_basket,
+         exists (select 1 from order_items i join orders o on o.id = i.order_id
+                  where i.snapshot->'member'->>'id' = $1::text and o.stage not in ('delivered','cancelled','pending_payment','payment_failed')) as on_order`,
+      [id],
+    );
+    if (busy.on_order) fail('member_has_order');
+    if (busy.booked) fail('member_has_booking');
+    if (busy.in_basket) fail('member_in_basket');
+    await db.pool.query('delete from family_members where id = $1 and customer_id = $2', [id, me.id]);
+    return { ok: true };
+  }
+
   @Get('addresses')
   addresses(@Me() me: Customer) {
     return db.many('select id, label, line1, area, city, notes, is_default from addresses where customer_id = $1 order by is_default desc, created_at', [me.id]);
@@ -86,10 +118,25 @@ export class FamilyController {
   }
 
   @Patch('addresses/:id')
-  async updateAddress(@Me() me: Customer, @Param('id') id: string, @Body() body: { isDefault?: boolean }) {
-    const a = await db.one('select id from addresses where id = $1 and customer_id = $2', [id, me.id]);
+  async updateAddress(@Me() me: Customer, @Param('id') id: string, @Body() body: { label?: string; line1?: string; area?: string; notes?: string | null; isDefault?: boolean }) {
+    const a = await db.one('select * from addresses where id = $1 and customer_id = $2', [id, me.id]);
     if (!a) throw new NotFoundException({ code: 'not_found' });
-    if (body.isDefault) {
+    const pick = (v: unknown, cur: string, field: string, max: number) => {
+      if (v === undefined) return cur;
+      const s = String(v).trim().slice(0, max);
+      if (!s) fail('missing_field', { field });
+      return s;
+    };
+    if (body?.label !== undefined || body?.line1 !== undefined || body?.area !== undefined || body?.notes !== undefined) {
+      await db.pool.query('update addresses set label = $2, line1 = $3, area = $4, notes = $5 where id = $1', [
+        id,
+        pick(body.label, a.label, 'label', 30),
+        pick(body.line1, a.line1, 'line1', 160),
+        pick(body.area, a.area, 'area', 60),
+        body.notes === undefined ? a.notes : body.notes ? String(body.notes).trim().slice(0, 200) : null,
+      ]);
+    }
+    if (body?.isDefault) {
       await db.tx(async (c) => {
         await c.query('update addresses set is_default = false where customer_id = $1', [me.id]);
         await c.query('update addresses set is_default = true where id = $1', [id]);
@@ -100,7 +147,20 @@ export class FamilyController {
 
   @Delete('addresses/:id')
   async deleteAddress(@Me() me: Customer, @Param('id') id: string) {
-    await db.pool.query('delete from addresses where id = $1 and customer_id = $2', [id, me.id]);
+    const booked = await db.one(`select 1 from appointments where address_id = $1 and status in ('held','confirmed') and starts_at > now() limit 1`, [id]);
+    if (booked) fail('address_has_booking');
+    // Past visits keep their record without the address.
+    await db.tx(async (c) => {
+      const mine = await db.one('select 1 from addresses where id = $1 and customer_id = $2', [id, me.id], c);
+      if (!mine) return;
+      await c.query('update appointments set address_id = null where address_id = $1', [id]);
+      await c.query('delete from addresses where id = $1 and customer_id = $2', [id, me.id]);
+      await c.query(
+        `update addresses set is_default = true where id = (select id from addresses where customer_id = $1 order by created_at limit 1)
+           and not exists (select 1 from addresses where customer_id = $1 and is_default)`,
+        [me.id],
+      );
+    });
     return { ok: true };
   }
 }

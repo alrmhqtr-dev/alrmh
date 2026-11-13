@@ -24,13 +24,13 @@ export function useDesignData() {
 export function ThobePreview({ height = 200 }: { height?: number }) {
   const { t } = useLocale();
   const { state } = useBuilder();
-  const { colour } = useDesignData();
+  const { colour, collar } = useDesignData();
   return (
     <Card style={{ height: height + 16, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 4 }}>
       <Text variant="caption" color={colors.textSecondary} style={{ position: 'absolute', top: 14, start: 18 }}>
         {t('design.preview')}
       </Text>
-      <ThobeArt fill={colour?.hex ?? '#FFFFFF'} collar={state.collarId ?? undefined} height={height - 24} />
+      <ThobeArt fill={colour?.hex ?? '#FFFFFF'} collar={collar?.shape ?? state.collarId ?? undefined} height={height - 24} />
     </Card>
   );
 }

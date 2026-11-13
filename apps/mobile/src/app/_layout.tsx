@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Platform, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { AppState, Platform, View } from 'react-native';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
 import { ReadexPro_400Regular, ReadexPro_500Medium, ReadexPro_600SemiBold, ReadexPro_700Bold } from '@expo-google-fonts/readex-pro';
 import { ArefRuqaa_400Regular, ArefRuqaa_700Bold } from '@expo-google-fonts/aref-ruqaa';
@@ -14,11 +14,16 @@ import { SessionProvider } from '@/state/session';
 import { BuilderProvider } from '@/state/builder';
 import { colors } from '@/theme/tokens';
 import { ApiError } from '@/api/client';
+import { CrashScreen, useRememberPath } from '@/ui/crash';
+
+// Any screen that fails to draw shows this instead of a blank page.
+export const ErrorBoundary = CrashScreen;
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function Shell() {
   const { isRTL } = useLocale();
+  useRememberPath(usePathname());
   return (
     <View style={{ flex: 1, direction: isRTL ? 'rtl' : 'ltr', backgroundColor: Platform.OS === 'web' ? '#EDEAE4' : colors.canvas }}>
       <View
@@ -67,6 +72,14 @@ export default function RootLayout() {
   useEffect(() => {
     if (loaded) SplashScreen.hideAsync().catch(() => {});
   }, [loaded]);
+
+  // The browser reports this by itself; on iOS and Android the app has to pass it on,
+  // so data refreshes when the customer returns to the app and pauses while it is away.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const sub = AppState.addEventListener('change', (state) => focusManager.setFocused(state === 'active'));
+    return () => sub.remove();
+  }, []);
 
   if (!loaded) return null;
 

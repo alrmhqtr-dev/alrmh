@@ -2,12 +2,13 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Bell, CalendarCheck, Clock, Scissors, Star } from 'lucide-react-native';
+import { Bell, CalendarCheck, CalendarClock, Clock, Scissors, Star } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
 import { useNotifications } from '@/api/hooks';
 import { Card, Divider, EmptyState, IconTile, Loading, Text, Touch } from '@/ui/primitives';
 import { Header, Screen } from '@/ui/layout';
+import { PushCard } from '@/ui/push';
 import { colors } from '@/theme/tokens';
 
 export default function Notifications() {
@@ -30,7 +31,8 @@ export default function Notifications() {
   };
 
   return (
-    <Screen header={<Header title={t('notifications.title')} />} contentStyle={{ paddingTop: 8 }}>
+    <Screen header={<Header title={t('notifications.title')} />} contentStyle={{ paddingTop: 8, gap: 14 }}>
+      <PushCard />
       {list.isLoading ? (
         <Loading />
       ) : !list.data?.length ? (
@@ -41,7 +43,7 @@ export default function Notifications() {
             <View key={n.id}>
               {i ? <Divider /> : null}
               <Touch onPress={() => n.link && router.push(n.link as any)} style={{ flexDirection: 'row', gap: 14, padding: 16, backgroundColor: n.read_at ? colors.surface : colors.goldSoft }}>
-                <IconTile icon={n.kind === 'points' ? (n.title_en.includes('expire') ? Clock : Star) : n.kind === 'appointment' ? CalendarCheck : n.kind === 'measurement' ? CalendarCheck : Scissors} gold={n.kind === 'points'} />
+                <IconTile icon={n.kind === 'points' ? (n.title_en.includes('expire') ? Clock : Star) : n.kind === 'appointment' ? CalendarCheck : n.kind === 'reminder' ? CalendarClock : n.kind === 'measurement' ? CalendarCheck : Scissors} gold={n.kind === 'points'} />
                 <View style={{ flex: 1, gap: 2 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
                     <Text variant="bodyStrong" style={{ flex: 1 }}>

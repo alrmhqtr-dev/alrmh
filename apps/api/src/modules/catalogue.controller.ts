@@ -2,14 +2,14 @@ import { Controller, Get, NotFoundException, Param } from '@nestjs/common';
 import { db } from '../db.js';
 import { getSettings } from '../lib.js';
 
-export const CATEGORIES = ['ghutra', 'agal', 'sandals', 'fragrance', 'accessories'] as const;
+export const COLLAR_SHAPES = ['classic-qatari', 'mandarin-band', 'round-neck', 'wide-collar'] as const;
 
 @Controller('v1')
 export class CatalogueController {
   @Get('catalogue')
   async catalogue() {
-    const [collars, fabrics, colours, fabricColours, products, branches, settings] = await Promise.all([
-      db.many('select id, name_en, name_ar from collars where active order by sort'),
+    const [collars, fabrics, colours, fabricColours, products, branches, settings, categories] = await Promise.all([
+      db.many('select id, name_en, name_ar, shape from collars where active order by sort'),
       db.many('select id, name_en, name_ar, note_en, note_ar, price from fabrics where active order by sort'),
       db.many('select id, name_en, name_ar, hex from colours order by sort'),
       db.many('select fabric_id, colour_id from fabric_colours'),
@@ -19,12 +19,13 @@ export class CatalogueController {
            from branches where active order by sort`,
       ),
       getSettings(),
+      db.many('select id, name_en, name_ar from categories where active order by sort, name_en'),
     ]);
     return {
       collars,
       fabrics: fabrics.map((f) => ({ ...f, colour_ids: fabricColours.filter((x) => x.fabric_id === f.id).map((x) => x.colour_id) })),
       colours,
-      categories: CATEGORIES,
+      categories,
       products,
       branches,
       settings: {

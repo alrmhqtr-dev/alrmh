@@ -55,6 +55,12 @@ jobs:
       SEED_DEMO: 'true'
       OTP_MODE: preview
       PAYMENT_MODE: mock
+      APP_URL: http://localhost:8081
+      CORS_ORIGINS: http://localhost:8081
+      RATE_LIMITS: 'off'
+      PUSH_HOSTS: 127.0.0.1
+      HOUSEKEEPING_SECONDS: '5'
+      QUIET_HOURS: 'off'
       ADMIN_EMAIL: owner@alrmh.qa
       ADMIN_PASSWORD: ci-owner-password
     steps:
@@ -75,8 +81,16 @@ jobs:
         working-directory: apps/api
         run: node dist/migrate.js
 
+      - name: Push keys and a test push receiver certificate, for this run only
+        working-directory: apps/api
+        run: |
+          node -e "const k=require('web-push').generateVAPIDKeys();console.log('VAPID_PUBLIC_KEY='+k.publicKey+'\\nVAPID_PRIVATE_KEY='+k.privateKey)" >> "$GITHUB_ENV"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" -addext "subjectAltName=IP:127.0.0.1" -keyout /tmp/push-test.key -out /tmp/push-test.crt 2>/dev/null
+
       - name: Start API
         working-directory: apps/api
+        env:
+          NODE_EXTRA_CA_CERTS: /tmp/push-test.crt
         run: |
           node dist/main.js > /tmp/api.log 2>&1 &
           for i in $(seq 1 30); do
@@ -91,6 +105,105 @@ jobs:
         env:
           API: http://localhost:4000
 
+      - name: Regression checks
+        run: python3 apps/api/scripts/regress.py
+        env:
+          API: http://localhost:4000
+          PUSH_TEST_CERT: /tmp/push-test.crt
+          PUSH_TEST_KEY: /tmp/push-test.key
+
       - name: API log
         if: failure()
         run: cat /tmp/api.log
+
+  browser:
+    name: Browser journey and accessibility
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: alrmh
+          POSTGRES_PASSWORD: alrmh
+          POSTGRES_DB: alrmh
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alrmh"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://alrmh:alrmh@localhost:5432/alrmh
+      PORT: 4000
+      MIGRATE_ON_START: 'false'
+      SEED_ON_START: 'true'
+      SEED_DEMO: 'true'
+      OTP_MODE: preview
+      PAYMENT_MODE: mock
+      APP_URL: http://localhost:8081
+      CORS_ORIGINS: http://localhost:8081,http://localhost:5174
+      RATE_LIMITS: 'off'
+      ADMIN_EMAIL: owner@alrmh.qa
+      ADMIN_PASSWORD: ci-owner-password
+      EXPO_PUBLIC_API_URL: http://localhost:4000
+      VITE_API_URL: http://localhost:4000
+      API: http://localhost:4000
+      APP: http://localhost:8081
+      ADMIN: http://localhost:5174
+      SHOTS: /tmp/e2e-shots
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm turbo run build
+
+      - run: pip install playwright==1.63.0
+
+      - name: Accessibility checker
+        run: npm install --prefix /tmp/axe axe-core@4
+
+      - name: Run migrations
+        working-directory: apps/api
+        run: node dist/migrate.js
+
+      - name: Start the API, the customer app and the admin
+        run: |
+          (cd apps/api && node dist/main.js > /tmp/api.log 2>&1 &)
+          (cd apps/mobile && PORT=8081 node scripts/serve.mjs > /tmp/app.log 2>&1 &)
+          (cd apps/admin && pnpm exec vite preview --port 5174 --strictPort > /tmp/admin.log 2>&1 &)
+          for i in $(seq 1 40); do
+            curl -sf http://localhost:4000/health && curl -sf http://localhost:8081/healthz && curl -sf -o /dev/null http://localhost:5174/ && exit 0
+            sleep 1
+          done
+          cat /tmp/api.log /tmp/app.log /tmp/admin.log
+          exit 1
+
+      - name: Full journey in English and Arabic, admin included
+        run: python3 tests/e2e/journey.py
+
+      - name: Accessibility of 25 screens in both languages
+        run: python3 tests/e2e/a11y.py
+        env:
+          AXE: /tmp/axe/node_modules/axe-core/axe.min.js
+
+      - name: Screenshots and logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-output
+          path: |
+            /tmp/e2e-shots
+            /tmp/api.log

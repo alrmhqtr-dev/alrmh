@@ -58,14 +58,9 @@ export default function ProductScreen() {
       }
       contentStyle={{ gap: 16 }}
     >
-      <ProductArt label={t('product.renderFromClient')} style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, aspectRatio: 0.95 }} />
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
-        <View style={{ width: 18, height: 6, borderRadius: 3, backgroundColor: colors.inverse }} />
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.border }} />
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.border }} />
-      </View>
+      <ProductArt label={t('product.renderFromClient')} uri={product.image_url} style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, aspectRatio: 0.95 }} />
       <View style={{ gap: 6 }}>
-        <Text variant="overline">{t(`cat.${product.category}` as any)}</Text>
+        <Text variant="overline">{f.name(cat.data?.categories.find((c) => c.id === product.category)) || product.category}</Text>
         <Text variant="h1">{f.name(product)}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Text variant="price">{f.money(product.price)}</Text>

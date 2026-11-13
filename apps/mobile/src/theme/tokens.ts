@@ -6,7 +6,7 @@ export const colors = {
   inverseSoft: '#262626',
   text: '#0B0B0B',
   textSecondary: '#4A4A4A',
-  textMuted: '#8A8A8A',
+  textMuted: '#666666',
   textInverse: '#FFFFFF',
   border: '#E8E2D6',
   borderStrong: '#0B0B0B',

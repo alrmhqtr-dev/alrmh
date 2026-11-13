@@ -40,7 +40,7 @@ export function Header({
           <IconButton
             icon={close ? X : android ? ArrowLeft : ChevronLeft}
             flip={!close}
-            label={close ? t('common.close') : 'Back'}
+            label={close ? t('common.close') : t('a11y.back')}
             onPress={onBack ?? (() => goBack())}
           />
         ) : null}
@@ -58,9 +58,10 @@ export function Header({
 }
 
 export function BagButton() {
+  const { t } = useLocale();
   const { signedIn } = useSession();
   const me = useMe();
-  return <IconButton icon={ShoppingBag} label="Basket" badge={signedIn ? me.data?.counts.basket : undefined} onPress={() => router.push('/basket')} />;
+  return <IconButton icon={ShoppingBag} label={t('a11y.basket')} badge={signedIn ? me.data?.counts.basket : undefined} onPress={() => router.push('/basket')} />;
 }
 
 export function Screen({
@@ -85,7 +86,7 @@ export function Screen({
   const insets = useSafeAreaInsets();
   const pad: ViewStyle = padded ? { paddingHorizontal: 20 } : {};
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView role="main" style={{ flex: 1, backgroundColor: bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {header ?? <View style={{ height: insets.top }} />}
       {scroll ? (
         <ScrollView
@@ -93,6 +94,7 @@ export function Screen({
           contentContainerStyle={[pad, { paddingBottom: footer ? 24 : 32 + insets.bottom }, contentStyle]}
           keyboardShouldPersistTaps="handled"
           refreshControl={refreshControl}
+          focusable={Platform.OS === 'web'}
         >
           {children}
         </ScrollView>
@@ -142,11 +144,14 @@ export function BottomBar({ children, label, value, sub }: { children: ReactNode
 
 export function Sheet({ visible, onClose, children }: { visible: boolean; onClose: () => void; children: ReactNode }) {
   const insets = useSafeAreaInsets();
+  const { t } = useLocale();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: 'flex-end', alignItems: 'center' }}>
-        <Pressable accessibilityLabel="Close" onPress={onClose} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(11,11,11,0.45)' }} />
+        <Pressable accessibilityLabel={t('common.close')} onPress={onClose} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(11,11,11,0.45)' }} />
         <View
+          role="dialog"
+          aria-modal
           style={{
             width: '100%',
             maxWidth: 480,

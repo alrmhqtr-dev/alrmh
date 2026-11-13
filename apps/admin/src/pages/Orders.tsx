@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Search } from 'lucide-react';
-import { api, errorMessage } from '../lib/api';
+import { ArrowRight, Download, Search } from 'lucide-react';
+import { api, downloadCsv, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { STAGES, STAGE_LABEL, date, dateTime, money, phone, todayQatar } from '../lib/format';
-import { Empty, Loading, PageHead, StageBadge, Tabs, useToast } from '../ui';
+import { Empty, Field, Input, Loading, Modal, PageHead, StageBadge, Tabs, useToast } from '../ui';
 
 export type OrderRow = {
   id: string;
@@ -53,6 +53,20 @@ export default function Orders() {
     onError: (e) => toast(errorMessage(e), 'error'),
   });
   const today = todayQatar();
+  const [exportOpen, setExportOpen] = useState(false);
+  const [range, setRange] = useState({ from: `${today.slice(0, 8)}01`, to: today });
+  const [exporting, setExporting] = useState(false);
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      await downloadCsv(`/export/orders.csv?from=${range.from}&to=${range.to}`, 'alrmh-orders.csv');
+      setExportOpen(false);
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="stack lg">
@@ -62,7 +76,30 @@ export default function Orders() {
           <input className="input" data-testid="orders-search" placeholder="Order #, name or phone" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 34, width: 240 }} />
         </div>
         <Tabs value={view} onChange={setView} options={[['board', 'Board'], ['list', 'List']]} />
+        {can('owner', 'manager') ? (
+          <button className="btn secondary" data-testid="export-orders" onClick={() => setExportOpen(true)}>
+            <Download size={16} /> Export
+          </button>
+        ) : null}
       </PageHead>
+      {exportOpen ? (
+        <Modal
+          title="Export paid orders"
+          onClose={() => setExportOpen(false)}
+          footer={
+            <>
+              <button className="btn secondary" onClick={() => setExportOpen(false)}>Cancel</button>
+              <button className="btn" data-testid="export-orders-go" disabled={exporting} onClick={exportCsv}>Download CSV</button>
+            </>
+          }
+        >
+          <div className="note">Orders paid between these dates, with totals, discounts and refunds. Opens in Excel or Google Sheets.</div>
+          <div className="grid k2">
+            <Field label="From"><Input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></Field>
+            <Field label="To"><Input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></Field>
+          </div>
+        </Modal>
+      ) : null}
 
       {!orders.data ? (
         <Loading />

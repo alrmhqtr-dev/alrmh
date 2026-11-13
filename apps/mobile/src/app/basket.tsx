@@ -70,7 +70,7 @@ export default function BasketScreen() {
           {data.items.map((line) => (
             <Card key={line.id} testID={`line-${line.kind}`} style={{ padding: 16, flexDirection: 'row', gap: 14 }}>
               <View style={{ width: 72, alignItems: 'center' }}>
-                {line.kind === 'thobe' ? <ThobeArt fill={line.thobe?.colour?.hex} collar={line.thobe?.collar?.id} height={84} /> : <ProductArt small style={{ width: 64, backgroundColor: 'transparent' }} />}
+                {line.kind === 'thobe' ? <ThobeArt fill={line.thobe?.colour?.hex} collar={line.thobe?.collar?.shape ?? line.thobe?.collar?.id} height={84} /> : <ProductArt small uri={line.product?.image_url} style={{ width: 64, backgroundColor: 'transparent' }} />}
               </View>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text variant="bodyStrong">{line.kind === 'thobe' ? t('review.custom') : f.name(line.product)}</Text>
