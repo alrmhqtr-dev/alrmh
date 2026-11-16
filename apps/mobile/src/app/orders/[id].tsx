@@ -1,6 +1,7 @@
 import { View } from 'react-native';
 import { useIsFocused, useLocalSearchParams } from 'expo-router';
 import { Check, Gift, MessageCircle, Package, Shirt } from 'lucide-react-native';
+import { stageKey } from '@/ui/commerce';
 import { useLocale } from '@/i18n';
 import { useCatalogue, useOrder } from '@/api/hooks';
 import { openWhatsApp } from '@/lib/actions';
@@ -10,12 +11,12 @@ import { colors, radius } from '@/theme/tokens';
 
 function discountLabel(label: string | null, t: (k: any, p?: any) => string) {
   const [kind, code, pct] = (label ?? '').split(':');
-  return kind === 'coupon' ? t('checkout.couponLine', { code, pct }) : t('checkout.voucherLine', { pct });
+  return kind === 'coupon' ? t('checkout.couponLine', { code, pct }) : t('track.discount');
 }
 
 export default function Tracking() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { t, f } = useLocale();
+  const { t, f, lang } = useLocale();
   const order = useOrder(id, useIsFocused());
   const cat = useCatalogue();
   const support = cat.data?.settings.support.whatsapp ?? '';
@@ -26,6 +27,7 @@ export default function Tracking() {
   if (!o) return <Screen header={<Header />}><ErrorState message={t('common.error')} retryLabel={t('common.retry')} onRetry={() => order.refetch()} /></Screen>;
 
   const currentIdx = o.stages.indexOf(o.stage);
+  const thobes = o.items.some((i) => i.kind === 'thobe');
   const eventFor = (s: string) => o.events.find((e) => e.stage === s);
 
   return (
@@ -41,16 +43,16 @@ export default function Tracking() {
       <View style={{ backgroundColor: colors.inverse, borderRadius: radius.xl, padding: 20, gap: 6 }}>
         <Overline color="rgba(255,255,255,0.6)">{t('track.current')}</Overline>
         <Text variant="h1" color={colors.textInverse} testID="track-stage">
-          {t(`stage.${o.stage}` as any)}
+          {t(stageKey(o.stage, thobes))}
         </Text>
-        {o.expected_delivery && o.stage !== 'delivered' ? (
+        {o.expected_delivery && !['delivered', 'cancelled', 'ready'].includes(o.stage) ? (
           <Text variant="small" color="rgba(255,255,255,0.7)">
-            {t('track.expected', { date: f.weekdayDate(o.expected_delivery) })}
+            {t(thobes ? 'track.readyBy' : 'track.expected', { date: f.weekdayDate(o.expected_delivery) })}
           </Text>
         ) : null}
       </View>
 
-      <Card style={{ padding: 18 }}>
+      <Card testID="track-steps" style={{ padding: 18 }}>
         {o.stages.map((s, i) => {
           const done = i < currentIdx || (i === currentIdx && s === 'delivered');
           const current = i === currentIdx && s !== 'delivered';
@@ -78,7 +80,7 @@ export default function Tracking() {
               </View>
               <View style={{ flex: 1, paddingBottom: last ? 0 : 12 }}>
                 <Text variant={current ? 'bodyStrong' : 'body'} color={done || current ? colors.text : colors.textMuted}>
-                  {t(`stage.${s}` as any)}
+                  {t(stageKey(s, thobes))}
                 </Text>
                 <Text variant="caption" color={colors.textMuted}>
                   {sub}
@@ -97,7 +99,7 @@ export default function Tracking() {
             it.kind === 'thobe' ? t('track.thobeFor', { name: s.member?.name ?? '' }) : it.kind === 'reward' ? t('track.reward', { name: f.name(s.product) }) : f.name(s.product);
           const sub =
             it.kind === 'thobe'
-              ? `${f.name(s.thobe.collar)} · ${f.name(s.thobe.fabric)} · ${f.name(s.thobe.colour)}${it.qty > 1 ? ` · ×${it.qty}` : ''}`
+              ? [f.name(s.thobe.collar), f.name(s.thobe.fabric), s.thobe.colour ? f.name(s.thobe.colour) : ''].filter(Boolean).join(' · ') + (it.qty > 1 ? ` · ×${it.qty}` : '')
               : `${s.size ? t('basket.sizeN', { size: s.size }) + ' · ' : ''}×${it.qty}`;
           return (
             <View key={it.id}>
@@ -118,9 +120,12 @@ export default function Tracking() {
       <Card style={{ padding: 16, gap: 8 }}>
         {[
           [t('review.subtotal'), f.money(o.subtotal, true)],
-          [t('checkout.delivery'), f.money(o.delivery_fee, true)],
+          o.address?.pickup
+            ? [t('track.pickup', { branch: lang === 'ar' && o.address.label_ar ? o.address.label_ar : o.address.label }), t('common.free')]
+            : [t('checkout.delivery'), f.money(o.delivery_fee, true)],
           ...(o.home_visit_fee ? [[t('checkout.homeVisitFee'), f.money(o.home_visit_fee, true)]] : []),
           ...(o.discount ? [[discountLabel(o.discount_label, t), `− ${f.money(o.discount, true)}`]] : []),
+          ...(o.points_used ? [[t('checkout.pointsLine', { pts: f.num(o.points_used) }), `− ${f.money(o.points_used, true)}`]] : []),
         ].map(([a, b]) => (
           <View key={a} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text variant="small" color={colors.textSecondary}>
@@ -134,6 +139,11 @@ export default function Tracking() {
           <Text variant="bodyStrong">{t('checkout.total')}</Text>
           <Text variant="bodyStrong">{f.money(o.total, true)}</Text>
         </View>
+        {o.payment_provider === 'card_machine' ? (
+          <Text testID="paid-in-store" variant="small" color={colors.textSecondary}>
+            {t('track.paidInStore')}
+          </Text>
+        ) : null}
         {o.refunded ? (
           <View testID="refunded" style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text variant="small" color={colors.goldInk}>

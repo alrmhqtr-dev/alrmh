@@ -1,6 +1,6 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { db, type Queryable } from '../db.js';
-import { DEFAULT_SETTINGS, fail, getSettings, need } from '../lib.js';
+import { DEFAULT_SETTINGS, fail, getSettings, listTiers, need } from '../lib.js';
 import { AnyStaff, CurrentStaff, Managers, audit, type StaffUser } from '../staff.js';
 import { COLLAR_SHAPES } from './catalogue.controller.js';
 import { MEDIA_PATH } from './media.controller.js';
@@ -62,6 +62,20 @@ async function patchRow(table: string, id: string, fields: Record<string, unknow
   const sets = entries.map(([k], i) => `${k} = $${i + 2}`).join(', ');
   const r = await db.pool.query(`update ${table} set ${sets} where id = $1`, [id, ...entries.map(([, v]) => v)]);
   if (!r.rowCount) throw new NotFoundException({ code: 'not_found' });
+}
+
+function tierFields(b: any, creating: boolean) {
+  const out: { name_en?: string; name_ar?: string; min_points?: number; points_per_product?: number; points_per_thobe?: number; colour?: string } = {};
+  if (creating || b?.name_en !== undefined) out.name_en = text(b?.name_en, 'name_en', 40);
+  if (creating || b?.name_ar !== undefined) out.name_ar = text(b?.name_ar, 'name_ar', 40);
+  if (creating || b?.min_points !== undefined) out.min_points = int(b?.min_points, 'min_points', 0, 1000000);
+  if (creating || b?.points_per_product !== undefined) out.points_per_product = int(b?.points_per_product, 'points_per_product', 0, 10000);
+  if (creating || b?.points_per_thobe !== undefined) out.points_per_thobe = int(b?.points_per_thobe, 'points_per_thobe', 0, 10000);
+  if (b?.colour !== undefined) {
+    if (!/^#[0-9A-Fa-f]{6}$/.test(String(b.colour))) fail('invalid_colour');
+    out.colour = String(b.colour);
+  }
+  return out;
 }
 
 @Controller('v1/admin')
@@ -286,15 +300,9 @@ export class AdminSetupController {
     if (b.home_visit_fee !== undefined) next.home_visit_fee = money(b.home_visit_fee, 'home_visit_fee');
     if (b.lead_working_days !== undefined) next.lead_working_days = int(b.lead_working_days, 'lead_working_days', 1, 60);
     if (b.measurements_valid_months !== undefined) next.measurements_valid_months = int(b.measurements_valid_months, 'measurements_valid_months', 1, 60);
-    if (b.voucher_valid_days !== undefined) next.voucher_valid_days = int(b.voucher_valid_days, 'voucher_valid_days', 1, 365);
+    if (b.appointment_fee !== undefined) next.appointment_fee = money(b.appointment_fee, 'appointment_fee');
     if (b.points) {
       const p = b.points;
-      if (p.thobe_fixed !== undefined) next.points.thobe_fixed = int(p.thobe_fixed, 'thobe_fixed', 0, 10000);
-      if (p.product_per_qar !== undefined) {
-        const v = Number(p.product_per_qar);
-        if (!(v >= 0 && v <= 10)) fail('invalid_number', { field: 'product_per_qar' });
-        next.points.product_per_qar = v;
-      }
       if (p.expiry_months !== undefined) next.points.expiry_months = int(p.expiry_months, 'expiry_months', 1, 60);
       if (p.warn_days !== undefined) next.points.warn_days = int(p.warn_days, 'warn_days', 1, 180);
     }
@@ -321,52 +329,65 @@ export class AdminSetupController {
     return next;
   }
 
-  /* ---------- rewards & coupons ---------- */
+  /* ---------- tiers & coupons ---------- */
 
-  @Get('reward-options')
+  @Get('tiers')
   @UseGuards(AnyStaff)
-  rewardOptions() {
-    return db.many(
-      `select r.*, p.name_en as product_name_en,
-              (select count(*)::int from vouchers v where v.option_id = r.id) as redeemed_count
-         from reward_options r left join products p on p.id = r.product_id order by r.kind, r.sort, r.cost_points`,
+  async tiers() {
+    const tiers = await listTiers();
+    const counts = await db.many<{ id: string; n: number }>(
+      `with life as (
+         select c.id, greatest(coalesce((select sum(points) from points_ledger p where p.customer_id = c.id and p.kind in ('earn','adjust')),0),0) as pts
+           from customers c where c.deleted_at is null
+       )
+       select t.id, (select count(*)::int from life where life.pts >= t.min_points
+                       and not exists (select 1 from tiers u where u.min_points > t.min_points and life.pts >= u.min_points)) as n
+         from tiers t`,
     );
+    return tiers.map((t) => ({ ...t, customers: counts.find((x) => x.id === t.id)?.n ?? 0 }));
   }
 
-  @Post('reward-options')
+  @Post('tiers')
   @UseGuards(Managers)
-  async addRewardOption(@CurrentStaff() me: StaffUser, @Body() b: any) {
-    const kind = b?.kind;
-    if (kind !== 'discount' && kind !== 'product') fail('invalid_kind');
-    const percent = kind === 'discount' ? int(b.percent, 'percent', 1, 100) : null;
-    let productId: string | null = null;
-    if (kind === 'product') {
-      const p = await db.one('select id from products where id = $1', [need(b.product_id, 'product_id')]);
-      if (!p) fail('product_not_found');
-      productId = p.id;
-    }
-    const id = await uniqueId('reward_options', kind === 'discount' ? `discount-${percent}` : `product-${productId}`);
-    await db.pool.query('insert into reward_options (id, kind, percent, product_id, cost_points, active, sort) values ($1,$2,$3,$4,$5,true,(select coalesce(max(sort),0)+1 from reward_options))', [
-      id,
-      kind,
-      percent,
-      productId,
-      int(b.cost_points, 'cost_points', 1, 1000000),
-    ]);
-    await audit(me, 'create', 'reward_option', id, b);
+  async addTier(@CurrentStaff() me: StaffUser, @Body() b: any) {
+    const fields = tierFields(b, true);
+    const id = await uniqueId('tiers', slug(fields.name_en!));
+    await this.assertThresholds(id, fields.min_points!);
+    await db.pool.query(
+      'insert into tiers (id, name_en, name_ar, min_points, points_per_product, points_per_thobe, colour) values ($1,$2,$3,$4,$5,$6,$7)',
+      [id, fields.name_en, fields.name_ar, fields.min_points, fields.points_per_product, fields.points_per_thobe, fields.colour ?? '#B8B8B8'],
+    );
+    await audit(me, 'create', 'tier', id, b);
     return { id };
   }
 
-  @Patch('reward-options/:id')
+  @Patch('tiers/:id')
   @UseGuards(Managers)
-  async updateRewardOption(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
-    await patchRow('reward_options', id, {
-      cost_points: b.cost_points !== undefined ? int(b.cost_points, 'cost_points', 1, 1000000) : undefined,
-      percent: b.percent !== undefined ? int(b.percent, 'percent', 1, 100) : undefined,
-      active: typeof b.active === 'boolean' ? b.active : undefined,
-    });
-    await audit(me, 'update', 'reward_option', id, b);
+  async updateTier(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
+    const fields = tierFields(b, false);
+    if (fields.min_points !== undefined) await this.assertThresholds(id, fields.min_points);
+    await patchRow('tiers', id, fields);
+    await audit(me, 'update', 'tier', id, b);
     return { ok: true };
+  }
+
+  @Delete('tiers/:id')
+  @UseGuards(Managers)
+  async deleteTier(@CurrentStaff() me: StaffUser, @Param('id') id: string) {
+    const t = await db.one('select id, min_points from tiers where id = $1', [id]);
+    if (!t) throw new NotFoundException({ code: 'not_found' });
+    if (t.min_points === 0) fail('starting_tier');
+    await db.pool.query('delete from tiers where id = $1', [id]);
+    await audit(me, 'delete', 'tier', id);
+    return { ok: true };
+  }
+
+  /** Every customer starts on the tier at 0 points, and no two tiers share a threshold. */
+  private async assertThresholds(id: string, minPoints: number) {
+    const others = await db.many<{ id: string; min_points: number }>('select id, min_points from tiers where id <> $1', [id]);
+    if (others.some((o) => o.min_points === minPoints)) fail('tier_threshold_taken');
+    const current = await db.one('select min_points from tiers where id = $1', [id]);
+    if (current?.min_points === 0 && minPoints !== 0) fail('starting_tier');
   }
 
   @Get('coupons')

@@ -1,19 +1,19 @@
 import { NotFoundException } from '@nestjs/common';
 import { db, type Queryable } from './db.js';
 import { addMonthsSql } from './sql-helpers.js';
-import { STAGES, STAGE_TEXT, addWorkingDays, fail, getSettings, notify, qatarDateString, type Stage } from './lib.js';
+import { SHOP_FLOW, THOBE_FLOW, addWorkingDays, stageText, expirePoints, fail, getSettings, notify, pointsBalance, qatarDateString, spendPoints, tierStatus, type Stage } from './lib.js';
 import { quote, type QuoteInput } from './pricing.js';
 import { assertSlotFree, slotLockKey } from './modules/booking.controller.js';
 
 export function stagesFor(items: { kind: string }[]): Stage[] {
-  return items.some((i) => i.kind === 'thobe') ? [...STAGES] : ['confirmed', 'ready', 'out_for_delivery', 'delivered'];
+  return items.some((i) => i.kind === 'thobe') ? [...THOBE_FLOW] : [...SHOP_FLOW];
 }
 
 export async function createOrder(customerId: string, input: QuoteInput) {
   return db.tx(async (c) => {
     await c.query('select pg_advisory_xact_lock(hashtext($1))', [`checkout:${customerId}`]);
     // One open checkout per customer: starting a new one closes any earlier unpaid
-    // attempt, so the same voucher, coupon or basket cannot be paid for twice.
+    // attempt, so the same points, coupon or basket cannot be paid for twice.
     const stale = await db.many<{ order_id: string }>(
       `update payments p set status = 'cancelled', completed_at = now() from orders o
         where o.id = p.order_id and o.customer_id = $1 and p.status = 'pending' returning p.order_id`,
@@ -52,7 +52,7 @@ export async function createOrder(customerId: string, input: QuoteInput) {
     }
     const number = `AR-${(await db.one<{ n: number }>(`select nextval('order_number_seq')::int as n`, [], c))!.n}`;
     const order = await db.one(
-      `insert into orders (number, customer_id, subtotal, delivery_fee, home_visit_fee, discount, discount_label, total, voucher_id, coupon_code, address, points_to_earn)
+      `insert into orders (number, customer_id, subtotal, delivery_fee, home_visit_fee, discount, discount_label, total, coupon_code, address, points_to_earn, points_used)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id, number, total`,
       [
         number,
@@ -63,10 +63,10 @@ export async function createOrder(customerId: string, input: QuoteInput) {
         q.discount,
         q.discountLabel,
         q.total,
-        q.appliedVoucher?.id ?? null,
         q.coupon && !q.coupon.error ? q.coupon.code : null,
         q.address,
         q.pointsToEarn,
+        q.pointsUsed,
       ],
       c,
     );
@@ -79,12 +79,6 @@ export async function createOrder(customerId: string, input: QuoteInput) {
         qty,
         unitPrice,
         lineTotal,
-      ]);
-    }
-    if (q.rewardItem) {
-      await c.query(`insert into order_items (order_id, kind, snapshot, qty, unit_price, line_total) values ($1,'reward',$2,1,0,0)`, [
-        order!.id,
-        { product: q.rewardItem, voucherCode: q.appliedVoucher.code },
       ]);
     }
     const payment = await db.one(`insert into payments (order_id, amount) values ($1,$2) returning id`, [order!.id, q.total], c);
@@ -109,11 +103,28 @@ export async function markPaid(paymentId: string, providerRef: string) {
       ? (await db.one<{ at: Date }>('select max(starts_at) as at from appointments where id = any($1::uuid[])', [apptIds], c))!.at
       : new Date();
     const expected = addWorkingDays(qatarDateString(new Date(Math.max(Date.now(), new Date(lastAppt).getTime()))), settings.lead_working_days);
+    // Thobe orders start at Taking measurements; shop-only orders at Order confirmed.
+    const first = thobes.length ? 'measured' : 'confirmed';
     const allSaved = thobes.length > 0 && thobes.every((t) => t.snapshot.measureMethod === 'saved');
-    await c.query(`update orders set stage = $2, paid_at = now(), expected_delivery = $3 where id = $1`, [order.id, allSaved ? 'measured' : 'confirmed', expected]);
-    await c.query(`insert into order_events (order_id, stage) values ($1, 'confirmed')`, [order.id]);
-    if (allSaved) await c.query(`insert into order_events (order_id, stage, note) values ($1, 'measured', 'saved')`, [order.id]);
-    if (order.voucher_id) await c.query(`update vouchers set status = 'used', used_order_id = $2 where id = $1`, [order.voucher_id, order.id]);
+    await c.query(`update orders set stage = $2, paid_at = now(), expected_delivery = $3 where id = $1`, [order.id, first, expected]);
+    await c.query(`insert into order_events (order_id, stage, note) values ($1, $2, $3)`, [order.id, first, allSaved ? 'saved' : null]);
+    if (order.points_used > 0) {
+      // Points are taken when the payment goes through. If some expired in the meantime,
+      // the customer keeps the discount they were shown; only what is left is taken.
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`points:${order.customer_id}`]);
+      await expirePoints(order.customer_id, c);
+      const take = Math.min(order.points_used, await pointsBalance(order.customer_id, c));
+      if (take > 0) {
+        await spendPoints(order.customer_id, take, c);
+        await c.query(`insert into points_ledger (customer_id, kind, points, order_id, label) values ($1, 'redeem', $2, $3, $4)`, [
+          order.customer_id,
+          -take,
+          order.id,
+          `Order #${order.number}`,
+        ]);
+      }
+      if (take !== order.points_used) await c.query('update orders set points_used = $2 where id = $1', [order.id, take]);
+    }
     const basketIds = items.map((i) => i.snapshot.basketItemId).filter(Boolean);
     await c.query('delete from basket_items where id = any($1::uuid[])', [basketIds]);
     await notify(
@@ -131,9 +142,36 @@ export async function markPaid(paymentId: string, providerRef: string) {
 }
 
 export async function closePayment(paymentId: string, status: 'failed' | 'cancelled') {
-  const p = await db.one(`update payments set status = $2, completed_at = now() where id = $1 and status = 'pending' returning order_id`, [paymentId, status]);
-  if (p) await db.pool.query(`update orders set stage = 'payment_failed' where id = $1 and stage = 'pending_payment'`, [p.order_id]);
+  const p = await db.one(`update payments set status = $2, completed_at = now() where id = $1 and status = 'pending' returning order_id, appointment_id`, [paymentId, status]);
+  if (p?.order_id) await db.pool.query(`update orders set stage = 'payment_failed' where id = $1 and stage = 'pending_payment'`, [p.order_id]);
+  // An unpaid booking lets its time go.
+  if (p?.appointment_id) await db.pool.query(`update appointments set status = 'cancelled' where id = $1 and status = 'held'`, [p.appointment_id]);
   return p?.order_id as string | undefined;
+}
+
+/** The booking fee for an appointment went through: the visit is confirmed. */
+export async function markAppointmentPaid(paymentId: string, providerRef: string) {
+  return db.tx(async (c) => {
+    const p = await db.one('select * from payments where id = $1 for update', [paymentId], c);
+    if (!p?.appointment_id) throw new NotFoundException({ code: 'payment_not_found' });
+    if (p.status === 'paid') return p.appointment_id as string;
+    if (p.status !== 'pending') fail('payment_closed');
+    const a = await db.one('select * from appointments where id = $1 for update', [p.appointment_id], c);
+    if (!a || a.status === 'cancelled') fail('payment_closed');
+    await c.query(`update payments set status = 'paid', provider_ref = $2, completed_at = now() where id = $1`, [paymentId, providerRef]);
+    await c.query(`update appointments set status = 'confirmed', fee_paid_at = now(), created_at = now() where id = $1`, [a.id]);
+    await notify(
+      a.customer_id,
+      'appointment',
+      {
+        en: { title: a.kind === 'home' ? 'Home visit booked' : 'Branch visit booked', body: 'Your booking fee is paid. A tailor will take your measurements and help you choose your fabric.' },
+        ar: { title: a.kind === 'home' ? 'تم حجز الزيارة المنزلية' : 'تم حجز زيارة الفرع', body: 'تم دفع رسوم الحجز. سيأخذ الخيّاط مقاساتك ويساعدك في اختيار القماش.' },
+      },
+      '/orders',
+      c,
+    );
+    return a.id as string;
+  });
 }
 
 export async function setStage(orderId: string, stage: Stage, client?: Queryable, staffId: string | null = null) {
@@ -149,9 +187,11 @@ export async function setStage(orderId: string, stage: Stage, client?: Queryable
     if (from < 0 || to <= from) fail('stage_not_forward', { current: order.stage });
     for (const s of flow.slice(from + 1, to + 1)) await c.query('insert into order_events (order_id, stage, staff_id) values ($1, $2, $3)', [orderId, s, staffId]);
     await c.query('update orders set stage = $2 where id = $1', [orderId, stage]);
-    await notify(order.customer_id, 'order', withNumber(STAGE_TEXT[stage], order.number), `/orders/${orderId}`, c);
+    const thobes = items.some((i) => i.kind === 'thobe');
+    await notify(order.customer_id, 'order', withNumber(stageText(stage, thobes), order.number), `/orders/${orderId}`, c);
     if (stage === 'delivered' && !order.points_awarded && order.points_to_earn > 0) {
       const s = await getSettings(c);
+      const before = await tierStatus(order.customer_id, c);
       await c.query(
         `insert into points_ledger (customer_id, kind, points, remaining, expires_at, order_id, label)
          values ($1, 'earn', $2, $2, ${addMonthsSql('now()', '$3')}, $4, $5)`,
@@ -163,19 +203,31 @@ export async function setStage(orderId: string, stage: Stage, client?: Queryable
         order.customer_id,
         'points',
         {
-          en: { title: `You earned ${order.points_to_earn} points`, body: `Order #${order.number} delivered. Points expire in ${s.points.expiry_months} months.` },
-          ar: { title: `ربحت ${order.points_to_earn} نقطة`, body: `تم توصيل الطلب #${order.number}. تنتهي صلاحية النقاط بعد ${s.points.expiry_months} شهرًا.` },
+          en: { title: `You earned ${order.points_to_earn} points`, body: `Order #${order.number} ${thobes ? 'collected' : 'delivered'}. Points expire in ${s.points.expiry_months} months.` },
+          ar: { title: `ربحت ${order.points_to_earn} نقطة`, body: `${thobes ? 'تم استلام' : 'تم توصيل'} الطلب #${order.number}. تنتهي صلاحية النقاط بعد ${s.points.expiry_months} شهرًا.` },
         },
         '/rewards',
         c,
       );
+      const after = await tierStatus(order.customer_id, c);
+      if (after.tier.id !== before.tier.id && after.tier.min_points > before.tier.min_points)
+        await notify(
+          order.customer_id,
+          'points',
+          {
+            en: { title: `You're now ${after.tier.name_en}`, body: `Every thobe now earns ${after.tier.points_per_thobe} points and every product ${after.tier.points_per_product}.` },
+            ar: { title: `أصبحت في الفئة ${after.tier.name_ar}`, body: `كل ثوب يمنحك الآن ${after.tier.points_per_thobe} نقطة وكل منتج ${after.tier.points_per_product} نقاط.` },
+          },
+          '/rewards',
+          c,
+        );
     }
     return { ok: true, stage };
   };
   return client ? run(client) : db.tx(run);
 }
 
-function withNumber(t: (typeof STAGE_TEXT)[Stage], number: string) {
+function withNumber(t: ReturnType<typeof stageText>, number: string) {
   return {
     en: { title: t.en.title, body: `#${number} · ${t.en.body}` },
     ar: { title: t.ar.title, body: `#${number} · ${t.ar.body}` },

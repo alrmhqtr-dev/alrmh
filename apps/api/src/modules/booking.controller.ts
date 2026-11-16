@@ -3,6 +3,8 @@ import { db, type Queryable } from '../db.js';
 import { CustomerGuard, Me, type Customer } from '../auth.js';
 import { addDays, fail, getSettings, need, notify, qatarDateString, qatarInstant } from '../lib.js';
 import { memberFor } from './family.controller.js';
+import { config } from '../config.js';
+import { allowedReturn } from '../returns.js';
 
 type Window = { open: number; close: number; step: number; capacity: number; closed: number[] };
 
@@ -82,7 +84,7 @@ export class BookingController {
   }
 
   @Post('appointments')
-  async hold(@Me() me: Customer, @Body() body: { kind: string; branchId?: string; addressId?: string; memberId: string; startsAt: string; standalone?: boolean }) {
+  async hold(@Me() me: Customer, @Body() body: { kind: string; branchId?: string; addressId?: string; memberId: string; startsAt: string; standalone?: boolean; returnUrl?: string }) {
     const kind = body?.kind;
     if (kind !== 'branch' && kind !== 'home') fail('invalid_kind');
     await memberFor(me.id, need(body.memberId, 'memberId'));
@@ -94,25 +96,30 @@ export class BookingController {
     }
     const standalone = body.standalone === true;
     const branchId = kind === 'branch' ? need(body.branchId, 'branchId') : null;
-    return db.tx(async (c) => {
+    const fee = standalone ? (await getSettings()).appointment_fee : 0;
+    if (fee > 0 && config.paymentMode !== 'mock') fail('payment_not_configured');
+    const appt = await db.tx(async (c) => {
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`bookings:${me.id}`]);
       if (standalone) {
-        // A visit booked on its own is confirmed without payment, so it is one per person at a time.
+        // A visit booked on its own (a new order) is one per person at a time.
         const existing = await db.one(
           `select id from appointments where customer_id = $1 and member_id = $2 and status = 'confirmed' and order_id is null and starts_at > now() limit 1`,
           [me.id, body.memberId],
           c,
         );
         if (existing) fail('already_booked', { appointmentId: existing.id });
-      } else {
-        // Choosing a new time while designing a thobe lets go of the earlier hold for that person.
-        await c.query(
-          `update appointments a set status = 'cancelled'
-            where a.customer_id = $1 and a.member_id = $2 and a.status = 'held' and a.order_id is null
-              and not exists (select 1 from basket_items b where b.appointment_id = a.id)`,
-          [me.id, body.memberId],
-        );
       }
+      // Choosing a new time lets go of an earlier unpaid hold for that person (and closes its payment).
+      await c.query(
+        `with released as (
+           update appointments a set status = 'cancelled'
+            where a.customer_id = $1 and a.member_id = $2 and a.status = 'held' and a.order_id is null
+              and not exists (select 1 from basket_items b where b.appointment_id = a.id)
+            returning a.id
+         )
+         update payments set status = 'cancelled', completed_at = now() where appointment_id in (select id from released) and status = 'pending'`,
+        [me.id, body.memberId],
+      );
       const open = await db.one<{ n: number }>(
         `select count(*)::int as n from appointments where customer_id = $1 and order_id is null and starts_at > now()
            and (status = 'confirmed' or (status = 'held' and created_at > now() - interval '30 minutes'))`,
@@ -122,14 +129,19 @@ export class BookingController {
       if (open!.n >= MAX_OPEN_BOOKINGS) fail('too_many_bookings');
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [slotLockKey(kind, branchId, startsAt)]);
       await assertSlotFree(kind, branchId, startsAt, c);
-      const appt = await db.one(
+      // Booked on its own: held until the booking fee is paid (or confirmed now when there is no fee).
+      // Booked while designing a thobe: held until the order is paid.
+      const status = standalone && fee === 0 ? 'confirmed' : 'held';
+      const row = await db.one(
         `insert into appointments (customer_id, member_id, kind, branch_id, address_id, starts_at, status, fee) values ($1,$2,$3,$4,$5,$6,$7,$8)
-         returning id, kind, branch_id, address_id, member_id, starts_at, status, fee`,
-        // A home visit that is part of an order is paid at checkout; one booked on its own is paid at the visit.
-        [me.id, body.memberId, kind, branchId, kind === 'home' ? body.addressId : null, startsAt, standalone ? 'confirmed' : 'held', standalone && kind === 'home' ? (await getSettings(c)).home_visit_fee : 0],
+         returning id, kind, branch_id, address_id, member_id, starts_at, status, fee::float as fee`,
+        [me.id, body.memberId, kind, branchId, kind === 'home' ? body.addressId : null, startsAt, status, fee],
         c,
       );
-      if (standalone) {
+      let paymentId: string | null = null;
+      if (standalone && fee > 0) {
+        paymentId = (await db.one(`insert into payments (appointment_id, amount) values ($1, $2) returning id`, [row!.id, fee], c))!.id;
+      } else if (standalone) {
         await notify(
           me.id,
           'appointment',
@@ -141,8 +153,11 @@ export class BookingController {
           c,
         );
       }
-      return appt;
+      return { ...row, paymentId };
     });
+    if (!appt.paymentId) return appt;
+    const ret = encodeURIComponent(allowedReturn(body.returnUrl));
+    return { ...appt, paymentUrl: `${config.apiUrl}/v1/pay/mock/${appt.paymentId}?return=${ret}` };
   }
 
   @Get('appointments')

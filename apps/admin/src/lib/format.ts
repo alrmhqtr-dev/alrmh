@@ -15,19 +15,30 @@ export const timeToMinute = (t: string) => {
   return h * 60 + (m || 0);
 };
 
-export const STAGES = ['confirmed', 'measured', 'cutting', 'stitching', 'ready', 'out_for_delivery', 'delivered'] as const;
+export const STAGES = ['confirmed', 'measured', 'cutting', 'stitching', 'quality', 'ready', 'out_for_delivery', 'delivered'] as const;
+/** Thobe orders: made to measure, collected from the branch. */
+export const THOBE_FLOW = ['measured', 'cutting', 'stitching', 'quality', 'ready', 'delivered'];
+/** Shop-only orders: packed and delivered. */
+export const SHOP_FLOW = ['confirmed', 'ready', 'out_for_delivery', 'delivered'];
 export const STAGE_LABEL: Record<string, string> = {
   pending_payment: 'Awaiting payment',
   payment_failed: 'Payment failed',
-  confirmed: 'Confirmed',
-  measured: 'Measured',
+  confirmed: 'Order confirmed',
+  measured: 'Taking measurements',
   cutting: 'Cutting',
-  stitching: 'Stitching',
+  stitching: 'Sewing',
+  quality: 'Quality inspection',
   ready: 'Ready',
   out_for_delivery: 'Out for delivery',
-  delivered: 'Delivered',
+  delivered: 'Collected / delivered',
   cancelled: 'Cancelled',
 };
+/** The stage name worded for the kind of order: "Ready for pickup" and "Collected" for thobes, "Packed" and "Delivered" for shop orders. */
+export function stageLabel(stage: string, thobes?: boolean) {
+  if (thobes === true) return ({ ready: 'Ready for pickup', delivered: 'Collected' } as Record<string, string>)[stage] ?? STAGE_LABEL[stage] ?? stage;
+  if (thobes === false) return ({ ready: 'Packed', delivered: 'Delivered' } as Record<string, string>)[stage] ?? STAGE_LABEL[stage] ?? stage;
+  return STAGE_LABEL[stage] ?? stage;
+}
 export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const RELATION: Record<string, string> = { self: 'Account holder', father: 'Father', son: 'Son', brother: 'Brother', friend: 'Friend', other: 'Other' };
 export const MEASURE_FIELDS = [

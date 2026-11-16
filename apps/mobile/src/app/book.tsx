@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Linking, Platform, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarCheck, Info, MapPin, Plus, Store } from 'lucide-react-native';
+import { CalendarCheck, Info, Lock, MapPin, Plus, Store } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
 import { useAddresses, useCatalogue, useFamily, useSlots } from '@/api/hooks';
@@ -14,7 +14,7 @@ import { BottomBar, Header, Screen, Sheet, goBack } from '@/ui/layout';
 import { colors, radius } from '@/theme/tokens';
 
 export default function Book() {
-  const params = useLocalSearchParams<{ kind?: string; memberId?: string; mode?: string; appointmentId?: string; standalone?: string; startsAt?: string; branchId?: string }>();
+  const params = useLocalSearchParams<{ kind?: string; memberId?: string; mode?: string; appointmentId?: string; standalone?: string; startsAt?: string; branchId?: string; payment?: string }>();
   const mode = params.mode ?? (params.standalone ? 'standalone' : 'builder');
   const { t, f } = useLocale();
   const qc = useQueryClient();
@@ -53,6 +53,8 @@ export default function Book() {
   const day = useMemo(() => slots.data?.days.find((d) => d.date === date), [slots.data, date]);
   const address = addresses.data?.find((a) => a.id === addressId);
   const fee = cat.data?.settings.home_visit_fee ?? 50;
+  // A visit booked on its own is a new order: the booking fee is paid now, online.
+  const bookingFee = mode === 'standalone' ? (cat.data?.settings.appointment_fee ?? 0) : 0;
 
   const confirm = async () => {
     if (!time) return;
@@ -64,9 +66,22 @@ export default function Book() {
         await qc.invalidateQueries();
         return goBack('/orders');
       }
-      const appt = await api<{ id: string; kind: 'branch' | 'home'; starts_at: string }>('/appointments', {
-        body: { kind, branchId: kind === 'branch' ? branch?.id : undefined, addressId: kind === 'home' ? addressId : undefined, memberId, startsAt: time, standalone: mode === 'standalone' },
+      const appt = await api<{ id: string; kind: 'branch' | 'home'; starts_at: string; paymentUrl?: string }>('/appointments', {
+        body: {
+          kind,
+          branchId: kind === 'branch' ? branch?.id : undefined,
+          addressId: kind === 'home' ? addressId : undefined,
+          memberId,
+          startsAt: time,
+          standalone: mode === 'standalone',
+          returnUrl: Platform.OS === 'web' ? window.location.origin : 'alrmh://',
+        },
       });
+      if (appt.paymentUrl) {
+        if (Platform.OS === 'web') window.location.assign(appt.paymentUrl);
+        else await Linking.openURL(appt.paymentUrl);
+        return;
+      }
       if (mode === 'builder') {
         builder.set({ method: kind, appointment: { id: appt.id, kind, startsAt: appt.starts_at } });
         return goBack('/design/measure');
@@ -90,16 +105,25 @@ export default function Book() {
 
   return (
     <Screen
-      header={<Header title={kind === 'home' ? t('book.homeTitle') : t('book.branchTitle')} />}
+      header={<Header title={mode === 'standalone' ? t('book.newOrderTitle') : kind === 'home' ? t('book.homeTitle') : t('book.branchTitle')} />}
       footer={
         <BottomBar>
-          <Button testID="book-confirm" label={time ? t('book.confirm', { when: f.when(time) }) : t('book.pickTime')} disabled={!time || (kind === 'home' && !addressId)} loading={busy} onPress={confirm} />
+          <Button
+            testID="book-confirm"
+            icon={bookingFee && time ? Lock : undefined}
+            label={!time ? t('book.pickTime') : bookingFee ? t('book.payAndBook', { amount: f.money(bookingFee) }) : t('book.confirm', { when: f.when(time) })}
+            disabled={!time || (kind === 'home' && !addressId)}
+            loading={busy}
+            onPress={confirm}
+          />
         </BottomBar>
       }
       contentStyle={{ gap: 22, paddingTop: 8 }}
     >
+      {params.payment ? <Note tone="error">{params.payment === 'failed' ? t('book.paymentFailed') : t('book.paymentCancelled')}</Note> : null}
       {mode === 'standalone' ? (
         <View style={{ gap: 10 }}>
+          {bookingFee ? <Note icon={Info} tone="gold">{t('book.newOrderNote', { fee: f.money(bookingFee) })}</Note> : null}
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <Chip testID="kind-branch" icon={Store} label={t('design.visitBranch')} selected={kind === 'branch'} onPress={() => setKind('branch')} />
             <Chip testID="kind-home" icon={MapPin} label={t('design.homeVisit')} selected={kind === 'home'} onPress={() => setKind('home')} />
@@ -251,7 +275,26 @@ export default function Book() {
         </View>
       ) : null}
 
-      {kind === 'home' ? <Note icon={Info} tone="gold">{mode === 'standalone' ? t('book.homeFeeStandalone', { fee }) : t('book.homeFee', { fee })}</Note> : null}
+      {kind === 'home' && mode !== 'standalone' ? <Note icon={Info} tone="gold">{t('book.homeFee', { fee })}</Note> : null}
+      {time && bookingFee ? (
+        <Card testID="book-summary" style={{ padding: 16, gap: 8 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text variant="body" color={colors.textSecondary}>
+              {f.when(time)}
+            </Text>
+            <Text variant="bodyStrong">{kind === 'home' ? t('design.homeVisit') : f.name(branch)}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text variant="body" color={colors.textSecondary}>
+              {t('book.fee')}
+            </Text>
+            <Text variant="bodyStrong">{f.money(bookingFee, true)}</Text>
+          </View>
+          <Text variant="caption" color={colors.goldInk}>
+            {t('checkout.testMode')}
+          </Text>
+        </Card>
+      ) : null}
       {error ? <Note tone="error">{error}</Note> : null}
 
       <Sheet visible={pickAddress} onClose={() => setPickAddress(false)}>

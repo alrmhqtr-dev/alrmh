@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Ruler } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Ruler, ShoppingBag } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { addDays, day, money, phone, time, todayQatar } from '../lib/format';
 import { MeasureModal } from '../measure';
+import { PlaceOrderModal } from '../place-order';
 import { Empty, Loading, PageHead, Tabs, useToast } from '../ui';
 
 type Appt = {
   id: string;
   kind: 'branch' | 'home';
+  branch_id: string | null;
   starts_at: string;
   status: string;
   order_id: string | null;
@@ -34,6 +36,7 @@ export default function Appointments() {
   const [from, setFrom] = useState(todayQatar());
   const [kind, setKind] = useState<'all' | 'branch' | 'home'>('all');
   const [measure, setMeasure] = useState<{ id: string; name: string } | null>(null);
+  const [ordering, setOrdering] = useState<Appt | null>(null);
   const { can } = useAuth();
   const toast = useToast();
   const qc = useQueryClient();
@@ -94,12 +97,17 @@ export default function Appointments() {
                           {a.order_number ? <Link className="badge outline" to={`/orders/${a.order_id}`}>#{a.order_number}</Link> : <span className="badge outline">Measurement only</span>}
                           {a.fee ? (
                             <div style={{ marginTop: 4 }}>
-                              {a.fee_paid_at ? <span className="badge ok">Fee collected</span> : <span className="badge gold" data-testid={`fee-due-${a.member_name}`}>Collect {money(a.fee)}</span>}
+                              {a.fee_paid_at ? <span className="badge ok">Fee paid · {money(a.fee)}</span> : <span className="badge gold" data-testid={`fee-due-${a.member_name}`}>Collect {money(a.fee)}</span>}
                             </div>
                           ) : null}
                         </td>
                         <td>{a.status === 'done' || a.measured ? <span className="badge ok">Measured</span> : <span className="badge">Booked</span>}</td>
                         <td className="right">
+                          {can('owner', 'manager', 'tailor') && !a.order_id ? (
+                            <button className="btn sm" style={{ marginBottom: 6 }} data-testid={`appt-order-${a.member_name}`} onClick={() => setOrdering(a)}>
+                              <ShoppingBag size={14} /> Place order
+                            </button>
+                          ) : null}
                           {can('owner', 'manager', 'tailor') && a.status === 'done' && a.fee && !a.fee_paid_at ? (
                             <button className="btn sm secondary" data-testid={`fee-paid-${a.member_name}`} onClick={() => feePaid.mutate(a.id)}>Fee paid</button>
                           ) : null}
@@ -127,6 +135,9 @@ export default function Appointments() {
       )}
       {q.data && !q.data.length ? <div className="card"><Empty>No visits booked this week.</Empty></div> : null}
       {measure ? <MeasureModal memberId={measure.id} memberName={measure.name} onClose={() => setMeasure(null)} /> : null}
+      {ordering ? (
+        <PlaceOrderModal customerId={ordering.customer_id} memberId={ordering.member_id} appointmentId={ordering.id} branchId={ordering.branch_id} onClose={() => setOrdering(null)} />
+      ) : null}
     </div>
   );
 }

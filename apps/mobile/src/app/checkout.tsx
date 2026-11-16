@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Linking, Platform, TextInput, View } from 'react-native';
+import { Linking, Platform, Switch, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Check, Lock, MapPin, Plus, ShieldCheck, Star, Tag, Truck, ChevronRight } from 'lucide-react-native';
+import { Award, Check, Lock, MapPin, Plus, ShieldCheck, Star, Store, Truck } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
-import { useAddresses, type Quote, type Voucher } from '@/api/hooks';
+import { useAddresses, useCatalogue, type Quote } from '@/api/hooks';
 import { errorText } from '@/lib/errors';
 import { Button, Card, Divider, ErrorState, Icon, IconTile, Loading, Note, Radio, Text, Touch } from '@/ui/primitives';
 import { BottomBar, Header, Screen, Sheet } from '@/ui/layout';
@@ -17,15 +17,17 @@ function appUrl() {
 }
 
 export default function Checkout() {
-  const { t, f, isRTL } = useLocale();
+  const { t, f, isRTL, lang } = useLocale();
   const params = useLocalSearchParams<{ payment?: string }>();
   const addresses = useAddresses();
   const [addressId, setAddressId] = useState<string | undefined>();
-  const [voucherId, setVoucherId] = useState<string | null | undefined>(undefined);
+  const [branchId, setBranchId] = useState<string | undefined>();
+  const [pickBranch, setPickBranch] = useState(false);
+  const branches = useCatalogue().data?.branches ?? [];
+  const [usePoints, setUsePoints] = useState(false);
   const [couponInput, setCouponInput] = useState('');
   const [coupon, setCoupon] = useState<string | null>(null);
   const [pickAddress, setPickAddress] = useState(false);
-  const [pickVoucher, setPickVoucher] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,13 +36,12 @@ export default function Checkout() {
   }, [addresses.data, addressId]);
 
   const quote = useQuery({
-    queryKey: ['quote', addressId, voucherId, coupon],
-    queryFn: () => api<Quote>('/checkout/quote', { body: { addressId, voucherId, couponCode: coupon } }),
+    queryKey: ['quote', addressId, branchId, usePoints, coupon],
+    queryFn: () => api<Quote>('/checkout/quote', { body: { addressId, branchId, usePoints, couponCode: coupon } }),
     placeholderData: (prev) => prev,
   });
   const q = quote.data;
   const couponOk = Boolean(q?.coupon && !q.coupon.error);
-  const voucherLabel = (v: Voucher) => (v.kind === 'discount' ? t('checkout.voucherPct', { pct: v.percent ?? 0 }) : t('checkout.voucherProduct', { name: f.name(v, 'product_name') }));
 
   const pay = async () => {
     if (!q) return;
@@ -48,7 +49,7 @@ export default function Checkout() {
     setError(null);
     try {
       const r = await api<{ paymentUrl: string; orderId: string }>('/orders', {
-        body: { addressId: q.address?.id, voucherId: couponOk ? null : (q.appliedVoucher?.id ?? null), couponCode: couponOk ? q.coupon!.code : null, returnUrl: appUrl() },
+        body: { addressId: q.address?.pickup ? undefined : q.address?.id, branchId: q.address?.pickup ? q.address.branchId : undefined, usePoints, couponCode: couponOk ? q.coupon!.code : null, returnUrl: appUrl() },
       });
       if (Platform.OS === 'web') window.location.assign(r.paymentUrl);
       else await Linking.openURL(r.paymentUrl);
@@ -63,13 +64,10 @@ export default function Checkout() {
 
   const discountLine = () => {
     if (!q.discountLabel) return null;
-    const [kind, code, pct] = q.discountLabel.split(':');
-    if (kind === 'reward') return [t('checkout.reward', { name: f.name(q.rewardItem) }), t('common.free')];
-    const label = kind === 'coupon' ? t('checkout.couponLine', { code, pct }) : t('checkout.voucherLine', { pct });
-    return [label, `− ${f.money(q.discount, true)}`];
+    const [, code, pct] = q.discountLabel.split(':');
+    return [t('checkout.couponLine', { code, pct }), `− ${f.money(q.discount, true)}`];
   };
   const dl = discountLine();
-  const others = q.vouchers.filter((v) => v.id !== q.appliedVoucher?.id).length;
 
   return (
     <Screen
@@ -91,78 +89,85 @@ export default function Checkout() {
     >
       {params.payment ? <Note tone="error">{params.payment === 'failed' ? t('checkout.failed') : t('checkout.cancelled')}</Note> : null}
 
-      <Text variant="bodyStrong" style={{ marginTop: 4 }}>
-        {t('checkout.deliverTo')}
-      </Text>
-      {q.address ? (
-        <Card style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-          <IconTile icon={MapPin} />
-          <View style={{ flex: 1 }}>
-            <Text variant="bodyStrong">{q.address.label}</Text>
-            <Text variant="small" color={colors.textSecondary}>{`${q.address.line1}, ${q.address.area}, ${q.address.city}`}</Text>
-          </View>
-          <Touch testID="change-address" onPress={() => setPickAddress(true)}>
-            <Text variant="smallStrong">{t('common.change')}</Text>
-          </Touch>
-        </Card>
+      {q.address?.pickup ? (
+        <>
+          <Text variant="bodyStrong" style={{ marginTop: 4 }}>
+            {t('checkout.collectFrom')}
+          </Text>
+          <Card testID="pickup-branch" style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <IconTile icon={Store} />
+            <View style={{ flex: 1 }}>
+              <Text variant="bodyStrong">{lang === 'ar' ? q.address.label_ar : q.address.label}</Text>
+              <Text variant="small" color={colors.textSecondary}>
+                {lang === 'ar' ? q.address.line1_ar : q.address.line1}
+              </Text>
+            </View>
+            {branches.length > 1 ? (
+              <Touch testID="change-branch" onPress={() => setPickBranch(true)}>
+                <Text variant="smallStrong">{t('common.change')}</Text>
+              </Touch>
+            ) : null}
+          </Card>
+          <Note>{t('checkout.pickupNote')}</Note>
+        </>
       ) : (
-        <Button testID="add-address" label={t('checkout.addAddress')} kind="secondary" icon={Plus} onPress={() => router.push('/account/add-address')} />
+        <>
+          <Text variant="bodyStrong" style={{ marginTop: 4 }}>
+            {t('checkout.deliverTo')}
+          </Text>
+          {q.address ? (
+            <Card style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+              <IconTile icon={MapPin} />
+              <View style={{ flex: 1 }}>
+                <Text variant="bodyStrong">{q.address.label}</Text>
+                <Text variant="small" color={colors.textSecondary}>{`${q.address.line1}, ${q.address.area}, ${q.address.city}`}</Text>
+              </View>
+              <Touch testID="change-address" onPress={() => setPickAddress(true)}>
+                <Text variant="smallStrong">{t('common.change')}</Text>
+              </Touch>
+            </Card>
+          ) : (
+            <Button testID="add-address" label={t('checkout.addAddress')} kind="secondary" icon={Plus} onPress={() => router.push('/account/add-address')} />
+          )}
+
+          <Text variant="bodyStrong" style={{ marginTop: 8 }}>
+            {t('checkout.delivery')}
+          </Text>
+          <Card style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <Icon icon={Truck} size={22} />
+            <View style={{ flex: 1 }}>
+              <Text variant="bodyStrong">{t('checkout.homeDelivery')}</Text>
+              <Text variant="small" color={colors.textSecondary}>
+                {t('checkout.shopDelivery')}
+              </Text>
+            </View>
+            <Text variant="smallStrong">{f.money(q.deliveryFee)}</Text>
+          </Card>
+        </>
       )}
 
-      <Text variant="bodyStrong" style={{ marginTop: 8 }}>
-        {t('checkout.delivery')}
-      </Text>
-      <Card style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <Icon icon={Truck} size={22} />
-        <View style={{ flex: 1 }}>
-          <Text variant="bodyStrong">{t('checkout.homeDelivery')}</Text>
-          <Text variant="small" color={colors.textSecondary}>
-            {t('checkout.afterReady')}
-          </Text>
-        </View>
-        <Text variant="smallStrong">{f.money(q.deliveryFee)}</Text>
-      </Card>
-
-      {q.vouchers.length ? (
+      {q.pointsBalance > 0 ? (
         <>
           <Text variant="bodyStrong" style={{ marginTop: 8 }}>
-            {t('checkout.rewards')}
+            {t('checkout.points')}
           </Text>
-          <Card style={{ opacity: couponOk ? 0.45 : 1 }}>
-            {q.appliedVoucher && !couponOk ? (
-              <View style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <IconTile icon={Tag} gold />
-                <View style={{ flex: 1 }}>
-                  <Text variant="bodyStrong">{voucherLabel(q.appliedVoucher)}</Text>
-                  <Text variant="small" color={colors.textSecondary}>
-                    {t('checkout.redeemedFor', { pts: f.num(q.appliedVoucher.cost_points), date: f.day(q.appliedVoucher.expires_at) })}
-                  </Text>
-                </View>
-                <Touch testID="voucher-remove" onPress={() => setVoucherId(null)}>
-                  <Text variant="small" color={colors.textSecondary}>
-                    {t('common.remove')}
-                  </Text>
-                </Touch>
-              </View>
-            ) : (
-              <View style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <IconTile icon={Tag} />
-                <Text variant="body" color={colors.textSecondary} style={{ flex: 1 }}>
-                  {t('checkout.noVoucher')}
-                </Text>
-              </View>
-            )}
-            {!couponOk && (others > 0 || !q.appliedVoucher) ? (
-              <>
-                <Divider />
-                <Touch onPress={() => setPickVoucher(true)} style={{ paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text variant="small" color={colors.textSecondary}>
-                    {q.appliedVoucher ? t('checkout.moreVouchers', { n: others }) : t('checkout.useVoucher')}
-                  </Text>
-                  <Icon icon={ChevronRight} size={16} color={colors.textMuted} flip />
-                </Touch>
-              </>
-            ) : null}
+          <Card style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <IconTile icon={Award} gold />
+            <View style={{ flex: 1 }}>
+              <Text variant="bodyStrong">{t('checkout.usePoints', { pts: f.num(q.pointsBalance) })}</Text>
+              <Text variant="small" color={colors.textSecondary}>
+                {usePoints && q.pointsUsed ? t('checkout.pointsSaving', { amount: f.money(q.pointsUsed) }) : t('checkout.pointsWorth', { amount: f.money(q.pointsBalance) })}
+              </Text>
+            </View>
+            <Switch
+              testID="use-points"
+              accessibilityLabel={t('checkout.usePoints', { pts: f.num(q.pointsBalance) })}
+              value={usePoints}
+              onValueChange={setUsePoints}
+              trackColor={{ false: colors.border, true: colors.inverse }}
+              thumbColor={colors.surface}
+              {...(Platform.OS === 'web' ? ({ activeThumbColor: colors.surface } as any) : {})}
+            />
           </Card>
         </>
       ) : null}
@@ -209,11 +214,6 @@ export default function Checkout() {
           ) : null}
         </View>
       )}
-      {couponOk && q.couponReplacesVoucher ? (
-        <Text variant="small" color={colors.textMuted}>
-          {t('checkout.oneDiscount')}
-        </Text>
-      ) : null}
 
       <Text variant="bodyStrong" style={{ marginTop: 8 }}>
         {t('checkout.payment')}
@@ -242,9 +242,10 @@ export default function Checkout() {
       <Card style={{ padding: 16, gap: 10 }}>
         {[
           [t('checkout.subtotalN', { n: q.count }), f.money(q.subtotal, true)],
-          [t('checkout.delivery'), f.money(q.deliveryFee, true)],
+          ...(q.pickup ? [] : [[t('checkout.delivery'), f.money(q.deliveryFee, true)]]),
           ...(q.homeVisitFee ? [[t('checkout.homeVisitFee'), f.money(q.homeVisitFee, true)]] : []),
           ...(dl ? [dl] : []),
+          ...(q.pointsUsed ? [[t('checkout.pointsLine', { pts: f.num(q.pointsUsed) }), `− ${f.money(q.pointsUsed, true)}`]] : []),
         ].map(([a, b]) => (
           <View key={a} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text variant="body" color={colors.textSecondary}>
@@ -263,7 +264,7 @@ export default function Checkout() {
         <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
           <Icon icon={Star} size={14} color={colors.textSecondary} />
           <Text variant="small" color={colors.textSecondary}>
-            {t('checkout.earn', { pts: q.pointsToEarn })}
+            {t(q.pickup ? 'checkout.earnCollect' : 'checkout.earn', { pts: q.pointsToEarn })}
           </Text>
         </View>
       </Card>
@@ -283,21 +284,20 @@ export default function Checkout() {
           <Button label={t('addresses.add')} kind="secondary" icon={Plus} onPress={() => { setPickAddress(false); router.push('/account/add-address'); }} />
         </View>
       </Sheet>
-      <Sheet visible={pickVoucher} onClose={() => setPickVoucher(false)}>
+      <Sheet visible={pickBranch} onClose={() => setPickBranch(false)}>
         <View style={{ gap: 10 }}>
-          {q.vouchers.map((v) => (
-            <Card key={v.id} selected={v.id === q.appliedVoucher?.id} onPress={() => { setVoucherId(v.id); setPickVoucher(false); }} style={{ padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <IconTile icon={Tag} gold />
-              <View style={{ flex: 1 }}>
-                <Text variant="bodyStrong">{voucherLabel(v)}</Text>
-                <Text variant="small" color={colors.textSecondary}>
-                  {t('rewards.validUntil', { date: f.date(v.expires_at) })}
-                </Text>
-              </View>
-              <Radio on={v.id === q.appliedVoucher?.id} />
-            </Card>
-          ))}
-          <Button label={t('checkout.noVoucher')} kind="ghost" onPress={() => { setVoucherId(null); setPickVoucher(false); }} />
+          {branches.map((b) => {
+            const on = q.address?.pickup && q.address.branchId === b.id;
+            return (
+              <Card key={b.id} testID={`branch-${b.id}`} selected={on} onPress={() => { setBranchId(b.id); setPickBranch(false); }} style={{ padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text variant="bodyStrong">{f.name(b)}</Text>
+                  <Text variant="small" color={colors.textSecondary}>{lang === 'ar' ? b.address_ar : b.address_en}</Text>
+                </View>
+                <Radio on={!!on} />
+              </Card>
+            );
+          })}
         </View>
       </Sheet>
       <View style={{ height: 8, borderRadius: radius.sm }} />

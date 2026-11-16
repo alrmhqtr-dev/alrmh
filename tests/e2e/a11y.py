@@ -1,4 +1,4 @@
-"""Accessibility check: axe-core on 26 screens of the customer app, in English and Arabic.
+"""Accessibility check: axe-core on 29 screens of the customer app, in English and Arabic.
 
 Signs in as the demo customer (SEED_DEMO=true, OTP_MODE=preview). Fails on any issue
 axe finds. Automated checks catch roughly a third of real problems; try the app with
@@ -25,10 +25,13 @@ tok = post("/auth/verify", {"phone": "55551234", "code": "123456"})["token"]
 orders = json.loads(urllib.request.urlopen(urllib.request.Request(API + "/orders", headers={"Authorization": "Bearer " + tok})).read())
 family = json.loads(urllib.request.urlopen(urllib.request.Request(API + "/family", headers={"Authorization": "Bearer " + tok})).read())
 order = (orders["active"] + orders["past"])[0]["id"]
+thobe_order = next(o["id"] for o in orders["active"] + orders["past"] if o.get("thobes"))
+appts = json.loads(urllib.request.urlopen(urllib.request.Request(API + "/appointments", headers={"Authorization": "Bearer " + tok})).read())
 
 SIGNED_OUT = ["/onboarding/language", "/onboarding/welcome", "/auth/phone", "/install"]
 SIGNED_IN = ["/home", "/shop", "/product/white-ghutra", "/design/collar", "/design/fabric", "/design/colour", "/design/for-whom", "/design/measure",
-             "/book?mode=standalone&kind=branch", "/basket", "/checkout", "/orders", f"/orders/{order}", "/rewards", "/rewards/redeem", "/account",
+             "/book?standalone=1&kind=branch", "/basket", "/checkout", "/orders", f"/orders/{order}", "/rewards", "/reorder", f"/reorder/{thobe_order}",
+             *([f"/booked/{appts[0]['id']}"] if appts else []), "/account",
              "/account/notifications", "/account/help", "/account/profile", "/account/addresses", "/account/family", f"/account/member/{family[0]['id']}"]
 
 by_rule = collections.defaultdict(lambda: {"count": 0, "screens": set(), "examples": [], "impact": None, "help": None})

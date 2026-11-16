@@ -1,10 +1,11 @@
 import { db, type Queryable } from './db.js';
-import { getSettings, round2, type Settings } from './lib.js';
+import { expirePoints, getSettings, pointsBalance, round2, tierStatus, type Tier } from './lib.js';
 
-export type QuoteInput = { addressId?: string; voucherId?: string | null; couponCode?: string | null };
+/** usePoints: spend the customer's points on this order, 1 point = QAR 1, up to the amount due. */
+export type QuoteInput = { addressId?: string; branchId?: string; couponCode?: string | null; usePoints?: boolean };
 
-export async function basketLines(customerId: string, client: Queryable = db.pool, settings?: Settings) {
-  const s = settings ?? (await getSettings(client));
+export async function basketLines(customerId: string, client: Queryable = db.pool, tier?: Tier) {
+  const t = tier ?? (await tierStatus(customerId, client)).tier;
   const rows = await db.many(
     `select bi.*, p.name_en as p_name_en, p.name_ar as p_name_ar, p.price as p_price, p.category as p_category, p.image_url as p_image_url,
             f.name as member_name, f.relation as member_relation, f.size as member_size,
@@ -35,7 +36,7 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
         qty: r.qty,
         unitPrice: r.p_price,
         lineTotal: line,
-        points: Math.round(line * s.points.product_per_qar),
+        points: t.points_per_product * r.qty,
         product: { id: r.product_id, name_en: r.p_name_en, name_ar: r.p_name_ar, category: r.p_category, image_url: r.p_image_url },
         size: r.size,
       };
@@ -48,11 +49,11 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
       qty: r.qty,
       unitPrice: unit,
       lineTotal: round2(unit * r.qty),
-      points: s.points.thobe_fixed * r.qty,
+      points: t.points_per_thobe * r.qty,
       thobe: {
         collar: byId(collars, r.thobe.collarId),
         fabric,
-        colour: byId(colours, r.thobe.colourId),
+        colour: byId(colours, r.thobe.colourId) ?? null,
       },
       member: { id: r.member_id, name: r.member_name, relation: r.member_relation, size: r.member_size },
       measureMethod: r.measure_method,
@@ -66,23 +67,29 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
 
 export async function quote(customerId: string, input: QuoteInput, client: Queryable = db.pool) {
   const settings = await getSettings(client);
-  const items = await basketLines(customerId, client, settings);
+  const status = await tierStatus(customerId, client);
+  const items = await basketLines(customerId, client, status.tier);
   const subtotal = round2(items.reduce((a, i) => a + i.lineTotal, 0));
   const homeAppointments = new Set(items.filter((i: any) => i.kind === 'thobe' && i.measureMethod === 'home' && i.appointment).map((i: any) => i.appointment.id));
   const homeVisitFee = round2(homeAppointments.size * settings.home_visit_fee);
-  const deliveryFee = items.length ? settings.delivery_fee : 0;
+  // Thobes are collected from a branch, so an order with thobes has no delivery.
+  // Shop-only orders are delivered to an address.
+  const pickup = items.some((i) => i.kind === 'thobe');
+  const deliveryFee = items.length && !pickup ? settings.delivery_fee : 0;
 
-  const address = input.addressId
-    ? await db.one('select id, label, line1, area, city, notes from addresses where id = $1 and customer_id = $2', [input.addressId, customerId], client)
-    : await db.one('select id, label, line1, area, city, notes from addresses where customer_id = $1 order by is_default desc, created_at limit 1', [customerId], client);
-
-  const vouchers = await db.many(
-    `select v.id, v.code, v.kind, v.percent, v.product_id, v.expires_at, v.cost_points, p.name_en as product_name_en, p.name_ar as product_name_ar, p.price as product_price
-       from vouchers v left join products p on p.id = v.product_id
-      where v.customer_id = $1 and v.status = 'active' and v.expires_at > now() order by v.percent desc nulls last, v.expires_at`,
-    [customerId],
-    client,
-  );
+  let address: any;
+  if (pickup) {
+    const b = await db.one(
+      'select id, name_en, name_ar, address_en, address_ar from branches where active and ($1::uuid is null or id = $1) order by sort limit 1',
+      [input.branchId && /^[0-9a-f-]{36}$/i.test(input.branchId) ? input.branchId : null],
+      client,
+    );
+    address = b ? { pickup: true, branchId: b.id, label: b.name_en, label_ar: b.name_ar, line1: b.address_en, line1_ar: b.address_ar, area: '', city: 'Doha' } : null;
+  } else {
+    address = input.addressId
+      ? await db.one('select id, label, line1, area, city, notes from addresses where id = $1 and customer_id = $2', [input.addressId, customerId], client)
+      : await db.one('select id, label, line1, area, city, notes from addresses where customer_id = $1 order by is_default desc, created_at limit 1', [customerId], client);
+  }
 
   let coupon: null | { code: string; percent?: number; maxDiscount?: number | null; error?: string; min?: number } = null;
   if (input.couponCode) {
@@ -112,25 +119,19 @@ export async function quote(customerId: string, input: QuoteInput, client: Query
 
   let discount = 0;
   let discountLabel: string | null = null;
-  let appliedVoucher: any = null;
-  let rewardItem: any = null;
-  const couponOk = coupon && !coupon.error;
-  if (couponOk) {
-    const raw = round2((subtotal * coupon!.percent!) / 100);
-    discount = coupon!.maxDiscount ? Math.min(raw, coupon!.maxDiscount) : raw;
-    discountLabel = `coupon:${coupon!.code}:${coupon!.percent}`;
-  } else if (input.voucherId !== null && vouchers.length) {
-    appliedVoucher = input.voucherId ? vouchers.find((v) => v.id === input.voucherId) ?? null : vouchers[0];
-    if (appliedVoucher?.kind === 'discount') {
-      discount = round2((subtotal * appliedVoucher.percent) / 100);
-      discountLabel = `voucher:${appliedVoucher.code}:${appliedVoucher.percent}`;
-    } else if (appliedVoucher?.kind === 'product') {
-      discountLabel = `reward:${appliedVoucher.code}`;
-      rewardItem = { product_id: appliedVoucher.product_id, name_en: appliedVoucher.product_name_en, name_ar: appliedVoucher.product_name_ar };
-    }
+  if (coupon && !coupon.error) {
+    const raw = round2((subtotal * coupon.percent!) / 100);
+    discount = coupon.maxDiscount ? Math.min(raw, coupon.maxDiscount) : raw;
+    discountLabel = `coupon:${coupon.code}:${coupon.percent}`;
   }
   discount = Math.min(discount, subtotal);
-  const total = round2(subtotal + deliveryFee + homeVisitFee - discount);
+  const due = round2(subtotal + deliveryFee + homeVisitFee - discount);
+
+  // Points are whole QAR, so they can cover the whole riyals of what's due.
+  await expirePoints(customerId, client);
+  const pointsBalance_ = await pointsBalance(customerId, client);
+  const pointsUsed = input.usePoints ? Math.max(0, Math.min(pointsBalance_, Math.floor(due))) : 0;
+  const total = round2(due - pointsUsed);
   const pointsToEarn = items.reduce((a, i) => a + i.points, 0);
 
   return {
@@ -141,13 +142,13 @@ export async function quote(customerId: string, input: QuoteInput, client: Query
     homeVisitFee,
     discount,
     discountLabel,
+    pointsBalance: pointsBalance_,
+    pointsUsed,
     total,
     pointsToEarn,
+    tier: status.tier,
     address: address ?? null,
+    pickup,
     coupon,
-    couponReplacesVoucher: Boolean(couponOk && vouchers.length),
-    appliedVoucher,
-    rewardItem,
-    vouchers,
   };
 }

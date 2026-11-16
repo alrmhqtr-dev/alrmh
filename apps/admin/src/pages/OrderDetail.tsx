@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowRight, Printer, Ruler } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { STAGE_LABEL, date, dateTime, money, phone } from '../lib/format';
+import { date, stageLabel, dateTime, money, phone } from '../lib/format';
 import { MeasureModal, MeasurementGrid, type Measurement } from '../measure';
 import { Field, Input, Loading, Modal, PageHead, StageBadge, TextArea, useToast } from '../ui';
 import { nextStage } from './Orders';
@@ -22,12 +22,15 @@ type Detail = {
   created_at: string;
   paid_at: string | null;
   expected_delivery: string | null;
-  address: { label: string; line1: string; area: string; city: string; notes?: string | null };
+  address: { label: string; line1: string; area: string; city: string; notes?: string | null; pickup?: boolean };
   customer_id: string;
   customer_name: string;
   phone: string;
   payment_status: string;
   payment_ref: string | null;
+  payment_provider: string | null;
+  placed_by: string | null;
+  points_used: number;
   points_to_earn: number;
   points_awarded: boolean;
   items: { id: string; kind: string; snapshot: any; qty: number; unit_price: number; line_total: number }[];
@@ -45,6 +48,7 @@ export default function OrderDetail() {
   const toast = useToast();
   const { can } = useAuth();
   const q = useQuery({ queryKey: ['order', id], queryFn: () => api<Detail>(`/orders/${id}`) });
+  const isThobe = (q.data?.items ?? []).some((i) => i.kind === 'thobe');
   const [measure, setMeasure] = useState<{ id: string; name: string } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState('');
@@ -68,7 +72,7 @@ export default function OrderDetail() {
   const move = useMutation({
     mutationFn: (to: string) => api(`/orders/${id}/stage`, { body: { stage: to } }),
     onSuccess: (_, to) => {
-      toast(`Moved to ${STAGE_LABEL[to]}. The customer was notified.`);
+      toast(`Moved to ${stageLabel(to, isThobe)}. The customer was notified.`);
       refresh();
     },
     onError: (e) => toast(errorMessage(e), 'error'),
@@ -96,7 +100,7 @@ export default function OrderDetail() {
         title={`Order #${o.number}`}
         sub={
           <span className="row wrap" style={{ gap: 8 }}>
-            <StageBadge stage={o.stage} /> Placed {dateTime(o.created_at)} · Due {date(o.expected_delivery)}
+            <StageBadge stage={o.stage} thobes={isThobe} /> Placed {dateTime(o.created_at)} · Due {date(o.expected_delivery)}
           </span>
         }
       >
@@ -105,7 +109,7 @@ export default function OrderDetail() {
         </button>
         {next && can('owner', 'manager', 'tailor') ? (
           <button className="btn" data-testid="detail-advance" disabled={move.isPending} onClick={() => move.mutate(next)}>
-            Move to {STAGE_LABEL[next]} <ArrowRight size={16} />
+            Move to {stageLabel(next, isThobe)} <ArrowRight size={16} />
           </button>
         ) : null}
         {can('owner', 'manager') && !['delivered', 'cancelled', 'out_for_delivery'].includes(o.stage) ? (
@@ -137,11 +141,15 @@ export default function OrderDetail() {
                   <span className="num strong">{money(it.line_total)}</span>
                 </div>
                 <div className="grid k3">
-                  <div><div className="overline">Collar</div><div className="strong">{s.thobe?.collar?.name_en}</div></div>
-                  <div><div className="overline">Fabric</div><div className="strong">{s.thobe?.fabric?.name_en}</div></div>
+                  <div><div className="overline">Type</div><div className="strong">{s.thobe?.collar?.name_en}</div></div>
+                  <div><div className="overline">Cloth</div><div className="strong">{s.thobe?.fabric?.name_en}</div></div>
                   <div>
                     <div className="overline">Colour</div>
-                    <div className="strong row" style={{ gap: 6 }}><span className="swatch" style={{ background: s.thobe?.colour?.hex }} />{s.thobe?.colour?.name_en}</div>
+                    {s.thobe?.colour ? (
+                      <div className="strong row" style={{ gap: 6 }}><span className="swatch" style={{ background: s.thobe.colour.hex }} />{s.thobe.colour.name_en}</div>
+                    ) : (
+                      <div className="secondary">{s.inStore ? 'Chosen in store' : 'As the cloth'}</div>
+                    )}
                   </div>
                 </div>
                 {s.remarks ? <div className="note gold">Customer remarks: “{s.remarks}”</div> : null}
@@ -185,8 +193,8 @@ export default function OrderDetail() {
             <Link to={`/customers/${o.customer_id}`} className="strong">{o.customer_name}</Link>
             <div className="secondary">{phone(o.phone)}</div>
             <div className="divider" />
-            <div className="overline">Deliver to</div>
-            <div>{o.address.label} · {o.address.line1}, {o.address.area}, {o.address.city}</div>
+            <div className="overline">{o.address.pickup ? 'Collect from' : 'Deliver to'}</div>
+            <div data-testid="order-address">{o.address.pickup ? `${o.address.label} branch` : `${o.address.label} · ${o.address.line1}, ${o.address.area}, ${o.address.city}`}</div>
             {o.address.notes ? <div className="small muted">{o.address.notes}</div> : null}
           </div>
           {o.appointments.length ? (
@@ -209,7 +217,8 @@ export default function OrderDetail() {
               ['Subtotal', money(o.subtotal)],
               ['Delivery', money(o.delivery_fee)],
               ...(o.home_visit_fee ? [['Home visit', money(o.home_visit_fee)]] : []),
-              ...(o.discount ? [[discount[0] === 'coupon' ? `Coupon ${discount[1]} (${discount[2]}%)` : `Voucher ${discount[1]} (${discount[2]}%)`, `− ${money(o.discount)}`]] : []),
+              ...(o.discount ? [[discount[0] === 'coupon' ? `Coupon ${discount[1]} (${discount[2]}%)` : 'Discount', `− ${money(o.discount)}`]] : []),
+              ...(o.points_used ? [[`Points (${o.points_used})`, `− ${money(o.points_used)}`]] : []),
             ].map(([a, b]) => (
               <div key={a} className="row spread small"><span className="secondary">{a}</span><span className="num">{b}</span></div>
             ))}
@@ -221,8 +230,10 @@ export default function OrderDetail() {
                 <span className="num">− {money(r.amount)}</span>
               </div>
             ))}
-            <div className="small muted">SADAD · {o.payment_status}{o.payment_ref ? ` · ${o.payment_ref}` : ''}</div>
-            <div className="small muted">{o.points_awarded ? `${o.points_to_earn} points awarded` : `${o.points_to_earn} points on delivery`}</div>
+            <div className="small muted" data-testid="payment-method">
+              {o.payment_provider === 'card_machine' ? `Card machine in store${o.placed_by ? ` · placed by ${o.placed_by}` : ''}` : `SADAD · ${o.payment_status}${o.payment_ref ? ` · ${o.payment_ref}` : ''}`}
+            </div>
+            <div className="small muted">{o.points_awarded ? `${o.points_to_earn} points awarded` : `${o.points_to_earn} points ${isThobe ? 'when collected' : 'on delivery'}`}</div>
           </div>
           <div className="card pad">
             <div className="overline" style={{ marginBottom: 10 }}>History</div>
@@ -231,7 +242,7 @@ export default function OrderDetail() {
                 <div key={i} className="tl-item">
                   <div className="tl-dot"><span />{i < o.events.length - 1 ? <i /> : null}</div>
                   <div className="tl-body">
-                    <div className="strong">{STAGE_LABEL[e.stage] ?? e.stage}</div>
+                    <div className="strong">{stageLabel(e.stage, isThobe)}</div>
                     <div className="small muted">{dateTime(e.at)}{e.staff_name ? ` · ${e.staff_name}` : ''}{e.note && e.note !== 'saved' ? ` · ${e.note}` : e.note === 'saved' ? ' · saved measurements' : ''}</div>
                   </div>
                 </div>
@@ -272,7 +283,7 @@ export default function OrderDetail() {
             </>
           }
         >
-          <div className="note">The customer is notified, booked visits are cancelled and any points voucher is returned. {o.paid_at ? `Refund ${money(o.total)} manually in SADAD.` : ''}</div>
+          <div className="note">The customer is notified, booked visits are cancelled and any points they spent are returned. {o.paid_at ? `Refund ${money(o.total)} manually in SADAD.` : ''}</div>
           <Field label="Reason (internal)">
             <TextArea value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>

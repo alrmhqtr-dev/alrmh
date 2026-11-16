@@ -1,7 +1,7 @@
 import { Body, Controller, Get, NotFoundException, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { db } from '../db.js';
-import { STAGES, expirePoints, fail, getSettings, need, notify, pointsBalance, spendPoints, type Stage } from '../lib.js';
+import { STAGES, addWorkingDays, expirePoints, fail, getSettings, lifetimePoints, need, notify, pointsBalance, qatarDateString, returnPoints, spendPoints, tierStatus, type Stage } from '../lib.js';
 import { setStage, stagesFor } from '../orders.js';
 import { addMonthsSql } from '../sql-helpers.js';
 import { AnyStaff, CurrentStaff, Managers, Workshop, audit, type StaffUser } from '../staff.js';
@@ -56,14 +56,16 @@ export class AdminOpsController {
     const o = await db.one(
       `select o.*, c.name as customer_name, c.phone, c.email,
               (select status from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_status,
-              (select provider_ref from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_ref
+              (select provider_ref from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_ref,
+              (select provider from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_provider,
+              (select name from staff_users u where u.id = o.placed_by_staff_id) as placed_by
          from orders o join customers c on c.id = o.customer_id where o.id = $1`,
       [id],
     );
     if (!o) throw new NotFoundException({ code: 'not_found' });
     const [items, events, appointments, refunds] = await Promise.all([
       db.many('select id, kind, snapshot, qty, unit_price, line_total from order_items where order_id = $1 order by kind desc', [id]),
-      db.many(`select e.stage, e.at, e.note, u.name as staff_name from order_events e left join staff_users u on u.id = e.staff_id where e.order_id = $1 order by e.at, array_position(array['confirmed','measured','cutting','stitching','ready','out_for_delivery','delivered','cancelled'], e.stage)`, [id]),
+      db.many(`select e.stage, e.at, e.note, u.name as staff_name from order_events e left join staff_users u on u.id = e.staff_id where e.order_id = $1 order by e.at, array_position(array['confirmed','measured','cutting','stitching','quality','ready','out_for_delivery','delivered','cancelled'], e.stage)`, [id]),
       db.many(
         `select a.id, a.kind, a.starts_at, a.status, a.member_id, f.name as member_name, b.name_en as branch_name, ad.line1, ad.area
            from appointments a join family_members f on f.id = a.member_id left join branches b on b.id = a.branch_id left join addresses ad on ad.id = a.address_id
@@ -105,7 +107,8 @@ export class AdminOpsController {
       await c.query(`update orders set stage = 'cancelled' where id = $1`, [id]);
       await c.query(`insert into order_events (order_id, stage, note, staff_id) values ($1, 'cancelled', $2, $3)`, [id, body?.reason ?? null, me.id]);
       await c.query(`update appointments set status = 'cancelled' where order_id = $1 and status in ('held','confirmed')`, [id]);
-      if (o.voucher_id) await c.query(`update vouchers set status = 'active', used_order_id = null where id = $1 and expires_at > now()`, [o.voucher_id]);
+      // Points spent on the order go back to the customer.
+      if (o.paid_at && o.points_used > 0) await returnPoints(o.customer_id, o.points_used, id, `Returned: Order #${o.number}`, c);
       await notify(
         o.customer_id,
         'order',
@@ -200,7 +203,7 @@ export class AdminOpsController {
   appointments(@Query('from') from?: string, @Query('days') days?: string, @Query('kind') kind?: string) {
     const start = from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : null;
     return db.many(
-      `select a.id, a.kind, a.starts_at, a.status, a.order_id, a.fee::float as fee, a.fee_paid_at, o.number as order_number, a.member_id, f.name as member_name, f.relation, f.size,
+      `select a.id, a.kind, a.branch_id, a.starts_at, a.status, a.order_id, a.fee::float as fee, a.fee_paid_at, o.number as order_number, a.member_id, f.name as member_name, f.relation, f.size,
               c.id as customer_id, c.name as customer_name, c.phone, ad.line1, ad.area, ad.notes as address_notes, b.name_en as branch_name,
               exists (select 1 from measurements m where m.member_id = a.member_id and m.taken_at >= a.created_at) as measured
          from appointments a join family_members f on f.id = a.member_id join customers c on c.id = a.customer_id
@@ -278,7 +281,7 @@ export class AdminOpsController {
     await expirePoints(id);
     const c = await db.one('select id, name, phone, email, language, created_at from customers where id = $1 and deleted_at is null', [id]);
     if (!c) throw new NotFoundException({ code: 'not_found' });
-    const [family, addresses, orders, ledger, vouchers, balance] = await Promise.all([
+    const [family, addresses, orders, ledger, tier, balance] = await Promise.all([
       db.many(
         `select f.id, f.name, f.relation, f.size,
                 (select row_to_json(m) from (select taken_at, tailor_name, method, ${FIELDS.join(', ')}, remarks from measurements where member_id = f.id order by taken_at desc limit 1) m) as latest,
@@ -293,10 +296,97 @@ export class AdminOpsController {
            from points_ledger p left join staff_users u on u.id = p.staff_id where p.customer_id = $1 order by p.created_at desc limit 50`,
         [id],
       ),
-      db.many(`select id, code, kind, percent, status, expires_at from vouchers where customer_id = $1 order by created_at desc limit 20`, [id]),
+      tierStatus(id),
       pointsBalance(id),
     ]);
-    return { ...c, family, addresses, orders, ledger, vouchers, balance };
+    return { ...c, family, addresses, orders, ledger, tier, balance };
+  }
+
+  /**
+   * An order staff place at the visit: the customer chose the type (collar) and
+   * cloth (fabric) with the tailor and paid on the card machine. It shows in the
+   * customer's app like any other order and earns points for their tier.
+   */
+  @Post('customers/:id/orders')
+  @UseGuards(Workshop)
+  async placeOrder(
+    @CurrentStaff() me: StaffUser,
+    @Param('id') id: string,
+    @Body() body: { memberId: string; lines: { collarId: string; fabricId: string; qty: number }[]; branchId?: string; appointmentId?: string; paidByCard?: boolean },
+  ) {
+    if (body?.paidByCard !== true) fail('payment_not_confirmed');
+    const lines = Array.isArray(body?.lines) ? body.lines : [];
+    if (!lines.length || lines.length > 10) fail('invalid_lines');
+    return db.tx(async (c) => {
+      const cust = await db.one('select id from customers where id = $1 and deleted_at is null', [id], c);
+      if (!cust) throw new NotFoundException({ code: 'not_found' });
+      const member = await db.one('select id, name, relation, size from family_members where id = $1 and customer_id = $2', [need(body.memberId, 'memberId'), id], c);
+      if (!member) fail('member_not_found');
+      const s = await getSettings(c);
+      const { tier } = await tierStatus(id, c);
+      const items: any[] = [];
+      for (const l of lines) {
+        const qty = Math.trunc(Number(l?.qty));
+        if (!(qty >= 1 && qty <= 20)) fail('invalid_qty');
+        const collar = await db.one('select id, name_en, name_ar, shape from collars where id = $1 and active', [l.collarId], c);
+        const fabric = await db.one('select id, name_en, name_ar, price::float as price from fabrics where id = $1 and active', [l.fabricId], c);
+        if (!collar || !fabric) fail('invalid_thobe_options');
+        items.push({ qty, unit: fabric.price, collar, fabric });
+      }
+      // Thobes are always collected from the branch.
+      const b = await db.one('select id, name_en, name_ar, address_en, address_ar from branches where active and ($1::uuid is null or id = $1) order by sort limit 1', [body.branchId || null], c);
+      if (!b) fail('branch_not_found');
+      const address = { pickup: true, branchId: b.id, label: b.name_en, label_ar: b.name_ar, line1: b.address_en, line1_ar: b.address_ar, area: '', city: 'Doha' };
+      const deliveryFee = 0;
+      const subtotal = round2(items.reduce((a, i) => a + i.unit * i.qty, 0));
+      const total = round2(subtotal + deliveryFee);
+      const pointsToEarn = items.reduce((a, i) => a + i.qty * tier.points_per_thobe, 0);
+      const measured = await db.one('select 1 from measurements where member_id = $1 limit 1', [member.id], c);
+      const stage = 'measured';
+      const number = `AR-${(await db.one<{ n: number }>(`select nextval('order_number_seq')::int as n`, [], c))!.n}`;
+      const expected = addWorkingDays(qatarDateString(new Date()), s.lead_working_days);
+      const order = await db.one(
+        `insert into orders (number, customer_id, stage, subtotal, delivery_fee, total, address, points_to_earn, expected_delivery, paid_at, placed_by_staff_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), $10) returning id, number, total`,
+        [number, id, stage, subtotal, deliveryFee, total, address, pointsToEarn, expected, me.id],
+        c,
+      );
+      for (const i of items)
+        await c.query('insert into order_items (order_id, kind, snapshot, qty, unit_price, line_total) values ($1,$2,$3,$4,$5,$6)', [
+          order!.id,
+          'thobe',
+          {
+            thobe: { collar: i.collar, fabric: i.fabric, colour: null },
+            member: { id: member.id, name: member.name, relation: member.relation, size: member.size },
+            measureMethod: 'saved',
+            points: i.qty * tier.points_per_thobe,
+            inStore: true,
+          },
+          i.qty,
+          i.unit,
+          round2(i.unit * i.qty),
+        ]);
+      await c.query(`insert into payments (order_id, provider, amount, status, provider_ref, completed_at) values ($1, 'card_machine', $2, 'paid', $3, now())`, [
+        order!.id,
+        total,
+        `CARD-${me.id.slice(0, 8)}`,
+      ]);
+      await c.query(`insert into order_events (order_id, stage, note, staff_id) values ($1, 'measured', $2, $3)`, [order!.id, measured ? 'saved' : null, me.id]);
+      if (body.appointmentId)
+        await c.query(`update appointments set order_id = $2, status = 'done' where id = $1 and customer_id = $3 and status in ('confirmed','done')`, [body.appointmentId, order!.id, id]);
+      await notify(
+        id,
+        'order',
+        {
+          en: { title: 'Order placed', body: `Order #${order!.number} is confirmed. We'll notify you at each stage.` },
+          ar: { title: 'تم استلام طلبك', body: `تم تأكيد الطلب رقم #${order!.number}. سنبلغك في كل مرحلة.` },
+        },
+        `/orders/${order!.id}`,
+        c,
+      );
+      await audit(me, 'place_order', 'order', order!.id, { customer: id, total, lines: items.map((i) => ({ collar: i.collar.id, fabric: i.fabric.id, qty: i.qty })) }, c);
+      return { orderId: order!.id, number: order!.number, total: order!.total, pointsToEarn };
+    });
   }
 
   @Post('customers/:id/points')
@@ -357,15 +447,6 @@ export class AdminOpsController {
       `update appointments set status = 'done' where member_id = $1 and status = 'confirmed' and (starts_at at time zone 'Asia/Qatar')::date <= (now() at time zone 'Asia/Qatar')::date`,
       [memberId],
     );
-    const waiting = await db.many(`select distinct o.id from orders o join appointments a on a.order_id = o.id where a.member_id = $1 and o.stage = 'confirmed'`, [memberId]);
-    for (const o of waiting) {
-      const pending = await db.one(
-        `select count(*)::int as n from appointments a where a.order_id = $1 and a.status in ('confirmed','done')
-           and not exists (select 1 from measurements m where m.member_id = a.member_id and m.taken_at >= a.created_at)`,
-        [o.id],
-      );
-      if (pending!.n === 0) await setStage(o.id, 'measured', undefined, me.id);
-    }
     await notify(
       member.customer_id,
       'measurement',

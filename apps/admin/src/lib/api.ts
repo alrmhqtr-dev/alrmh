@@ -133,6 +133,15 @@ const MESSAGES: Record<string, string> = {
   cannot_demote_self: "You can't remove your own owner access.",
   missing_field: 'Fill in the required fields.',
   invalid_email: 'Check the email address.',
+  starting_tier: 'The starting tier stays at 0 points and can’t be removed.',
+  tier_threshold_taken: 'Another tier already starts at that number of points.',
+  invalid_colour: 'Use a colour like #C9A35A.',
+  payment_not_confirmed: 'Confirm the payment was taken on the card machine.',
+  invalid_lines: 'Add at least one thobe.',
+  invalid_qty: 'Check the number of thobes (1–20).',
+  invalid_thobe_options: 'That type or cloth is no longer available.',
+  member_not_found: 'Choose who the thobes are for.',
+  address_not_found: 'Choose a delivery address.',
 };
 
 export function errorMessage(err: unknown) {

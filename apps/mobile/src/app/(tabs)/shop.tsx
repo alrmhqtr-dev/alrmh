@@ -4,8 +4,7 @@ import { router } from 'expo-router';
 import { ArrowRight, Search, ShoppingBag } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { useCatalogue } from '@/api/hooks';
-import { useBuilder } from '@/state/builder';
-import { defaultsFor } from '@/lib/actions';
+import { useSession } from '@/state/session';
 import { Button, Chip, ErrorState, Icon, Loading, Text, EmptyState } from '@/ui/primitives';
 import { BagButton, Screen } from '@/ui/layout';
 import { ProductCard } from '@/ui/commerce';
@@ -15,7 +14,6 @@ import { colors, radius, type as typeScale } from '@/theme/tokens';
 export default function Shop() {
   const { t, f, isRTL } = useLocale();
   const cat = useCatalogue();
-  const builder = useBuilder();
   const [filter, setFilter] = useState<string>('all');
   const [q, setQ] = useState('');
 
@@ -31,10 +29,8 @@ export default function Shop() {
     });
   }, [cat.data, filter, q]);
 
-  const startDesign = () => {
-    builder.reset(defaultsFor(cat.data));
-    router.push('/design/collar');
-  };
+  const { signedIn } = useSession();
+  const startOrder = () => router.push(signedIn ? '/book?standalone=1' : '/auth/phone');
 
   const filters = ['all', 'thobes', ...categories.map((c) => c.id)];
 
@@ -76,9 +72,9 @@ export default function Shop() {
               {t('shop.mtm')}
             </Text>
             <Text variant="h2" color={colors.textInverse}>
-              {t('shop.designYours')}
+              {t('shop.bookYours')}
             </Text>
-            <Button testID="shop-design" label={t('shop.start')} kind="light" small iconEnd={ArrowRight} onPress={startDesign} style={{ alignSelf: 'flex-start', marginTop: 6 }} />
+            <Button testID="shop-design" label={t('shop.book')} kind="light" small iconEnd={ArrowRight} onPress={startOrder} style={{ alignSelf: 'flex-start', marginTop: 6 }} />
           </View>
           <View style={{ marginVertical: -20 }}>
             <ThobeArt fill="#F4F2EE" height={150} />

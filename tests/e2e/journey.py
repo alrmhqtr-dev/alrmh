@@ -6,11 +6,14 @@ the built customer app and admin, `psql`, and Chrome. On a fresh database:
     API=http://localhost:4000 APP=http://localhost:8081 ADMIN=http://localhost:5174 python3 tests/e2e/journey.py
 
 
-Customer: language -> phone sign-up -> design a thobe -> book a measurement ->
-add an accessory -> checkout with a coupon -> pay on the test page -> track.
-Staff (admin, another browser): find the order, record measurements, move it
-through every stage, top up points. Customer: sees each stage live, gets the
-points, redeems a voucher and spends it on a second order.
+Customer: language -> phone sign-up -> New order -> book a visit and pay the
+QAR 70 booking fee on the test page -> booking confirmed.
+Staff (admin, another browser): at the visit, record measurements and place the
+order (type, cloth, how many; paid on the card machine), move it through every
+stage. Customer: sees the order and each stage live, earns points for their
+tier (Silver). In English, staff top up points so the customer reaches Gold;
+the customer re-orders a past thobe with a different type and cloth and pays
+part of it with points.
 The API is only read, to confirm what the screens showed.
 """
 import json, os, subprocess, sys, time, urllib.request
@@ -60,12 +63,12 @@ def text(page):
     return " | ".join(t.strip() for t in page.locator("body").inner_text().split("\n") if t.strip())
 
 
-def journey(browser, lang, method, phone, name, redeem):
+def journey(browser, lang, method, phone, name, reorder):
     tag = f"{lang}/{method}"
     cat = read("/catalogue")
     s = cat["settings"]
     fabric = next(f for f in cat["fabrics"] if f["id"] == "japanese-cotton")
-    ghutra = next(p for p in cat["products"] if p["id"] == "white-ghutra")
+    silver, gold = cat["tiers"][0], cat["tiers"][1]
     ctx = browser.new_context(viewport={"width": 420, "height": 900}, device_scale_factor=2)
     page = ctx.new_page()
     page.on("pageerror", lambda e: errors.append(f"{tag} app: {e}"))
@@ -80,68 +83,63 @@ def journey(browser, lang, method, phone, name, redeem):
     fill(page, '[data-testid="details-name"]', name); tap(page, '[data-testid="details-save"]')
     page.wait_for_url("**/home", timeout=20000)
     check(f"{tag}: new customer signs up with a mobile number and code", sql(f"select name from customers where phone = '+974{phone}'") == name)
+    cid = sql(f"select id from customers where phone = '+974{phone}'")
 
-    if method == "home":
-        page.goto(APP + "/account/add-address")
-        fill(page, '[data-testid="address-line1"]', "Villa 21, Street 830"); fill(page, '[data-testid="address-area"]', "Al Waab")
-        tap(page, '[data-testid="address-save"]'); page.wait_for_timeout(1200)
+    page.goto(APP + "/account/add-address")
+    fill(page, '[data-testid="address-line1"]', "Villa 21, Street 830"); fill(page, '[data-testid="address-area"]', "Al Waab")
+    tap(page, '[data-testid="address-save"]'); page.wait_for_timeout(1200)
 
-    # ---- design a thobe ----
-    page.goto(APP + "/shop"); tap(page, '[data-testid="shop-design"]')
-    tap(page, '[data-testid="collar-classic-qatari"]'); tap(page, '[data-testid="design-next"]')
-    tap(page, '[data-testid="fabric-japanese-cotton"]'); tap(page, '[data-testid="design-next"]')
-    tap(page, '[data-testid="colour-ivory"]'); tap(page, '[data-testid="design-next"]')
-    vis(page, '[data-testid="member-self"]').wait_for(timeout=20000); tap(page, '[data-testid="design-next"]')
-    tap(page, f'[data-testid="measure-{method}"]')
+    # ---- New order = book a visit and pay the booking fee ----
+    page.goto(APP + "/home"); tap(page, '[data-testid="home-design"]')
+    page.wait_for_url("**/book**", timeout=20000)
+    tap(page, f'[data-testid="kind-{method}"]')
     vis(page, '[data-testid^="date-"]').wait_for(timeout=20000); page.wait_for_timeout(800)
     page.locator('[data-testid^="time-"]:not([aria-disabled="true"]) >> visible=true').first.click()
+    vis(page, '[data-testid="book-summary"]').wait_for(timeout=20000)
+    label = vis(page, '[data-testid="book-confirm"]').inner_text()
+    check(f"{tag}: New order books a visit and asks for the QAR {s['appointment_fee']} booking fee", str(s["appointment_fee"]) in label.replace("٧٠", "70"), label)
+    page.screenshot(path=f"{SHOTS}/full-book-{lang}.png", full_page=True)
     tap(page, '[data-testid="book-confirm"]')
-    vis(page, '[data-testid="measure-next"]').wait_for(timeout=20000); page.wait_for_timeout(500)
-    tap(page, '[data-testid="measure-next"]')
-    tap(page, '[data-testid="review-add"]'); page.wait_for_url("**/basket", timeout=20000)
-    vis(page, '[data-testid="line-thobe"]').wait_for(timeout=20000)
-    check(f"{tag}: thobe designed, measurement booked, added to the basket", sql(f"select count(*) from basket_items b join customers c on c.id = b.customer_id where c.phone = '+974{phone}' and b.kind = 'thobe' and b.appointment_id is not null") == "1")
+    page.locator("button.pay").wait_for(timeout=20000)
+    fee_page = page.locator("body").inner_text()
+    page.locator("button.pay").click()
+    page.wait_for_url("**/booked/**", timeout=20000)
+    appt = page.url.rstrip("/").split("/")[-1].split("?")[0]
+    vis(page, '[data-testid="booked-title"]').wait_for(timeout=20000)
+    check(f"{tag}: the fee is paid on the test page and the visit is confirmed",
+          "Booking fee" in fee_page and sql(f"select a.status || ':' || p.status || ':' || p.amount::int from appointments a join payments p on p.appointment_id = a.id where a.id = '{appt}'") == f"confirmed:paid:{s['appointment_fee']}",
+          sql(f"select a.status || ':' || coalesce(p.status,'-') from appointments a left join payments p on p.appointment_id = a.id where a.id = '{appt}'"))
+    page.screenshot(path=f"{SHOTS}/full-booked-{lang}.png", full_page=True)
 
-    # ---- an accessory ----
-    page.goto(APP + "/product/white-ghutra"); tap(page, '[data-testid="size-56"]'); tap(page, '[data-testid="product-add"]'); page.wait_for_timeout(1200)
-    page.goto(APP + "/basket"); tap(page, '[data-testid="basket-checkout"]')
-
-    # ---- checkout ----
-    vis(page, '[data-testid="checkout-total"]').wait_for(timeout=20000)
-    if method == "branch":
-        tap(page, '[data-testid="add-address"]')
-        fill(page, '[data-testid="address-line1"]', "Tower 4, West Bay"); fill(page, '[data-testid="address-area"]', "West Bay")
-        tap(page, '[data-testid="address-save"]'); vis(page, '[data-testid="checkout-pay"]').wait_for(timeout=20000); page.wait_for_timeout(1000)
-    fill(page, '[data-testid="coupon-input"]', "EID20"); tap(page, '[data-testid="coupon-apply"]'); page.wait_for_timeout(1500)
-    subtotal = fabric["price"] + ghutra["price"]
-    expected = round(subtotal + s["delivery_fee"] + (s["home_visit_fee"] if method == "home" else 0) - min(round(subtotal * 0.2, 2), 100), 2)
-    shown = vis(page, '[data-testid="checkout-total"]').inner_text().replace(",", "")
-    check(f"{tag}: checkout total is right (QAR {expected:.2f} with EID20{', home visit' if method == 'home' else ''})", f"{expected:.2f}" in shown, shown)
-    page.screenshot(path=f"{SHOTS}/full-checkout-{lang}.png", full_page=True)
-    tap(page, '[data-testid="checkout-pay"]')
-    page.locator("button.pay").wait_for(timeout=20000); page.locator("button.pay").click()
-    page.wait_for_url("**/order-placed/**", timeout=20000)
-    order_id = page.url.rstrip("/").split("/")[-1]
-    number = sql(f"select number from orders where id = '{order_id}'")
-    check(f"{tag}: payment on the test page places the order", sql(f"select stage from orders where id = '{order_id}'") == "confirmed")
-    tap(page, '[data-testid="placed-track"]'); vis(page, '[data-testid="track-stage"]').wait_for(timeout=20000)
-
-    # ---- staff, in the admin ----
+    # ---- staff, at the visit ----
     actx = browser.new_context(viewport={"width": 1280, "height": 900})
     admin = actx.new_page()
     admin.on("pageerror", lambda e: errors.append(f"{tag} admin: {e}"))
     admin.goto(ADMIN + "/")
     admin.fill('[data-testid="login-email"]', ADMIN_EMAIL); admin.fill('[data-testid="login-password"]', ADMIN_PASSWORD); admin.click('[data-testid="login-submit"]')
-    admin.click('[data-testid="nav-orders"]'); admin.wait_for_selector(f'[data-testid="ticket-{number}"]', timeout=15000)
-    check(f"{tag}: staff see the order on the board", name in admin.locator(f'[data-testid="ticket-{number}"]').inner_text())
-    admin.goto(f"{ADMIN}/orders/{order_id}"); admin.wait_for_selector(f'[data-testid="measure-{name}"]', timeout=15000)
-    admin.click(f'[data-testid="measure-{name}"]')
+    admin.click('[data-testid="nav-appointments"]'); admin.wait_for_selector(f'[data-testid="appt-order-{name}"]', timeout=15000)
+    admin.click(f'[data-testid="appt-measure-{name}"]')
     for k, v in {"length_cm": 149, "shoulder_cm": 47, "chest_cm": 111, "waist_cm": 102, "sleeve_cm": 62, "neck_cm": 41, "cuff_cm": 24}.items():
         admin.fill(f'[data-testid="m-{k}"]', str(v))
     admin.click('[data-testid="measure-save"]'); admin.wait_for_timeout(1500)
-    check(f"{tag}: recording measurements moves the order to Measured", sql(f"select stage from orders where id = '{order_id}'") == "measured")
-    page.wait_for_timeout(12000)
-    check(f"{tag}: the open tracking screen shows Measured by itself", vis(page, '[data-testid="track-stage"]').inner_text().strip() in ("Measured", "أخذ المقاسات"), vis(page, '[data-testid="track-stage"]').inner_text())
+    admin.click(f'[data-testid="appt-order-{name}"]'); admin.wait_for_selector('[data-testid="po-type-0"]', timeout=15000)
+    admin.select_option('[data-testid="po-type-0"]', "classic-qatari")
+    admin.select_option('[data-testid="po-cloth-0"]', "japanese-cotton")
+    admin.fill('[data-testid="po-qty-0"]', "2")
+    total = fabric["price"] * 2
+    po_total = admin.locator('[data-testid="po-total"]').inner_text().replace(",", "")
+    admin.check('[data-testid="po-paid"]'); admin.click('[data-testid="place-order"]')
+    admin.wait_for_url("**/orders/**", timeout=15000)
+    order_id = admin.url.rstrip("/").split("/")[-1]
+    number = sql(f"select number from orders where id = '{order_id}'")
+    check(f"{tag}: staff place the order at the visit (2 thobes, QAR {total:.2f}, card machine, to collect from the branch); it starts at Taking measurements",
+          float(po_total.replace("QAR", "").strip()) == total and sql(f"select stage || ':' || total::numeric(10,2) from orders where id = '{order_id}'") == f"measured:{total:.2f}"
+          and sql(f"select provider from payments where order_id = '{order_id}'") == "card_machine", f"{po_total} {sql(f'select stage, total from orders where id = {chr(39)}{order_id}{chr(39)}')}")
+
+    page.goto(APP + "/orders"); page.wait_for_timeout(2500)
+    check(f"{tag}: the order shows in the customer's app", number in text(page), text(page)[:300])
+    page.goto(APP + f"/orders/{order_id}"); vis(page, '[data-testid="track-stage"]').wait_for(timeout=20000)
+    check(f"{tag}: it says it was paid on the card machine", vis(page, '[data-testid="paid-in-store"]').count() == 1)
     moved = []
     for _ in range(6):
         btn = admin.locator('[data-testid="detail-advance"]')
@@ -149,45 +147,75 @@ def journey(browser, lang, method, phone, name, redeem):
             break
         btn.click(); admin.wait_for_timeout(1300)
         moved.append(sql(f"select stage from orders where id = '{order_id}'"))
-    check(f"{tag}: staff move it through every stage to Delivered", moved == ["cutting", "stitching", "ready", "out_for_delivery", "delivered"], str(moved))
+    want = ["cutting", "stitching", "quality", "ready", "delivered"]
+    check(f"{tag}: staff move it through every stage to Collected", moved == want, str(moved))
     page.wait_for_timeout(12000)
     final = vis(page, '[data-testid="track-stage"]').inner_text().strip()
-    check(f"{tag}: the customer's tracking screen reaches Delivered without a refresh", final in ("Delivered", "تم التوصيل"), final)
+    steps = [x.strip() for x in page.locator('[data-testid="track-steps"]').inner_text().split("\n") if x.strip()]
+    names = {"en": ["Taking measurements", "Cutting", "Sewing", "Quality inspection", "Ready for pickup", "Collected"],
+             "ar": ["أخذ المقاسات", "القص", "الخياطة", "قسم التدقيق ومراجعة الجودة", "الملابس جاهزة", "تم الاستلام"]}[lang]
+    check(f"{tag}: the customer's tracking reaches {names[-1]} without a refresh, through the six stages", final == names[-1] and [x for x in steps if x in names] == names, f"{final} {steps}")
     page.screenshot(path=f"{SHOTS}/full-tracking-{lang}.png", full_page=True)
 
     page.goto(APP + "/account/notifications"); page.wait_for_timeout(2000)
-    n = sql(f"select count(*) from notifications n join customers c on c.id = n.customer_id where c.phone = '+974{phone}'")
-    check(f"{tag}: every step reached the customer's notifications ({n})", int(n) >= 8 and ("Order delivered" in text(page) or "تم التوصيل" in text(page)))
+    n = sql(f"select count(*) from notifications where customer_id = '{cid}'")
+    check(f"{tag}: every step reached the customer's notifications ({n})", int(n) >= 7, n)
 
-    pts = s["points"]["thobe_fixed"] + round(ghutra["price"] * s["points"]["product_per_qar"])
+    pts = silver["points_per_thobe"] * 2
     page.goto(APP + "/rewards"); vis(page, '[data-testid="rewards-balance"]').wait_for(timeout=20000); page.wait_for_timeout(800)
     bal = vis(page, '[data-testid="rewards-balance"]').inner_text().strip()
-    check(f"{tag}: points arrive on delivery ({pts})", bal.replace(",", "").replace("٬", "") in (str(pts),) or str(pts) in bal, bal)
+    tier = vis(page, '[data-testid="tier-name"]').inner_text().strip()
+    nxt = vis(page, '[data-testid="tier-next"]').inner_text()
+    check(f"{tag}: Silver earns {silver['points_per_thobe']} points a thobe ({pts}); the card shows the way to Gold",
+          bal.replace(",", "") == str(pts) and tier == silver[f"name_{lang}"] and gold[f"name_{lang}"] in nxt, f"{bal} {tier} {nxt}")
+    page.screenshot(path=f"{SHOTS}/full-rewards-{lang}.png", full_page=True)
 
-    if redeem:
-        # staff top the customer up so a reward is in reach
-        admin.click('[data-testid="nav-customers"]'); admin.fill('[data-testid="customer-search"]', phone); admin.wait_for_timeout(1200)
-        admin.locator('tr[data-testid^="customer-"]').first.click(); admin.wait_for_selector('[data-testid="adjust-points"]')
-        admin.click('[data-testid="adjust-points"]'); admin.fill('[data-testid="adjust-points-input"]', "500"); admin.fill('[data-testid="adjust-reason"]', "Welcome gift")
-        admin.click('[data-testid="adjust-save"]'); admin.wait_for_timeout(1200)
-        check(f"{tag}: staff add points from the customer page", admin.locator('[data-testid="points-balance"]').inner_text().strip().replace(",", "") == str(pts + 500))
-        page.goto(APP + "/rewards"); page.wait_for_timeout(1500); tap(page, '[data-testid="rewards-redeem"]')
-        tap(page, '[data-testid="redeem-discount-5"]'); tap(page, '[data-testid="confirm-redeem"]')
-        vis(page, '[data-testid="voucher-code"]').wait_for(timeout=20000)
-        code = vis(page, '[data-testid="voucher-code"]').inner_text().strip()
-        check(f"{tag}: the customer redeems 500 points for a 5% voucher", code.startswith("AR5-"), code)
-        tap(page, '[data-testid="voucher-shop"]')
-        page.goto(APP + "/product/oud-50"); tap(page, '[data-testid="product-add"]'); page.wait_for_timeout(1200)
-        page.goto(APP + "/checkout"); vis(page, '[data-testid="checkout-total"]').wait_for(timeout=20000); page.wait_for_timeout(1500)
-        oud = next(p for p in cat["products"] if p["id"] == "oud-50")["price"]
-        exp2 = round(oud + s["delivery_fee"] - round(oud * 0.05, 2), 2)
-        t2 = vis(page, '[data-testid="checkout-total"]').inner_text().replace(",", "")
-        check(f"{tag}: the voucher is applied by itself at the next checkout (QAR {exp2:.2f})", f"{exp2:.2f}" in t2, t2)
+    if reorder:
+        # staff top the customer up past the Gold threshold
+        admin.goto(f"{ADMIN}/customers/{cid}"); admin.wait_for_selector('[data-testid="adjust-points"]', timeout=15000)
+        admin.click('[data-testid="adjust-points"]'); admin.fill('[data-testid="adjust-points-input"]', str(gold["min_points"])); admin.fill('[data-testid="adjust-reason"]', "Welcome gift")
+        admin.click('[data-testid="adjust-save"]'); admin.wait_for_timeout(1500)
+        bal = pts + gold["min_points"]
+        check(f"{tag}: staff add points from the customer page; the customer is now Gold",
+              admin.locator('[data-testid="points-balance"]').inner_text().strip().replace(",", "") == str(bal) and gold["name_en"].lower() in admin.locator('[data-testid="customer-tier"]').inner_text().lower(),
+              admin.locator('[data-testid="customer-tier"]').inner_text())
+        page.goto(APP + "/rewards"); page.wait_for_timeout(2000)
+        check(f"{tag}: the rewards card shows Gold", vis(page, '[data-testid="tier-name"]').inner_text().strip() == gold["name_en"])
+
+        # re-order: the list, then the order, change type and cloth, place it
+        page.goto(APP + "/home"); tap(page, '[data-testid="home-again"]')
+        tap(page, f'[data-testid="reorder-{number}"]')
+        tap(page, '[data-testid="reorder-edit-0"]')
+        tap(page, '[data-testid="retype-0-mandarin-band"]'); tap(page, '[data-testid="refabric-0-swiss-voile"]')
+        page.screenshot(path=f"{SHOTS}/full-reorder-{lang}.png", full_page=True)
+        tap(page, '[data-testid="reorder-place"]'); page.wait_for_url("**/checkout**", timeout=20000)
+        vis(page, '[data-testid="checkout-total"]').wait_for(timeout=20000); page.wait_for_timeout(1500)
+        voile = next(f for f in cat["fabrics"] if f["id"] == "swiss-voile")["price"]
+        due = voile * 2
+        branch_card = vis(page, '[data-testid="pickup-branch"]').inner_text()
+        check(f"{tag}: checkout says to collect from the branch, with no delivery fee", cat["branches"][0]["name_en"] in branch_card and "Delivery" not in vis(page, '[data-testid="checkout-total"]').locator("xpath=../..").inner_text(), branch_card)
+        used = min(bal, int(due))
+        tap(page, '[data-testid="use-points"]'); page.wait_for_timeout(1500)
+        shown = vis(page, '[data-testid="checkout-total"]').inner_text().replace(",", "")
+        check(f"{tag}: re-order of 2 thobes (new type and cloth); {used} points pay QAR {used} (QAR {due - used:.2f} left)", f"{due - used:.2f}" in shown, shown)
+        page.screenshot(path=f"{SHOTS}/full-checkout-points-{lang}.png", full_page=True)
         tap(page, '[data-testid="checkout-pay"]'); page.locator("button.pay").wait_for(timeout=20000); page.locator("button.pay").click()
         page.wait_for_url("**/order-placed/**", timeout=20000)
-        check(f"{tag}: second order paid; the voucher is used up", sql(f"select status from vouchers where code = '{code}'") == "used")
+        o2 = page.url.rstrip("/").split("/")[-1]
+        line = sql(f"select (snapshot->'thobe'->'collar'->>'id') || ':' || (snapshot->'thobe'->'fabric'->>'id') || ':' || coalesce(snapshot->'thobe'->>'colour', 'none') || ':' || (snapshot->>'measureMethod') || ':' || qty from order_items where order_id = '{o2}' and kind = 'thobe'")
+        check(f"{tag}: the re-order keeps the saved measurements, with the new type and cloth and no colour",
+              line == "mandarin-band:swiss-voile:none:saved:2" and sql(f"select points_used from orders where id = '{o2}'") == str(used), line)
+        check(f"{tag}: the points are spent; the tier stays Gold",
+              read_rewards(cid) == (bal - used, "gold"), str(read_rewards(cid)))
     actx.close()
     ctx.close()
+
+
+def read_rewards(cid):
+    bal = sql(f"select coalesce(sum(points),0) from points_ledger where customer_id = '{cid}'")
+    life = int(sql(f"select coalesce(sum(points),0) from points_ledger where customer_id = '{cid}' and kind in ('earn','adjust')") or 0)
+    tier = sql(f"select id from tiers where min_points <= {life} order by min_points desc limit 1")
+    return int(bal), tier
 
 
 def crash_screens(browser):
@@ -224,8 +252,8 @@ def crash_screens(browser):
 
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=CHROME, args=["--no-sandbox"])
-    journey(browser, "en", "branch", "55594001", "Nasser Al-Hajri", redeem=True)
-    journey(browser, "ar", "home", "55594002", "فيصل الكواري", redeem=False)
+    journey(browser, "en", "branch", "55594001", "Nasser Al-Hajri", reorder=True)
+    journey(browser, "ar", "home", "55594002", "فيصل الكواري", reorder=False)
     crash_screens(browser)
     browser.close()
 

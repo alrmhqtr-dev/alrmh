@@ -19,7 +19,7 @@ export function lineDetails(line: BasketLine, t: any, f: any): string[] {
       : line.appointment
         ? t(line.appointment.kind === 'home' ? 'review.homeVisitWhen' : 'review.branchVisit', { when: f.when(line.appointment.startsAt) })
         : '';
-  return [`${line.member?.name} · ${f.name(line.thobe?.collar)}`, `${f.name(line.thobe?.fabric)} · ${f.name(line.thobe?.colour)}`, method];
+  return [`${line.member?.name} · ${f.name(line.thobe?.collar)}`, [f.name(line.thobe?.fabric), line.thobe?.colour ? f.name(line.thobe.colour) : ''].filter(Boolean).join(' · '), method];
 }
 
 export default function BasketScreen() {
@@ -97,9 +97,9 @@ export default function BasketScreen() {
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <Text variant="body" color={colors.textSecondary}>
-                {t('basket.delivery')}
+                {data.items.some((i) => i.kind === 'thobe') ? t('basket.collection') : t('basket.delivery')}
               </Text>
-              <Text variant="bodyStrong">{t('basket.deliveryLater')}</Text>
+              <Text variant="bodyStrong">{data.items.some((i) => i.kind === 'thobe') ? t('basket.collectionFree') : t('basket.deliveryLater')}</Text>
             </View>
           </Card>
           <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', backgroundColor: colors.goldSoft, borderRadius: radius.md, padding: 14 }}>

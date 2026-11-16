@@ -2,17 +2,23 @@ import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Info, Star } from 'lucide-react-native';
+import { Info, Pencil, Star } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
-import { useCatalogue, useFamily, useOrder } from '@/api/hooks';
+import { useCatalogue, useFamily, useOrder, usePointRates } from '@/api/hooks';
 import { errorText } from '@/lib/errors';
-import { memberTitle } from '@/lib/people';
 import { Button, Card, Chip, Divider, Loading, Note, Pill, Stepper, Text, Touch } from '@/ui/primitives';
 import { BottomBar, Header, Screen } from '@/ui/layout';
-import { Swatch, ThobeArt } from '@/ui/art';
-import { colors, fonts } from '@/theme/tokens';
+import { ThobeArt } from '@/ui/art';
+import { colors } from '@/theme/tokens';
 
+type Line = { key: string; memberId: string; memberName: string; collarId: string; fabricId: string; colourId: string | null; qty: number; editing: boolean };
+
+/**
+ * Repeat a past order. Each thobe keeps the person's saved measurements; the
+ * customer sets how many, and can change the type (collar) and the cloth.
+ * There is no colour choice here.
+ */
 export default function Reorder() {
   const { orderId } = useLocalSearchParams<{ orderId: string }>();
   const { t, f } = useLocale();
@@ -20,40 +26,52 @@ export default function Reorder() {
   const cat = useCatalogue();
   const order = useOrder(orderId);
   const family = useFamily();
-  const thobe = order.data?.items.find((i) => i.kind === 'thobe');
-  const [fabricId, setFabricId] = useState<string | null>(null);
-  const [colourId, setColourId] = useState<string | null>(null);
-  const [qty, setQty] = useState(1);
+  const rates = usePointRates();
+  const [lines, setLines] = useState<Line[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (thobe && !fabricId) {
-      setFabricId(thobe.snapshot.thobe.fabric?.id);
-      setColourId(thobe.snapshot.thobe.colour?.id);
-      setQty(thobe.qty);
-    }
-  }, [thobe, fabricId]);
+    if (order.data && !lines)
+      setLines(
+        order.data.items
+          .filter((i) => i.kind === 'thobe')
+          .map((i) => ({
+            key: i.id,
+            memberId: i.snapshot.member?.id,
+            memberName: i.snapshot.member?.name ?? '',
+            collarId: i.snapshot.thobe.collar?.id,
+            fabricId: i.snapshot.thobe.fabric?.id,
+            colourId: i.snapshot.thobe.colour?.id ?? null,
+            qty: i.qty,
+            editing: false,
+          })),
+      );
+  }, [order.data, lines]);
 
-  if (order.isLoading || !cat.data) return <Screen header={<Header title={t('again.title')} />}><Loading /></Screen>;
-  if (!thobe) return <Screen header={<Header title={t('again.title')} />}><Note>{t('home.orderAgainEmpty')}</Note></Screen>;
+  if (order.isLoading || !cat.data || (order.data && !lines)) return <Screen header={<Header title={t('again.title')} />}><Loading /></Screen>;
+  if (!order.data || !lines?.length) return <Screen header={<Header title={t('again.title')} />}><Note>{t('home.orderAgainEmpty')}</Note></Screen>;
 
-  const s = thobe.snapshot;
-  const member = family.data?.find((m) => m.id === s.member?.id);
-  const fabric = cat.data.fabrics.find((x) => x.id === fabricId);
-  const colours = cat.data.colours.filter((c) => fabric?.colour_ids.includes(c.id));
-  const colour = cat.data.colours.find((c) => c.id === colourId);
-  const pts = cat.data.settings.points.thobe_fixed * qty;
+  const update = (key: string, patch: Partial<Line>) => setLines((ls) => ls!.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const fabricOf = (l: Line) => cat.data!.fabrics.find((x) => x.id === l.fabricId);
+  const collarOf = (l: Line) => cat.data!.collars.find((x) => x.id === l.collarId);
+  const chosen = lines.filter((l) => l.qty > 0);
+  const count = chosen.reduce((a, l) => a + l.qty, 0);
+  const total = chosen.reduce((a, l) => a + (fabricOf(l)?.price ?? 0) * l.qty, 0);
+  const pts = (rates?.points_per_thobe ?? 0) * count;
+  const unavailable = chosen.some((l) => !fabricOf(l) || !collarOf(l));
 
-  const add = async () => {
+  const place = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api('/basket/items', {
-        body: { kind: 'thobe', collarId: s.thobe.collar.id, fabricId, colourId, memberId: s.member.id, measureMethod: 'saved', qty, remarks: s.remarks ?? undefined },
-      });
+      for (const l of chosen) {
+        // The original colour goes with it only when the cloth is unchanged and still offers it.
+        const keepColour = l.colourId && fabricOf(l)?.colour_ids.includes(l.colourId) ? l.colourId : undefined;
+        await api('/basket/items', { body: { kind: 'thobe', collarId: l.collarId, fabricId: l.fabricId, colourId: keepColour, memberId: l.memberId, measureMethod: 'saved', qty: l.qty } });
+      }
       await Promise.all([qc.invalidateQueries({ queryKey: ['basket'] }), qc.invalidateQueries({ queryKey: ['me'] })]);
-      router.replace('/basket');
+      router.replace('/checkout');
     } catch (e) {
       setError(errorText(t, e));
     } finally {
@@ -61,79 +79,74 @@ export default function Reorder() {
     }
   };
 
-  const fixed = (label: string, value: string) => (
-    <View style={{ flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 13, gap: 12 }}>
-      <Text variant="small" color={colors.textSecondary} style={{ width: 104 }}>
-        {label}
-      </Text>
-      <Text variant="smallStrong" style={{ flex: 1 }}>
-        {value}
-      </Text>
-    </View>
-  );
-
   return (
     <Screen
       header={<Header title={t('again.title')} />}
       footer={
-        <BottomBar label={`${qty} × ${f.name(fabric)}`} value={f.money((fabric?.price ?? 0) * qty)} sub={`+${pts} ${t('rewards.pts')}`}>
-          <Button testID="reorder-add" label={t('review.add')} onPress={add} loading={busy} disabled={!fabricId || !colourId} style={{ minWidth: 170 }} />
+        <BottomBar label={count === 1 ? t('again.one') : t('again.count', { n: count })} value={f.money(total)} sub={`+${pts} ${t('rewards.pts')}`}>
+          <Button testID="reorder-place" label={t('again.place')} onPress={place} loading={busy} disabled={!count || unavailable} style={{ minWidth: 170 }} />
         </BottomBar>
       }
       contentStyle={{ gap: 16, paddingTop: 8 }}
     >
       <Text variant="small" color={colors.textSecondary}>
-        {t('again.from', { number: f.orderNo(order.data!.number), date: f.date(order.data!.created_at) })}
+        {t('again.from', { number: f.orderNo(order.data.number), date: f.date(order.data.created_at) })}
       </Text>
-      <Card>
-        <View style={{ flexDirection: 'row', gap: 16, padding: 16, alignItems: 'center' }}>
-          <ThobeArt fill={colour?.hex} collar={s.thobe.collar.shape ?? s.thobe.collar.id} height={90} />
-          <View style={{ flex: 1, gap: 4 }}>
-            <Text variant="title">{t('review.custom')}</Text>
-            <Text variant="small" color={colors.textSecondary}>
-              {t('review.forLine', { name: s.member.name, size: t(`size.${member?.size ?? 'adult'}` as any) })}
-            </Text>
-            <Pill gold icon={Star} label={t('review.earn', { pts })} />
-          </View>
-        </View>
-        <Divider />
-        {fixed(t('design.collar'), f.name(s.thobe.collar))}
-        <Divider />
-        {fixed(t('review.for'), member ? memberTitle(member, t) : s.member.name)}
-        <Divider />
-        {fixed(t('design.measurements'), member?.measured_at ? t('review.saved', { date: f.date(member.measured_at) }) : t('basket.savedMeasurements'))}
-      </Card>
 
-      <Text variant="bodyStrong">{t('design.fabric')}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-        {cat.data.fabrics.map((x) => (
-          <Chip
-            key={x.id}
-            testID={`refabric-${x.id}`}
-            label={f.name(x)}
-            selected={fabricId === x.id}
-            onPress={() => {
-              setFabricId(x.id);
-              if (!x.colour_ids.includes(colourId ?? '')) setColourId(x.colour_ids[0]);
-            }}
-          />
-        ))}
-      </ScrollView>
-      <Text variant="bodyStrong">{t('design.colour')}</Text>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-        {colours.map((c) => (
-          <Touch key={c.id} onPress={() => setColourId(c.id)} style={{ alignItems: 'center', width: 72, gap: 4 }}>
-            <Swatch hex={c.hex} size={36} selected={colourId === c.id} />
-            <Text variant="caption" center style={{ fontFamily: colourId === c.id ? fonts.semibold : fonts.regular }}>
-              {f.name(c)}
-            </Text>
-          </Touch>
-        ))}
+      {lines.map((l, idx) => {
+        const fabric = fabricOf(l);
+        const collar = collarOf(l);
+        const member = family.data?.find((m) => m.id === l.memberId);
+        return (
+          <Card key={l.key} testID={`reorder-line-${idx}`}>
+            <View style={{ flexDirection: 'row', gap: 16, padding: 16, alignItems: 'center' }}>
+              <ThobeArt fill={cat.data!.colours.find((c) => c.id === l.colourId)?.hex} collar={collar?.shape ?? l.collarId} height={84} />
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text variant="title">{collar ? f.name(collar) : t('again.unavailable')}</Text>
+                <Text variant="small" color={colors.textSecondary}>
+                  {fabric ? `${f.name(fabric)} · ${f.money(fabric.price)}` : t('again.unavailable')}
+                </Text>
+                <Text variant="small" color={colors.textSecondary}>
+                  {t('again.forLine', { name: member?.name ?? l.memberName, date: member?.measured_at ? f.date(member.measured_at) : '—' })}
+                </Text>
+              </View>
+            </View>
+            <Divider />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 }}>
+              <Touch testID={`reorder-edit-${idx}`} accessibilityRole="button" onPress={() => update(l.key, { editing: !l.editing })} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 }}>
+                <Pencil size={16} color={colors.text} />
+                <Text variant="smallStrong">{l.editing ? t('common.done') : t('again.edit')}</Text>
+              </Touch>
+              <Stepper value={l.qty} onChange={(n) => update(l.key, { qty: n })} min={lines.length > 1 ? 0 : 1} />
+            </View>
+            {l.editing ? (
+              <>
+                <Divider />
+                <View style={{ padding: 16, gap: 10 }}>
+                  <Text variant="smallStrong">{t('again.type')}</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                    {cat.data!.collars.map((c) => (
+                      <Chip key={c.id} testID={`retype-${idx}-${c.id}`} label={f.name(c)} selected={l.collarId === c.id} onPress={() => update(l.key, { collarId: c.id })} />
+                    ))}
+                  </ScrollView>
+                  <Text variant="smallStrong" style={{ marginTop: 4 }}>
+                    {t('again.cloth')}
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                    {cat.data!.fabrics.map((x) => (
+                      <Chip key={x.id} testID={`refabric-${idx}-${x.id}`} label={`${f.name(x)} · ${f.money(x.price)}`} selected={l.fabricId === x.id} onPress={() => update(l.key, { fabricId: x.id })} />
+                    ))}
+                  </ScrollView>
+                </View>
+              </>
+            ) : null}
+          </Card>
+        );
+      })}
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Pill gold icon={Star} label={t('review.earn', { pts })} />
       </View>
-      <Card style={{ padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text variant="bodyStrong">{t('review.quantity')}</Text>
-        <Stepper value={qty} onChange={setQty} />
-      </Card>
       <Note icon={Info}>{t('again.note')}</Note>
       {error ? <Note tone="error">{error}</Note> : null}
     </Screen>

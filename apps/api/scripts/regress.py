@@ -95,6 +95,17 @@ def home_setup(tok):
     return fam[0]["id"], addr["id"]
 
 
+def book(tok, body, result="paid"):
+    """A visit booked on its own (a new order): held, then confirmed when the booking fee is paid."""
+    s, a, _ = call("POST", "/appointments", {**body, "standalone": True}, tok)
+    if s >= 400 or not a.get("paymentId"):
+        return a
+    loc = pay(a, result)[1].get("location", "")
+    a = dict(a, location=loc)
+    a["status"] = sql(f"select status from appointments where id = '{a['id']}'")
+    return a
+
+
 def free_home_slots(tok, days=10):
     return [x["startsAt"] for d in call("GET", f"/slots?kind=home&days={days}", token=tok)[1]["days"] for x in d["times"] if x["available"]]
 
@@ -117,17 +128,19 @@ for _ in range(6):
     sql(f"update otp_codes set sent_at = now() - interval '1 minute' where phone = '+974{phone}'")
 check("login code: 5 codes per number per hour", codes == [200] * 5 + [429], str(codes))
 
-# ---- one voucher, one order ---------------------------------------------------
+# ---- points spent once ---------------------------------------------------------
 t = login("55551234")
 for it in call("GET", "/basket", token=t)[1]["items"]:
     call("DELETE", f"/basket/items/{it['id']}", token=t)
 call("POST", "/basket/items", {"kind": "product", "productId": "leather-sandals", "size": "42"}, t)
-o1 = call("POST", "/orders", {}, t)[1]
-o2 = call("POST", "/orders", {}, t)[1]
+before = call("GET", "/rewards", token=t)[1]["balance"]
+o1 = call("POST", "/orders", {"usePoints": True}, t)[1]
+o2 = call("POST", "/orders", {"usePoints": True}, t)[1]
 p1, p2 = pay(o1), pay(o2)
-paid = int(sql("select count(*) from orders o join vouchers v on v.id = o.voucher_id where v.code = 'AR10-7KQ2' and o.paid_at is not null"))
-check("voucher: the earlier unpaid checkout is closed", "checkout?payment=cancelled" in p1[1].get("location", ""), str(p1[1]))
-check("voucher: only one order is paid with it", paid == 1 and "order-placed" in p2[1].get("location", ""), f"paid={paid}")
+spent = sql("select coalesce(-sum(points),0) from points_ledger p join customers c on c.id = p.customer_id where c.phone = '+97455551234' and p.kind = 'redeem' and p.created_at > now() - interval '1 minute'")
+after = call("GET", "/rewards", token=t)[1]["balance"]
+check("points: the earlier unpaid checkout is closed", "checkout?payment=cancelled" in p1[1].get("location", ""), str(p1[1]))
+check("points: spent once, on the order that was paid", spent == str(before) and after == 0 and "order-placed" in p2[1].get("location", ""), f"before={before} spent={spent} after={after}")
 
 # ---- bookings ------------------------------------------------------------------
 ta, tb = login("55570003"), login("55570004")
@@ -138,7 +151,7 @@ hold = call("POST", "/appointments", {"kind": "home", "addressId": aa, "memberId
 s, r, _ = call("POST", "/appointments", {"kind": "home", "addressId": ab, "memberId": mb, "startsAt": slot, "standalone": True}, tb)
 check("booking: a fresh hold blocks the slot", r.get("code") == "slot_taken", str(r))
 sql(f"update appointments set created_at = now() - interval '31 minutes' where id = '{hold['id']}'")
-s, booked, _ = call("POST", "/appointments", {"kind": "home", "addressId": ab, "memberId": mb, "startsAt": slot, "standalone": True}, tb)
+booked = book(tb, {"kind": "home", "addressId": ab, "memberId": mb, "startsAt": slot})
 check("booking: a lapsed hold frees the slot", booked.get("status") == "confirmed", str(booked))
 call("POST", "/basket/items", {"kind": "thobe", "collarId": "classic-qatari", "fabricId": "swiss-voile", "colourId": "ivory", "memberId": ma, "measureMethod": "home", "appointmentId": hold["id"]}, ta)
 s, r, _ = call("POST", "/orders", {}, ta)
@@ -150,7 +163,7 @@ s, r, _ = call("POST", "/appointments", {"kind": "home", "addressId": ab, "membe
 check("booking: one free-standing visit per person at a time", r.get("code") == "already_booked", str(r))
 s, r, _ = call("DELETE", f"/appointments/{booked['id']}", token=tb)
 check("booking: the customer can cancel a free-standing visit", s == 200, f"{s} {r}")
-s, r, _ = call("POST", "/appointments", {"kind": "home", "addressId": ab, "memberId": mb, "startsAt": other[0], "standalone": True}, tb)
+r = book(tb, {"kind": "home", "addressId": ab, "memberId": mb, "startsAt": other[0]})
 check("booking: and book again afterwards", r.get("status") == "confirmed", str(r))
 
 tc = login("55570005")
@@ -167,7 +180,7 @@ for i in range(12):
     cid = call("GET", "/me", token=tg)[1]["id"]
     sql(f"insert into points_ledger (customer_id, kind, points, remaining, expires_at, label) values ('{cid}','earn',100,100, now() - interval '1 minute','Regress')")
     with ThreadPoolExecutor(6) as ex:
-        list(ex.map(lambda p: call("GET", p, token=tg), ["/me", "/rewards", "/rewards/options"] * 2))
+        list(ex.map(lambda p: call("GET", p, token=tg), ["/me", "/rewards", "/rewards/history"] * 2))
     doubled += sql(f"select count(*) || ':' || coalesce(sum(points),0) from points_ledger where customer_id = '{cid}' and kind = 'expire'") != "1:-100"
 check("points: an expired award is deducted exactly once", doubled == 0, f"{doubled} of 12 rounds wrong")
 
@@ -293,7 +306,7 @@ call("PATCH", f"/addresses/{addr}", {"line1": "Villa 11, Street 4", "notes": "Bl
 a = next(x for x in call("GET", "/addresses", token=te)[1] if x["id"] == addr)
 check("self-service: an address can be edited", a["line1"] == "Villa 11, Street 4" and a["notes"] == "Blue gate" and a["area"] == "Al Sadd", str(a))
 slot = free_home_slots(te)[0]
-visit = call("POST", "/appointments", {"kind": "home", "addressId": addr, "memberId": son, "startsAt": slot, "standalone": True}, te)[1]
+visit = book(te, {"kind": "home", "addressId": addr, "memberId": son, "startsAt": slot})
 refused = {"remove booked person": call("DELETE", f"/family/{son}", token=te)[1].get("code"), "remove booked address": call("DELETE", f"/addresses/{addr}", token=te)[1].get("code")}
 check("self-service: a person or address with a booked visit cannot be removed", refused == {"remove booked person": "member_has_booking", "remove booked address": "address_has_booking"}, str(refused))
 call("DELETE", f"/appointments/{visit['id']}", token=te)
@@ -302,22 +315,41 @@ s2 = call("DELETE", f"/addresses/{addr}", token=te)[0]
 left = call("GET", "/addresses", token=te)[1]
 check("self-service: removed once the visit is cancelled; the other address becomes the default", s1 == 200 and s2 == 200 and len(left) == 1 and left[0]["id"] == addr2 and left[0]["is_default"], f"{s1} {s2} {left}")
 
-# ---- home-visit fee for a visit booked on its own ----------------------------------
+# ---- booking fee for a new order (a visit booked on its own) ------------------------
 mem = call("GET", "/family", token=te)[1][0]["id"]
-visit = call("POST", "/appointments", {"kind": "home", "addressId": addr2, "memberId": mem, "startsAt": free_home_slots(te)[1], "standalone": True}, te)[1]
-fee_due = float(visit.get("fee") or 0)
-first = call("POST", f"/admin/appointments/{visit['id']}/fee-paid", {}, owner)[0]
-again = call("POST", f"/admin/appointments/{visit['id']}/fee-paid", {}, owner)[1].get("code")
-check("fee: a home visit booked on its own is charged at the visit, and collected once", fee_due == 50 and first == 201 and again == "no_fee_due", f"{fee_due} {first} {again}")
+fee = call("GET", "/catalogue")[1]["settings"]["appointment_fee"]
+t1 = free_home_slots(te)[1]
+declined = book(te, {"kind": "home", "addressId": addr2, "memberId": mem, "startsAt": t1}, result="failed")
+retry = book(te, {"kind": "home", "addressId": addr2, "memberId": mem, "startsAt": t1})
+paid_fee = sql(f"select amount || ':' || status from payments where appointment_id = '{retry['id']}'")
+check("booking fee: QAR 70 is taken online; a declined card frees the time; paying confirms it",
+      fee == 70 and declined.get("status") == "cancelled" and "book?standalone=1&payment=failed" in declined.get("location", "")
+      and retry.get("status") == "confirmed" and f"/booked/{retry['id']}" in retry.get("location", "") and paid_fee == "70.00:paid",
+      f"{fee} {declined} {retry} {paid_fee}")
+again = call("POST", f"/admin/appointments/{retry['id']}/fee-paid", {}, owner)[1].get("code")
+told = any(n["title_en"] == "Home visit booked" for n in call("GET", "/notifications", token=te)[1])
+check("booking fee: paid online, so there is nothing to collect at the visit; the customer is told", again == "no_fee_due" and told, f"{again} {told}")
+tl = login("55570014")
+ml, al = home_setup(tl)
+t2 = free_home_slots(tl)[2]
+s, lapsed, _ = call("POST", "/appointments", {"kind": "home", "addressId": al, "memberId": ml, "startsAt": t2, "standalone": True}, tl)
+sql(f"update payments set created_at = now() - interval '31 minutes' where id = '{lapsed['paymentId']}'")
+loc = pay(lapsed)[1].get("location", "")
+check("booking fee: a payment page left open over 30 minutes cannot be paid, and the time is let go",
+      "payment=cancelled" in loc and sql(f"select status from appointments where id = '{lapsed['id']}'") == "cancelled", loc)
+call("PATCH", "/admin/settings", {"appointment_fee": 0}, owner)
+free_visit = call("POST", "/appointments", {"kind": "home", "addressId": al, "memberId": ml, "startsAt": free_home_slots(tl)[3], "standalone": True}, tl)[1]
+call("PATCH", "/admin/settings", {"appointment_fee": 70}, owner)
+check("booking fee: set to 0 in the admin, booking is free and confirmed straight away", free_visit.get("status") == "confirmed" and not free_visit.get("paymentUrl"), str(free_visit))
 
 # ---- a cancelled visit only comes back if its time still has room --------------------
 tr1, tr2 = login("55570011"), login("55570012")
 m1, a1 = home_setup(tr1)
 m2, a2 = home_setup(tr2)
 t0 = free_home_slots(tr1)[5]
-v1 = call("POST", "/appointments", {"kind": "home", "addressId": a1, "memberId": m1, "startsAt": t0, "standalone": True}, tr1)[1]
+v1 = book(tr1, {"kind": "home", "addressId": a1, "memberId": m1, "startsAt": t0})
 call("POST", f"/admin/appointments/{v1['id']}/status", {"status": "cancelled"}, owner)
-call("POST", "/appointments", {"kind": "home", "addressId": a2, "memberId": m2, "startsAt": t0, "standalone": True}, tr2)
+book(tr2, {"kind": "home", "addressId": a2, "memberId": m2, "startsAt": t0})
 s, r, _ = call("POST", f"/admin/appointments/{v1['id']}/status", {"status": "confirmed"}, owner)
 check("staff: re-confirming a cancelled visit checks the time is still free", s == 400 and r.get("code") == "slot_taken", f"{s} {r}")
 
@@ -376,14 +408,155 @@ check("staff password: needs the current one; other sessions end, this one stays
       wrong == "wrong_password" and ok == 200 and call("GET", "/admin/me", token=t_b)[0] == 401 and call("GET", "/admin/me", token=t_a)[0] == 200
       and call("POST", "/admin/auth/login", {"email": "lock-test@alrmh.qa", "password": "a-new-password-1"})[0] == 200, f"{wrong} {ok}")
 
+# ---- thobes are collected, shop orders are delivered ------------------------------------
+tc = login("55570030", "Collect Tester")
+call("POST", "/addresses", {"label": "Home", "line1": "Villa 30", "area": "Al Sadd"}, tc)
+mc = call("GET", "/family", token=tc)[1][0]["id"]
+sql(f"insert into measurements (member_id, method, tailor_name, length_cm, shoulder_cm, chest_cm, waist_cm, sleeve_cm, neck_cm, cuff_cm) values ('{mc}', 'branch', 'Yousef', 150, 47, 110, 100, 62, 41, 24)")
+call("PATCH", f"/admin/branches/{bid}", {"active": True}, owner)
+br = call("GET", "/catalogue")[1]["branches"]
+call("POST", "/basket/items", {"kind": "product", "productId": "white-ghutra", "size": "56"}, tc)
+shop = call("POST", "/checkout/quote", {}, tc)[1]
+call("POST", "/basket/items", {"kind": "thobe", "collarId": "classic-qatari", "fabricId": "swiss-voile", "memberId": mc, "measureMethod": "saved", "qty": 1}, tc)
+mixed = call("POST", "/checkout/quote", {}, tc)[1]
+other = call("POST", "/checkout/quote", {"branchId": br[-1]["id"]}, tc)[1]
+check("collect: shop-only orders are delivered with the fee; any thobe makes it a free collection from the branch, and the customer can pick the branch",
+      shop["pickup"] is False and shop["deliveryFee"] == 25 and shop["address"]["label"] == "Home"
+      and mixed["pickup"] is True and mixed["deliveryFee"] == 0 and mixed["address"]["pickup"] is True and mixed["address"]["branchId"] == br[0]["id"]
+      and other["address"]["branchId"] == br[-1]["id"], f"{shop['deliveryFee']} {mixed['deliveryFee']} {mixed['address']} {other['address'].get('branchId')}")
+oc = call("POST", "/orders", {"branchId": br[-1]["id"]}, tc)[1]
+pay(oc)
+d = call("GET", f"/orders/{oc['orderId']}", token=tc)[1]
+check("collect: a thobe order paid online starts at Taking measurements, to collect from the chosen branch",
+      len(br) == 2 and d["stage"] == "measured" and d["address"]["pickup"] is True and d["address"]["branchId"] == br[-1]["id"] and float(d["delivery_fee"]) == 0, f"{d['stage']} {d['address']} {d['delivery_fee']}")
+call("PATCH", f"/admin/branches/{bid}", {"active": False}, owner)
+for it in call("GET", "/basket", token=tc)[1]["items"]:
+    call("DELETE", f"/basket/items/{it['id']}", token=tc)
+call("POST", "/basket/items", {"kind": "product", "productId": "white-ghutra", "size": "56"}, tc)
+os_ = call("POST", "/orders", {}, tc)[1]
+pay(os_)
+for stage in ["ready", "out_for_delivery", "delivered"]:
+    call("POST", f"/admin/orders/{os_['orderId']}/stage", {"stage": stage}, owner)
+ds = call("GET", f"/orders/{os_['orderId']}", token=tc)[1]
+titles = [n["title_en"] for n in call("GET", "/notifications", token=tc)[1]]
+check("shop order: Order confirmed, Packed, Out for delivery, Delivered, to the customer's address",
+      ds["stages"] == ["confirmed", "ready", "out_for_delivery", "delivered"] and [e["stage"] for e in ds["events"]] == ds["stages"]
+      and all(x in titles for x in ["Packed", "Out for delivery", "Order delivered"]) and not ds["address"].get("pickup"), f"{ds['stages']} {titles[:5]}")
+
+# ---- tiers ------------------------------------------------------------------------------
+cat = call("GET", "/catalogue")[1]
+tiers = {t["id"]: t for t in cat["tiers"]}
+check("tiers: Silver from 0 (10 per product, 15 per thobe) and Gold from 300 (15 and 20) reach the app",
+      [t["id"] for t in cat["tiers"]] == ["silver", "gold"] and (tiers["silver"]["min_points"], tiers["silver"]["points_per_product"], tiers["silver"]["points_per_thobe"]) == (0, 10, 15)
+      and (tiers["gold"]["min_points"], tiers["gold"]["points_per_product"], tiers["gold"]["points_per_thobe"]) == (300, 15, 20), str(cat["tiers"]))
+tt = login("55570020", "Tier Tester")
+call("POST", "/addresses", {"label": "Home", "line1": "Villa 20", "area": "Al Sadd"}, tt)
+ttid = call("GET", "/me", token=tt)[1]["id"]
+rw = call("GET", "/rewards", token=tt)[1]
+check("tiers: a new customer is Silver, 300 points from Gold", rw["tier"]["id"] == "silver" and rw["next"]["id"] == "gold" and rw["toNext"] == 300 and rw["balance"] == 0, str(rw))
+call("POST", "/basket/items", {"kind": "product", "productId": "black-agal", "size": "M", "qty": 2}, tt)
+q = call("POST", "/checkout/quote", {}, tt)[1]
+check("tiers: Silver earns 10 points per product", q["pointsToEarn"] == 20, str(q["pointsToEarn"]))
+call("POST", f"/admin/customers/{ttid}/points", {"points": 290, "reason": "Regress"}, owner)
+call("POST", f"/admin/customers/{ttid}/points", {"points": 10, "reason": "Regress"}, owner)
+q = call("POST", "/checkout/quote", {}, tt)[1]
+rw = call("GET", "/rewards", token=tt)[1]
+check("tiers: at 300 points ever earned the customer is Gold, and products earn 15", rw["tier"]["id"] == "gold" and rw["next"] is None and q["pointsToEarn"] == 30 and q["tier"]["id"] == "gold", f"{rw} {q['pointsToEarn']}")
+
+# ---- points at checkout (1 point = QAR 1) -------------------------------------------------
+q = call("POST", "/checkout/quote", {"usePoints": True}, tt)[1]
+due = q["subtotal"] + q["deliveryFee"]
+check("checkout: points pay QAR 1 each, up to the whole riyals due", q["pointsUsed"] == min(300, int(due)) and abs(q["total"] - (due - q["pointsUsed"])) < 0.001, f"{q['pointsUsed']} {q['total']} due={due}")
+o = call("POST", "/orders", {"usePoints": True}, tt)[1]
+pay(o)
+rw = call("GET", "/rewards", token=tt)[1]
+check("checkout: points are taken when the order is paid; spending them doesn't lower the tier",
+      rw["balance"] == 300 - q["pointsUsed"] and rw["tier"]["id"] == "gold" and int(sql(f"select points_used from orders where id = '{o['orderId']}'")) == q["pointsUsed"], f"{rw} used={q['pointsUsed']}")
+call("POST", f"/admin/orders/{o['orderId']}/cancel", {"reason": "regress"}, owner)
+rw = call("GET", "/rewards", token=tt)[1]
+check("checkout: cancelling a paid order gives the points back (not counted again towards a tier)", rw["balance"] == 300 and rw["lifetime"] == 300, str(rw))
+
+# ---- staff place an order at the visit (card machine) ---------------------------------------
+ts = login("55570021", "Shop Tester")
+ms, as_ = home_setup(ts)
+tsid = call("GET", "/me", token=ts)[1]["id"]
+appt = book(ts, {"kind": "home", "addressId": as_, "memberId": ms, "startsAt": free_home_slots(ts)[4]})
+call("POST", f"/admin/members/{ms}/measurements", {"length_cm": 150, "shoulder_cm": 47, "chest_cm": 110, "waist_cm": 100, "sleeve_cm": 62, "neck_cm": 41, "cuff_cm": 24, "tailor_name": "Yousef", "method": "home"}, owner)
+lines = [{"collarId": "classic-qatari", "fabricId": "swiss-voile", "qty": 2}, {"collarId": "mandarin-band", "fabricId": "japanese-cotton", "qty": 1}]
+s, r, _ = call("POST", f"/admin/customers/{tsid}/orders", {"memberId": ms, "lines": lines, "delivery": "pickup", "appointmentId": appt["id"]}, owner)
+check("staff order: refused until the card-machine payment is confirmed", r.get("code") == "payment_not_confirmed", str(r))
+s, placed, _ = call("POST", f"/admin/customers/{tsid}/orders", {"memberId": ms, "lines": lines, "delivery": "pickup", "appointmentId": appt["id"], "paidByCard": True}, owner)
+fab = {f["id"]: f["price"] for f in cat["fabrics"]}
+expect = fab["swiss-voile"] * 2 + fab["japanese-cotton"]
+mine = call("GET", "/orders", token=ts)[1]["active"]
+detail = call("GET", f"/orders/{placed.get('orderId')}", token=ts)[1]
+check("staff order: placed at the visit, priced from the cloth, in the customer's app at Measured, paid on the card machine",
+      s == 201 and abs(placed["total"] - expect) < 0.01 and placed["pointsToEarn"] == 45 and any(x["id"] == placed["orderId"] for x in mine)
+      and detail["stage"] == "measured" and detail["payment_provider"] == "card_machine" and detail["address"].get("pickup") is True
+      and sql(f"select status || ':' || (order_id = '{placed['orderId']}') from appointments where id = '{appt['id']}'") == "done:true", f"{s} {placed} {detail.get('stage')} {detail.get('payment_provider')}")
+check("staff order: the customer is told", any(n["title_en"] == "Order placed" and placed["number"] in n["body_en"] for n in call("GET", "/notifications", token=ts)[1]))
+bad = call("POST", f"/admin/orders/{placed['orderId']}/stage", {"stage": "out_for_delivery"}, owner)[1].get("code")
+moved = []
+for stage in ["cutting", "stitching", "quality", "ready", "delivered"]:
+    moved.append(call("POST", f"/admin/orders/{placed['orderId']}/stage", {"stage": stage}, owner)[0])
+detail = call("GET", f"/orders/{placed['orderId']}", token=ts)[1]
+titles = [n["title_en"] for n in call("GET", "/notifications", token=ts)[1]]
+check("stages: a thobe order goes Taking measurements, Cutting, Sewing, Quality inspection, Ready for pickup, Collected; never Out for delivery",
+      detail["stages"] == ["measured", "cutting", "stitching", "quality", "ready", "delivered"] and bad == "invalid_stage" and moved == [201] * 5
+      and [e["stage"] for e in detail["events"]] == ["measured", "cutting", "stitching", "quality", "ready", "delivered"]
+      and all(x in titles for x in ["Cutting", "Sewing", "Quality inspection", "Ready for pickup", "Collected"]), f"{detail['stages']} {bad} {moved} {[e['stage'] for e in detail['events']]} {titles[:6]}")
+check("staff order: Silver earns 15 points per thobe when collected", call("GET", "/rewards", token=ts)[1]["balance"] == 45)
+
+# ---- re-order: type and cloth, no colour --------------------------------------------------
+s, r, _ = call("POST", "/basket/items", {"kind": "thobe", "collarId": "mandarin-band", "fabricId": "linen-blend", "memberId": ms, "measureMethod": "saved", "qty": 3}, ts)
+b = call("GET", "/basket", token=ts)[1]
+line = next((i for i in b["items"] if i["kind"] == "thobe"), {})
+check("re-order: a thobe with type and cloth only (no colour) goes in the basket with saved measurements",
+      s == 201 and line.get("thobe", {}).get("colour") is None and line.get("qty") == 3 and line.get("points") == 45, f"{s} {r} {line}")
+lst = call("GET", "/orders", token=ts)[1]
+row = next((x for x in lst["past"] + lst["active"] if x["id"] == placed["orderId"]), {})
+check("re-order: past orders list their thobes (type, cloth, how many)",
+      sorted((l["collar"]["id"], l["fabric"]["id"], l["qty"]) for l in (row.get("thobes") or [])) == [("classic-qatari", "swiss-voile", 2), ("mandarin-band", "japanese-cotton", 1)], str(row.get("thobes")))
+
+# ---- moving up a tier ---------------------------------------------------------------------
+call("POST", f"/admin/customers/{tsid}/points", {"points": 250, "reason": "Regress"}, owner)
+call("POST", "/addresses", {"label": "Office", "line1": "Tower 1", "area": "West Bay"}, ts)
+for it in call("GET", "/basket", token=ts)[1]["items"]:
+    call("DELETE", f"/basket/items/{it['id']}", token=ts)
+call("POST", "/basket/items", {"kind": "product", "productId": "white-ghutra", "size": "56"}, ts)
+up = call("POST", "/orders", {}, ts)[1]
+pay(up)
+for stage in ["ready", "out_for_delivery", "delivered"]:
+    call("POST", f"/admin/orders/{up['orderId']}/stage", {"stage": stage}, owner)
+rw = call("GET", "/rewards", token=ts)[1]
+check("tiers: crossing 300 on delivery moves the customer to Gold and tells them",
+      rw["tier"]["id"] == "gold" and rw["lifetime"] == 305 and any(n["title_en"] == "You're now Gold" for n in call("GET", "/notifications", token=ts)[1]), str(rw))
+
+# ---- tiers set up in the admin --------------------------------------------------------------
+s, pl, _ = call("POST", "/admin/tiers", {"name_en": "Platinum", "name_ar": "بلاتيني", "min_points": 1000, "points_per_product": 20, "points_per_thobe": 30, "colour": "#8FA3B8"}, owner)
+dup = call("POST", "/admin/tiers", {"name_en": "Twin", "name_ar": "توأم", "min_points": 1000, "points_per_product": 1, "points_per_thobe": 1}, owner)[1].get("code")
+base = call("PATCH", "/admin/tiers/silver", {"min_points": 50}, owner)[1].get("code")
+del_base = call("DELETE", "/admin/tiers/silver", token=owner)[1].get("code")
+call("PATCH", "/admin/tiers/silver", {"points_per_product": 12}, owner)
+app = call("GET", "/catalogue")[1]["tiers"]
+rw = call("GET", "/rewards", token=ts)[1]
+listed = {t["id"]: t["customers"] for t in call("GET", "/admin/tiers", token=owner)[1]}
+check("tiers: staff add a tier (Platinum), change rates; thresholds stay unique and the starting tier stays at 0",
+      s == 201 and pl.get("id") == "platinum" and dup == "tier_threshold_taken" and base == "starting_tier" and del_base == "starting_tier"
+      and [t["id"] for t in app] == ["silver", "gold", "platinum"] and app[0]["points_per_product"] == 12 and rw["next"]["id"] == "platinum" and rw["toNext"] == 695
+      and listed.get("gold", 0) >= 2, f"{s} {pl} {dup} {base} {del_base} {[t['id'] for t in app]} {rw.get('toNext')} {listed}")
+call("DELETE", "/admin/tiers/platinum", token=owner)
+call("PATCH", "/admin/tiers/silver", {"points_per_product": 10}, owner)
+check("tiers: a removed tier is gone from the app", [t["id"] for t in call("GET", "/catalogue")[1]["tiers"]] == ["silver", "gold"])
+
 # ---- reminders (needs HOUSEKEEPING_SECONDS=5 and QUIET_HOURS=off) -------------------------
 tz = login("55570015", "Reminder Tester")
 mz, az = home_setup(tz)
-visit = call("POST", "/appointments", {"kind": "home", "addressId": az, "memberId": mz, "startsAt": free_home_slots(tz)[0], "standalone": True}, tz)[1]
+visit = book(tz, {"kind": "home", "addressId": az, "memberId": mz, "startsAt": free_home_slots(tz)[0]})
 # a visit 20 hours away (today or tomorrow in Doha), booked yesterday; and one in 3 hours booked just now (no reminder: the confirmation covers it)
 sql(f"update appointments set starts_at = now() + interval '20 hours', created_at = now() - interval '1 day' where id = '{visit['id']}'")
 late = call("POST", "/family", {"name": "Late", "relation": "son", "size": "child"}, tz)[1]["id"]
-v2 = call("POST", "/appointments", {"kind": "home", "addressId": az, "memberId": late, "startsAt": free_home_slots(tz)[1], "standalone": True}, tz)[1]
+v2 = book(tz, {"kind": "home", "addressId": az, "memberId": late, "startsAt": free_home_slots(tz)[1]})
 sql(f"update appointments set starts_at = now() + interval '3 hours', created_at = now() where id = '{v2['id']}'")
 cz = call("GET", "/me", token=tz)[1]["id"]
 sql(f"insert into points_ledger (customer_id, kind, points, remaining, expires_at, label) values ('{cz}','earn',120,120, now() + interval '10 days','Regress'), ('{cz}','earn',80,80, now() + interval '200 days','Regress later')")

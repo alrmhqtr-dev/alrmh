@@ -1,6 +1,6 @@
 import { Controller, Get, NotFoundException, Param } from '@nestjs/common';
 import { db } from '../db.js';
-import { getSettings } from '../lib.js';
+import { getSettings, listTiers } from '../lib.js';
 
 export const COLLAR_SHAPES = ['classic-qatari', 'mandarin-band', 'round-neck', 'wide-collar'] as const;
 
@@ -8,7 +8,7 @@ export const COLLAR_SHAPES = ['classic-qatari', 'mandarin-band', 'round-neck', '
 export class CatalogueController {
   @Get('catalogue')
   async catalogue() {
-    const [collars, fabrics, colours, fabricColours, products, branches, settings, categories] = await Promise.all([
+    const [collars, fabrics, colours, fabricColours, products, branches, settings, categories, tiers] = await Promise.all([
       db.many('select id, name_en, name_ar, shape from collars where active order by sort'),
       db.many('select id, name_en, name_ar, note_en, note_ar, price from fabrics where active order by sort'),
       db.many('select id, name_en, name_ar, hex from colours order by sort'),
@@ -20,6 +20,7 @@ export class CatalogueController {
       ),
       getSettings(),
       db.many('select id, name_en, name_ar from categories where active order by sort, name_en'),
+      listTiers(),
     ]);
     return {
       collars,
@@ -31,11 +32,13 @@ export class CatalogueController {
       settings: {
         delivery_fee: settings.delivery_fee,
         home_visit_fee: settings.home_visit_fee,
+        appointment_fee: settings.appointment_fee,
         lead_working_days: settings.lead_working_days,
         measurements_valid_months: settings.measurements_valid_months,
         points: settings.points,
         support: settings.support,
       },
+      tiers,
     };
   }
 

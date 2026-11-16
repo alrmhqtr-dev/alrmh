@@ -1,12 +1,11 @@
 import { RefreshControl, ScrollView, View } from 'react-native';
 import { router, useIsFocused } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, Bell, Clock, MessageCircle, Repeat, Ruler, Scissors, Store, Users } from 'lucide-react-native';
+import { ArrowRight, Award, Bell, CalendarPlus, MessageCircle, Repeat, Ruler, Store, Users } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { useSession } from '@/state/session';
-import { useBuilder } from '@/state/builder';
 import { useCatalogue, useFamily, useMe, useOrders, useRewards } from '@/api/hooks';
-import { defaultsFor, openWhatsApp } from '@/lib/actions';
+import { openWhatsApp } from '@/lib/actions';
 import { Button, Card, Icon, IconButton, IconTile, SectionTitle, Text, Touch } from '@/ui/primitives';
 import { BagButton, Screen } from '@/ui/layout';
 import { ActiveOrderCard, ProductCard } from '@/ui/commerce';
@@ -16,7 +15,6 @@ export default function Home() {
   const { t, f } = useLocale();
   const qc = useQueryClient();
   const { signedIn } = useSession();
-  const builder = useBuilder();
   const cat = useCatalogue();
   const focused = useIsFocused();
   const me = useMe(focused);
@@ -29,15 +27,11 @@ export default function Home() {
   const active = orders.data?.active[0];
   const hasHistory = Boolean(orders.data && (orders.data.active.length || orders.data.past.length));
   const lastThobeOrder = [...(orders.data?.active ?? []), ...(orders.data?.past ?? [])].find((o) => o.thobe_count > 0);
-  const showBalance = signedIn && rewards.data && (rewards.data.balance > 0 || hasHistory);
+  const showBalance = Boolean(signedIn && rewards.data);
   const support = cat.data?.settings.support.whatsapp ?? '';
   const branch = cat.data?.branches[0];
   const branchCount = cat.data?.branches.length ?? 0;
 
-  const startDesign = () => {
-    builder.reset(defaultsFor(cat.data));
-    router.push('/design/collar');
-  };
   const needAuth = (path: string) => (signedIn ? router.push(path as any) : router.push('/auth/phone'));
 
   return (
@@ -61,36 +55,33 @@ export default function Home() {
       </View>
 
       {showBalance ? (
-        <View style={{ backgroundColor: colors.inverse, borderRadius: radius.xl, padding: 20, gap: 16 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View>
-              <Text variant="overline" color={colors.gold}>
-                {t('home.rewardsBalance')}
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
-                <Text variant="display" color={colors.gold}>
-                  {f.num(rewards.data!.balance)}
-                </Text>
-                <Text variant="body" color={colors.gold}>
-                  {t('rewards.pts')}
-                </Text>
-              </View>
-            </View>
-            <Button testID="home-redeem" label={t('home.redeem')} kind="gold" small iconEnd={ArrowRight} onPress={() => router.push('/rewards/redeem')} />
+        <Touch
+          testID="home-tier"
+          accessibilityRole="button"
+          onPress={() => router.push('/rewards')}
+          style={{ backgroundColor: colors.inverse, borderRadius: radius.xl, padding: 20, flexDirection: 'row', alignItems: 'center', gap: 14 }}
+        >
+          <View style={{ width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: rewards.data!.tier.colour, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon icon={Award} size={22} color={rewards.data!.tier.colour} />
           </View>
-          {rewards.data!.expiring ? (
-            <Touch onPress={() => router.push('/rewards/redeem')} style={{ backgroundColor: colors.surface, borderRadius: radius.md, padding: 12, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-              <Icon icon={Clock} size={18} color={colors.error} />
-              <Text variant="small" color={colors.error} style={{ flex: 1 }}>
-                {t('home.expiring', {
-                  pts: f.num(rewards.data!.expiring.points),
-                  days: f.daysUntil(rewards.data!.expiring.expires_at),
-                  date: f.day(rewards.data!.expiring.expires_at),
-                })}
+          <View style={{ flex: 1 }}>
+            <Text variant="overline" color={rewards.data!.tier.colour}>
+              {t('home.tierLine', { tier: f.name(rewards.data!.tier) })}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+              <Text variant="h1" color={colors.textInverse}>
+                {f.num(rewards.data!.balance)}
               </Text>
-            </Touch>
-          ) : null}
-        </View>
+              <Text variant="body" color={colors.textInverse}>
+                {t('rewards.pts')}
+              </Text>
+            </View>
+            <Text variant="caption" color="rgba(255,255,255,0.7)">
+              {rewards.data!.next ? t('rewards.toNext', { pts: f.num(rewards.data!.toNext), tier: f.name(rewards.data!.next) }) : t('rewards.worth', { amount: f.money(rewards.data!.balance) })}
+            </Text>
+          </View>
+          <Icon icon={ArrowRight} size={20} color={colors.textInverse} flip />
+        </Touch>
       ) : (
         <View style={{ backgroundColor: colors.inverse, borderRadius: radius.xl, padding: 20, gap: 6 }}>
           <Text variant="overline" color={colors.gold}>
@@ -106,16 +97,16 @@ export default function Home() {
       )}
 
       <View style={{ flexDirection: 'row', gap: 12 }}>
-        <Card testID="home-design" onPress={startDesign} style={{ flex: 1, padding: 17, minHeight: 200, gap: 10 }}>
-          <IconTile icon={Scissors} dark />
-          <Text variant="title">{t('home.designNew')}</Text>
+        <Card testID="home-design" onPress={() => needAuth('/book?standalone=1')} style={{ flex: 1, padding: 17, minHeight: 200, gap: 10 }}>
+          <IconTile icon={CalendarPlus} dark />
+          <Text variant="title">{t('home.newOrder')}</Text>
           <Text variant="small" color={colors.textSecondary}>
-            {t('home.designNewBody')}
+            {t('home.newOrderBody', { fee: f.money(cat.data?.settings.appointment_fee ?? 0) })}
           </Text>
         </Card>
         <Card
           testID="home-again"
-          onPress={() => (lastThobeOrder ? router.push(`/reorder/${lastThobeOrder.id}`) : signedIn ? startDesign() : router.push('/auth/phone'))}
+          onPress={() => (lastThobeOrder ? router.push('/reorder') : signedIn ? router.push('/book?standalone=1') : router.push('/auth/phone'))}
           style={{ flex: 1, padding: 17, minHeight: 200, gap: 10 }}
         >
           <IconTile icon={Repeat} />

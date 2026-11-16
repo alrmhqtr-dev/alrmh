@@ -10,18 +10,19 @@ import { useAppointments, useOrders, type OrderSummary } from '@/api/hooks';
 import { errorText } from '@/lib/errors';
 import { Button, Card, EmptyState, ErrorState, Icon, Loading, Note, Overline, Pill, Text, Touch } from '@/ui/primitives';
 import { Screen, Sheet } from '@/ui/layout';
-import { orderLine } from '@/ui/commerce';
+import { orderLine, stageKey } from '@/ui/commerce';
 import { colors, radius } from '@/theme/tokens';
 
 function OrderRow({ o, past }: { o: OrderSummary; past?: boolean }) {
   const { t, f } = useLocale();
   const today = f.date(o.created_at) === f.date(new Date());
+  const thobes = o.thobe_count > 0;
   const when = past
     ? o.stage === 'cancelled'
       ? t('orders.placedOn', { date: f.day(o.created_at) })
-      : t('orders.deliveredOn', { date: f.date(o.closed_at ?? o.created_at) })
+      : t(thobes ? 'orders.collectedOn' : 'orders.deliveredOn', { date: f.date(o.closed_at ?? o.created_at) })
     : o.expected_delivery && o.stage !== 'confirmed'
-      ? t('orders.deliveryOn', { date: f.weekdayDate(o.expected_delivery) })
+      ? t(thobes ? 'orders.readyOn' : 'orders.deliveryOn', { date: f.weekdayDate(o.expected_delivery) })
       : today
         ? t('orders.placedToday')
         : t('orders.placedOn', { date: f.day(o.created_at) });
@@ -34,7 +35,7 @@ function OrderRow({ o, past }: { o: OrderSummary; past?: boolean }) {
             {orderLine(o, t, f)}
           </Text>
         </View>
-        <Pill label={t(`stage.${o.stage}` as any)} dark={!past} />
+        <Pill label={t(stageKey(o.stage, thobes))} dark={!past} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text variant="small" color={colors.textSecondary}>
@@ -103,7 +104,7 @@ export default function Orders() {
         <ErrorState message={t('err.network')} retryLabel={t('common.retry')} onRetry={() => orders.refetch()} />
       ) : empty ? (
         <EmptyState icon={FileText} title={t('orders.empty')} body={t('orders.emptyBody')}>
-          <Button label={t('orders.design')} onPress={() => router.push('/design/collar')} />
+          <Button testID="orders-book" label={t('orders.book')} onPress={() => router.push('/book?standalone=1')} />
           <Button label={t('orders.browse')} kind="secondary" onPress={() => router.push('/shop')} />
         </EmptyState>
       ) : (

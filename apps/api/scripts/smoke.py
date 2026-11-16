@@ -48,10 +48,10 @@ d = call("GET", f"/orders/{o['orderId']}", token=t); print("stage", d["stage"], 
 print("basket after", call("GET", "/basket", token=t)["count"])
 call("POST", f"/admin/members/{me_id}/measurements", {"tailorName": "Yousef", "length_cm": 150, "shoulder_cm": 46, "chest_cm": 110, "waist_cm": 100, "sleeve_cm": 61, "neck_cm": 40, "cuff_cm": 24}, admin=True)
 print("after measure", call("GET", f"/orders/{o['orderId']}", token=t)["stage"])
-for s in ["cutting", "stitching", "ready", "out_for_delivery", "delivered"]:
+for s in ["cutting", "stitching", "quality", "ready", "delivered"]:
     call("POST", f"/admin/orders/{o['orderId']}/stage", {"stage": s}, admin=True)
-rw = call("GET", "/rewards", token=t); print("rewards", rw["balance"], rw["expiring"])
-print("redeem 1000", call("POST", "/rewards/redeem", {"optionId": "discount-10"}, t, ok=False).get("code"))
-print("redeem 5", call("POST", "/rewards/redeem", {"optionId": "discount-5"}, t, ok=False))
+rw = call("GET", "/rewards", token=t); print("rewards", rw["balance"], rw["tier"]["name_en"], "next", (rw["next"] or {}).get("name_en"), rw["toNext"])
+call("POST", "/basket/items", {"kind": "product", "productId": "cufflinks"}, t)
+q = call("POST", "/checkout/quote", {"usePoints": True}, t); print("points at checkout", q["pointsUsed"], q["total"])
 print("notifications", [n["title_ar"] for n in call("GET", "/notifications", token=t)][:4])
 print("orders", {k: [x["number"] for x in v] for k, v in call("GET", "/orders", token=t).items()})

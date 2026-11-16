@@ -7,8 +7,8 @@ export const CHECKOUT_MINUTES = 30;
 
 /**
  * Regular tidying, every 10 minutes:
- * - unpaid checkouts close after 30 minutes, so a late payment cannot confirm a
- *   visit whose time has since gone to someone else;
+ * - unpaid checkouts and booking fees close after 30 minutes, so a late payment
+ *   cannot confirm a visit whose time has since gone to someone else;
  * - held times that never reached an order are released after a day;
  * - expired sign-in sessions and codes are removed;
  * - points past their date are expired;
@@ -18,9 +18,11 @@ export async function housekeeping() {
   await db.pool.query(
     `with closed as (
        update payments set status = 'cancelled', completed_at = now()
-        where status = 'pending' and created_at < now() - ($1 || ' minutes')::interval returning order_id
+        where status = 'pending' and created_at < now() - ($1 || ' minutes')::interval returning order_id, appointment_id
+     ), orders_closed as (
+       update orders set stage = 'payment_failed' where id in (select order_id from closed) and stage = 'pending_payment'
      )
-     update orders set stage = 'payment_failed' where id in (select order_id from closed) and stage = 'pending_payment'`,
+     update appointments set status = 'cancelled' where id in (select appointment_id from closed) and status = 'held'`,
     [String(CHECKOUT_MINUTES)],
   );
   await db.pool.query(

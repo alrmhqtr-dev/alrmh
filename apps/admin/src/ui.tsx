@@ -1,6 +1,6 @@
 import { Component, createContext, useCallback, useContext, useEffect, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { X } from 'lucide-react';
-import { STAGE_LABEL } from './lib/format';
+import { stageLabel } from './lib/format';
 
 /** A page that fails to draw shows this instead of a blank screen; the sidebar keeps working. */
 export class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -39,9 +39,9 @@ export function PageHead({ title, sub, children }: { title: string; sub?: ReactN
   );
 }
 
-export function StageBadge({ stage }: { stage: string }) {
+export function StageBadge({ stage, thobes }: { stage: string; thobes?: boolean }) {
   const tone = stage === 'delivered' ? 'ok' : stage === 'cancelled' || stage === 'payment_failed' ? 'error' : stage === 'ready' || stage === 'out_for_delivery' ? 'gold' : 'dark';
-  return <span className={`badge ${tone}`}>{STAGE_LABEL[stage] ?? stage}</span>;
+  return <span className={`badge ${tone}`}>{stageLabel(stage, thobes)}</span>;
 }
 
 export function Field({ label, hint, error, children }: { label: string; hint?: ReactNode; error?: string | null; children: ReactNode }) {

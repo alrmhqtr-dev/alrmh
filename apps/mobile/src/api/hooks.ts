@@ -19,12 +19,16 @@ export type Catalogue = {
   settings: {
     delivery_fee: number;
     home_visit_fee: number;
+    appointment_fee: number;
     lead_working_days: number;
     measurements_valid_months: number;
-    points: { thobe_fixed: number; product_per_qar: number; expiry_months: number; warn_days: number };
+    points: { expiry_months: number; warn_days: number };
     support: { whatsapp: string; phone: string };
   };
+  tiers: Tier[];
 };
+/** A loyalty tier. Customers move up by points ever earned; points are worth QAR 1 each at checkout. */
+export type Tier = Bi & { id: string; min_points: number; points_per_product: number; points_per_thobe: number; colour: string };
 export type Me = {
   id: string;
   phone: string;
@@ -79,30 +83,20 @@ export type BasketLine = {
   appointment?: { id: string; kind: string; startsAt: string; branch_en: string | null; branch_ar: string | null; area: string | null } | null;
 };
 export type Basket = { items: BasketLine[]; count: number; subtotal: number; pointsToEarn: number };
-export type Voucher = {
-  id: string;
-  code: string;
-  kind: 'discount' | 'product';
-  percent: number | null;
-  product_id: string | null;
-  product_name_en?: string | null;
-  product_name_ar?: string | null;
-  status?: string;
-  expires_at: string;
-  cost_points: number;
-};
+export type PickupAddress = { pickup: true; branchId: string; id?: undefined; label: string; label_ar: string; line1: string; line1_ar: string; area: string; city: string };
+
 export type Quote = Basket & {
   deliveryFee: number;
   homeVisitFee: number;
   discount: number;
   discountLabel: string | null;
   total: number;
-  address: Address | null;
+  address: (Address & { pickup?: false }) | PickupAddress | null;
+  pickup: boolean;
   coupon: null | { code: string; percent?: number; maxDiscount?: number | null; error?: string; min?: number };
-  couponReplacesVoucher: boolean;
-  appliedVoucher: Voucher | null;
-  rewardItem: (Bi & { product_id: string }) | null;
-  vouchers: Voucher[];
+  pointsBalance: number;
+  pointsUsed: number;
+  tier: Tier;
 };
 export type OrderSummary = {
   id: string;
@@ -115,7 +109,10 @@ export type OrderSummary = {
   item_count: number;
   thobe_count: number;
   members: string[] | null;
+  thobes: ThobeLine[] | null;
 };
+/** One thobe line of a past order, as re-order shows it. */
+export type ThobeLine = { collar: Collar; fabric: Bi & { id: string; price: number }; colour: Colour | null; member: { id: string; name: string }; qty: number };
 export type OrderItem = { id: string; kind: 'thobe' | 'product' | 'reward'; snapshot: any; qty: number; unit_price: number; line_total: number };
 export type OrderDetail = OrderSummary & {
   subtotal: number;
@@ -123,10 +120,13 @@ export type OrderDetail = OrderSummary & {
   home_visit_fee: number;
   discount: number;
   discount_label: string | null;
-  address: Address;
+  /** A pickup order (placed in store) carries the branch instead of a home address. */
+  address: Address & { pickup?: boolean; label_ar?: string; line1_ar?: string };
   points_to_earn: number;
   points_awarded: boolean;
+  points_used: number;
   payment_status: string;
+  payment_provider: string | null;
   refunded: number;
   items: OrderItem[];
   events: { stage: string; at: string; note: string | null }[];
@@ -146,26 +146,8 @@ export type Appointment = {
   branch_name_en: string | null;
   branch_name_ar: string | null;
 };
-export type LedgerEntry = { id: string; kind: 'earn' | 'redeem' | 'expire' | 'adjust'; points: number; remaining?: number; expires_at: string | null; label: string | null; created_at: string };
-export type Rewards = {
-  balance: number;
-  earnedThisYear: number;
-  redeemedThisYear: number;
-  expiring: { points: number; expires_at: string; earned_at: string } | null;
-  vouchers: Voucher[];
-  rules: { thobe_fixed: number; product_per_qar: number; expiry_months: number; warn_days: number };
-  recent: LedgerEntry[];
-};
-export type RewardOption = {
-  id: string;
-  kind: 'discount' | 'product';
-  percent: number | null;
-  product_id: string | null;
-  product_name_en: string | null;
-  product_name_ar: string | null;
-  cost_points: number;
-  short: number;
-};
+export type LedgerEntry = { id: string; kind: 'earn' | 'redeem' | 'expire' | 'adjust' | 'refund'; points: number; remaining?: number; expires_at: string | null; label: string | null; created_at: string };
+export type Rewards = { balance: number; tier: Tier; next: Tier | null; lifetime: number; toNext: number; expiryMonths: number };
 export type Notification = { id: string; kind: string; title_en: string; title_ar: string; body_en: string; body_ar: string; link: string | null; created_at: string; read_at: string | null };
 export type Slots = { closedWeekdays: number[]; days: { date: string; weekday: number; available: boolean; times: { startsAt: string; minute: number; available: boolean }[] }[] };
 
@@ -199,11 +181,13 @@ export const useOrder = (id: string, live = false) =>
   });
 export const useAppointments = () => useQuery({ queryKey: ['appointments'], queryFn: () => api<Appointment[]>('/appointments'), ...authed() });
 export const useRewards = () => useQuery({ queryKey: ['rewards'], queryFn: () => api<Rewards>('/rewards'), ...authed() });
-export const useRewardHistory = (filter: string) =>
-  useQuery({ queryKey: ['rewards', 'history', filter], queryFn: () => api<LedgerEntry[]>(`/rewards/history?filter=${filter}`), ...authed() });
-export const useRewardOptions = () =>
-  useQuery({ queryKey: ['rewards', 'options'], queryFn: () => api<{ balance: number; discounts: RewardOption[]; products: RewardOption[] }>('/rewards/options'), ...authed() });
-export const useVoucher = (id: string) => useQuery({ queryKey: ['voucher', id], queryFn: () => api<Voucher>(`/rewards/vouchers/${id}`), ...authed() });
+/** The points rates to show: the customer's own tier, or the starting tier for guests. */
+export function usePointRates(): Tier | undefined {
+  const { signedIn } = useSession();
+  const rewards = useRewards();
+  const cat = useCatalogue();
+  return (signedIn ? rewards.data?.tier : undefined) ?? cat.data?.tiers?.[0];
+}
 export const useNotifications = () => useQuery({ queryKey: ['notifications'], queryFn: () => api<Notification[]>('/notifications'), ...authed() });
 export const useSlots = (kind: 'branch' | 'home', branchId?: string) =>
   useQuery({

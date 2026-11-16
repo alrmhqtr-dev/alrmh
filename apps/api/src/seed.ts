@@ -55,17 +55,6 @@ const products = [
   ['card-holder-red', 'accessories', 'Leather card holder, red', 'حافظة بطاقات جلدية حمراء', 'Slim card holder in textured leather with a red front, gift boxed.', 'حافظة بطاقات رفيعة من جلد محبب بواجهة حمراء، تأتي في علبة هدية.', 165, []],
 ];
 
-const rewardOptions = [
-  ['discount-5', 'discount', 5, null, 500],
-  ['discount-10', 'discount', 10, null, 1000],
-  ['discount-15', 'discount', 15, null, 1500],
-  ['discount-20', 'discount', 20, null, 2000],
-  ['product-ghutra', 'product', null, 'white-ghutra', 950],
-  ['product-agal', 'product', null, 'black-agal', 1200],
-  ['product-oud', 'product', null, 'oud-50', 1800],
-  ['product-sandals', 'product', null, 'leather-sandals', 2600],
-];
-
 export async function seed({ demo = false } = {}) {
   await migrate();
   await db.tx(async (c) => {
@@ -97,9 +86,6 @@ export async function seed({ demo = false } = {}) {
         `insert into products (id, category, name_en, name_ar, description_en, description_ar, price, sizes, sort) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict (id) do nothing`,
         [...p, i],
       );
-    }
-    for (const [i, r] of rewardOptions.entries()) {
-      await c.query('insert into reward_options (id, kind, percent, product_id, cost_points, sort) values ($1,$2,$3,$4,$5,$6) on conflict (id) do nothing', [...r, i]);
     }
   });
   await seedProductPhotos();
@@ -177,11 +163,13 @@ async function seedDemoCustomer() {
 
     const order = async (number: string, daysAgo: number, stage: string, thobes: { member: string; name: string; collar: string; fabric: string; price: number }[], stages: [string, number][], points: number) => {
       const total = thobes.reduce((a, t) => a + t.price, 0);
+      const b = (await c.query('select id, name_en, name_ar, address_en, address_ar from branches where active order by sort limit 1')).rows[0];
+      const pickup = { pickup: true, branchId: b.id, label: b.name_en, label_ar: b.name_ar, line1: b.address_en, line1_ar: b.address_ar, area: '', city: 'Doha' };
       const o = (
         await c.query(
           `insert into orders (number, customer_id, stage, subtotal, delivery_fee, total, address, points_to_earn, points_awarded, expected_delivery, created_at, paid_at)
-           values ($1,$2,$3,$4,25,$5,$6,$7,$8,$9, now() - ($10 || ' days')::interval, now() - ($10 || ' days')::interval) returning id`,
-          [number, cust.id, stage, total, total + 25, { label: 'Home', line1: 'Villa 12, Street 840', area: 'Al Waab', city: 'Doha' }, points, stage === 'delivered', qatarDateString(new Date(Date.now() + (stage === 'delivered' ? -daysAgo + 9 : 3) * 864e5)), String(daysAgo)],
+           values ($1,$2,$3,$4,0,$5,$6,$7,$8,$9, now() - ($10 || ' days')::interval, now() - ($10 || ' days')::interval) returning id`,
+          [number, cust.id, stage, total, total, pickup, points, stage === 'delivered', qatarDateString(new Date(Date.now() + (stage === 'delivered' ? -daysAgo + 9 : 3) * 864e5)), String(daysAgo)],
         )
       ).rows[0].id;
       for (const t of thobes) {
@@ -195,22 +183,21 @@ async function seedDemoCustomer() {
             },
             member: { id: t.member, name: t.name },
             measureMethod: 'saved',
-            points: 32,
+            points: 15,
           },
           t.price,
         ]);
       }
-      await c.query(`insert into payments (order_id, amount, status, provider_ref, completed_at) values ($1, $2, 'paid', 'SEED', now())`, [o, total + 25]);
+      await c.query(`insert into payments (order_id, amount, status, provider_ref, completed_at) values ($1, $2, 'paid', 'SEED', now())`, [o, total]);
       for (const [s, ago] of stages) await c.query(`insert into order_events (order_id, stage, at, note) values ($1,$2, now() - ($3 || ' hours')::interval, $4)`, [o, s, String(ago), s === 'measured' ? 'saved' : null]);
       return o;
     };
-    const o1 = await order('AR-09918', 367 - 18 + 18, 'delivered', [{ member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 320 }], [['confirmed', 8800], ['measured', 8800], ['cutting', 8760], ['stitching', 8700], ['ready', 8650], ['out_for_delivery', 8640], ['delivered', 8630]], 120);
-    const o2 = await order('AR-10311', 92, 'delivered', [{ member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 320 }], [['confirmed', 2200], ['measured', 2200], ['cutting', 2150], ['stitching', 2100], ['ready', 2010], ['out_for_delivery', 1990], ['delivered', 1980]], 32);
+    const o1 = await order('AR-09918', 367 - 18 + 18, 'delivered', [{ member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 320 }], [['measured', 8800], ['cutting', 8760], ['stitching', 8700], ['quality', 8660], ['ready', 8650], ['delivered', 8630]], 15);
+    const o2 = await order('AR-10311', 92, 'delivered', [{ member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 320 }], [['measured', 2200], ['cutting', 2150], ['stitching', 2100], ['quality', 2030], ['ready', 2010], ['delivered', 1980]], 15);
     const o3 = await order('AR-10482', 6, 'stitching', [
       { member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 320 },
       { member: khalifa, name: 'Khalifa', collar: 'mandarin-band', fabric: 'linen-blend', price: 350 },
-    ], [['confirmed', 144], ['measured', 144], ['cutting', 96], ['stitching', 30]], 64);
-    void o3;
+    ], [['measured', 144], ['cutting', 96], ['stitching', 30]], 40);
     void home;
     const earn = async (orderId: string, pts: number, label: string, daysAgo: number, remaining = pts) =>
       c.query(
@@ -218,22 +205,15 @@ async function seedDemoCustomer() {
          values ($1,'earn',$2,$3, now() - ($4 || ' days')::interval + interval '12 months', $5, $6, now() - ($4 || ' days')::interval)`,
         [cust.id, pts, remaining, String(daysAgo), orderId, label],
       );
-    await earn(o1, 2070, 'Order #AR-09918', 347, 120);
-    await earn(o1, 1088, 'Loyalty card transfer', 200);
-    await earn(o2, 32, 'Order #AR-10311', 82);
-    const v = (
-      await c.query(
-        `insert into vouchers (customer_id, code, option_id, kind, percent, cost_points, expires_at, created_at)
-         values ($1, 'AR10-7KQ2', 'discount-10', 'discount', 10, 1000, now() + interval '28 days', now() - interval '2 days') returning id`,
-        [cust.id],
-      )
-    ).rows[0].id;
-    await c.query(`insert into points_ledger (customer_id, kind, points, voucher_id, label, created_at) values ($1,'redeem',-1000,$2,'10% off voucher', now() - interval '2 days')`, [cust.id, v]);
-    await c.query(`insert into points_ledger (customer_id, kind, points, label, created_at) values ($1,'redeem',-950,'Reward: white-ghutra', now() - interval '60 days')`, [cust.id]);
+    // 320 points earned in all (Gold), 165 spent at checkout: 155 to use.
+    await earn(o1, 15, 'Order #AR-09918', 347);
+    await earn(o1, 290, 'Loyalty card transfer', 200, 125);
+    await earn(o2, 15, 'Order #AR-10311', 82);
+    await c.query(`insert into points_ledger (customer_id, kind, points, order_id, label, created_at) values ($1,'redeem',-165,$2,'Order #AR-10482', now() - interval '6 days')`, [cust.id, o3]);
     await c.query(
       `insert into notifications (customer_id, kind, title_en, title_ar, body_en, body_ar, link, created_at) values
-       ($1,'points','120 points expire in 18 days','تنتهي صلاحية 120 نقطة خلال 18 يوماً','Use them before they expire — redeem for a discount or a product.','استخدمها قبل انتهاء صلاحيتها — استبدلها بخصم أو منتج.','/rewards', now() - interval '2 hours'),
-       ($1,'order','Your thobes are being stitched','ثيابك قيد الخياطة','#AR-10482 · Your order moved to Stitching.','#AR-10482 · انتقل طلبك إلى مرحلة الخياطة.','/orders', now() - interval '30 hours')`,
+       ($1,'points','You''re now Gold','أصبحت في الفئة ذهبي','Every thobe now earns 20 points and every product 15.','كل ثوب يمنحك الآن 20 نقطة وكل منتج 15 نقاط.','/rewards', now() - interval '2 hours'),
+       ($1,'order','Sewing','الخياطة','#AR-10482 · Your thobes are being sewn.','#AR-10482 · ثيابك قيد الخياطة.','/orders', now() - interval '30 hours')`,
       [cust.id],
     );
   });

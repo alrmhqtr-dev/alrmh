@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Download, Search } from 'lucide-react';
 import { api, downloadCsv, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { STAGES, STAGE_LABEL, date, dateTime, money, phone, todayQatar } from '../lib/format';
+import { SHOP_FLOW, STAGES, STAGE_LABEL, THOBE_FLOW, date, stageLabel, dateTime, money, phone, todayQatar } from '../lib/format';
 import { Empty, Field, Input, Loading, Modal, PageHead, StageBadge, Tabs, useToast } from '../ui';
 
 export type OrderRow = {
@@ -22,10 +22,10 @@ export type OrderRow = {
   next_appointment: string | null;
 };
 
-const BOARD = ['confirmed', 'measured', 'cutting', 'stitching', 'ready', 'out_for_delivery'] as const;
+const BOARD = ['confirmed', 'measured', 'cutting', 'stitching', 'quality', 'ready', 'out_for_delivery'] as const;
 export const nextStage = (stage: string, hasThobes: boolean) => {
-  const flow = hasThobes ? [...STAGES] : ['confirmed', 'ready', 'out_for_delivery', 'delivered'];
-  const i = flow.indexOf(stage as any);
+  const flow = hasThobes ? THOBE_FLOW : SHOP_FLOW;
+  const i = flow.indexOf(stage);
   return i >= 0 && i < flow.length - 1 ? flow[i + 1] : null;
 };
 
@@ -44,9 +44,9 @@ export default function Orders() {
     refetchInterval: 30_000,
   });
   const move = useMutation({
-    mutationFn: ({ id, to }: { id: string; to: string }) => api(`/orders/${id}/stage`, { body: { stage: to } }),
+    mutationFn: ({ id, to }: { id: string; to: string; thobes: boolean }) => api(`/orders/${id}/stage`, { body: { stage: to } }),
     onSuccess: (_, v) => {
-      toast(`Moved to ${STAGE_LABEL[v.to]}. The customer was notified.`);
+      toast(`Moved to ${stageLabel(v.to, v.thobes)}. The customer was notified.`);
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['overview'] });
     },
@@ -125,12 +125,12 @@ export default function Orders() {
                         </div>
                         <span className="small secondary">{o.customer_name}</span>
                         <span className={`small ${late ? 'error-text' : 'muted'}`}>
-                          {o.stage === 'confirmed' && o.next_appointment ? `Measuring ${dateTime(o.next_appointment)}` : o.expected_delivery ? `Due ${date(o.expected_delivery)}` : ''}
+                          {o.stage === 'measured' && o.next_appointment ? `Measuring ${dateTime(o.next_appointment)}` : o.expected_delivery ? `Due ${date(o.expected_delivery)}` : ''}
                         </span>
                       </Link>
                       {next && can('owner', 'manager', 'tailor') ? (
-                        <button className="btn sm secondary" data-testid={`advance-${o.number}`} disabled={move.isPending} onClick={() => move.mutate({ id: o.id, to: next })}>
-                          {STAGE_LABEL[next]} <ArrowRight size={14} />
+                        <button className="btn sm secondary" data-testid={`advance-${o.number}`} disabled={move.isPending} onClick={() => move.mutate({ id: o.id, to: next, thobes: o.thobe_count > 0 })}>
+                          {stageLabel(next, o.thobe_count > 0)} <ArrowRight size={14} />
                         </button>
                       ) : null}
                     </div>
@@ -171,7 +171,7 @@ export default function Orders() {
                         <div>{o.customer_name}</div>
                         <div className="small muted">{phone(o.phone)}</div>
                       </td>
-                      <td><StageBadge stage={o.stage} /></td>
+                      <td><StageBadge stage={o.stage} thobes={o.thobe_count > 0} /></td>
                       <td className="small">{date(o.created_at)}</td>
                       <td className="small">{date(o.expected_delivery)}</td>
                       <td className="right num">{money(o.total)}</td>

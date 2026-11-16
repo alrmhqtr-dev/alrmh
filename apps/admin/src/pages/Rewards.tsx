@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { date, money, num } from '../lib/format';
-import { Field, Input, Loading, Modal, PageHead, Select, useToast } from '../ui';
+import { Field, Input, Loading, Modal, PageHead, useToast } from '../ui';
 
-type Option = { id: string; kind: 'discount' | 'product'; percent: number | null; product_id: string | null; product_name_en: string | null; cost_points: number; active: boolean; redeemed_count: number };
+type Tier = { id: string; name_en: string; name_ar: string; min_points: number; points_per_product: number; points_per_thobe: number; colour: string; customers: number };
 type Coupon = { code: string; percent: number; max_discount: number | null; starts_at: string | null; expires_at: string | null; active: boolean; uses: number; per_customer_limit: number | null; max_uses: number | null; min_subtotal: number | null };
 
 export default function Rewards() {
@@ -14,21 +14,36 @@ export default function Rewards() {
   const editable = can('owner', 'manager');
   const qc = useQueryClient();
   const toast = useToast();
-  const options = useQuery({ queryKey: ['reward-options'], queryFn: () => api<Option[]>('/reward-options') });
+  const tiers = useQuery({ queryKey: ['tiers'], queryFn: () => api<Tier[]>('/tiers') });
   const coupons = useQuery({ queryKey: ['coupons'], queryFn: () => api<Coupon[]>('/coupons') });
-  const products = useQuery({ queryKey: ['catalogue'], queryFn: () => api<{ products: { id: string; name_en: string }[] }>('/catalogue') });
-  const [opt, setOpt] = useState<Partial<Option> | null>(null);
+  const [tier, setTier] = useState<(Partial<Tier> & { isNew?: boolean }) | null>(null);
   const [cp, setCp] = useState<Partial<Coupon> & { isNew?: boolean } | null>(null);
 
-  const saveOpt = useMutation({
-    mutationFn: () =>
-      opt!.id
-        ? api(`/reward-options/${opt!.id}`, { method: 'PATCH', body: { cost_points: Number(opt!.cost_points), percent: opt!.kind === 'discount' ? Number(opt!.percent) : undefined, active: opt!.active } })
-        : api('/reward-options', { body: { kind: opt!.kind, percent: Number(opt!.percent), product_id: opt!.product_id, cost_points: Number(opt!.cost_points) } }),
+  const saveTier = useMutation({
+    mutationFn: () => {
+      const body = {
+        name_en: tier!.name_en,
+        name_ar: tier!.name_ar,
+        min_points: Number(tier!.min_points),
+        points_per_product: Number(tier!.points_per_product),
+        points_per_thobe: Number(tier!.points_per_thobe),
+        colour: tier!.colour,
+      };
+      return tier!.isNew ? api('/tiers', { body }) : api(`/tiers/${tier!.id}`, { method: 'PATCH', body });
+    },
     onSuccess: () => {
-      toast('Reward saved.');
-      qc.invalidateQueries({ queryKey: ['reward-options'] });
-      setOpt(null);
+      toast('Tier saved. New orders earn at these rates.');
+      qc.invalidateQueries({ queryKey: ['tiers'] });
+      setTier(null);
+    },
+    onError: (e) => toast(errorMessage(e), 'error'),
+  });
+  const deleteTier = useMutation({
+    mutationFn: (id: string) => api(`/tiers/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      toast('Tier removed.');
+      qc.invalidateQueries({ queryKey: ['tiers'] });
+      setTier(null);
     },
     onError: (e) => toast(errorMessage(e), 'error'),
   });
@@ -53,31 +68,46 @@ export default function Rewards() {
     onError: (e) => toast(errorMessage(e), 'error'),
   });
 
-  if (!options.data || !coupons.data) return <Loading />;
+  if (!tiers.data || !coupons.data) return <Loading />;
   const now = new Date().toISOString();
 
   return (
     <div className="stack lg">
-      <PageHead title="Rewards & coupons" sub="What customers can redeem with points, and the coupon codes that work at checkout. One discount per order." />
+      <PageHead title="Rewards & coupons" sub="Loyalty tiers and the coupon codes that work at checkout. Points are worth QAR 1 each when customers pay." />
 
       <div className="card">
         <div className="row spread" style={{ padding: '16px 18px 6px' }}>
-          <h2>Redeem with points</h2>
-          {editable ? <button className="btn sm" data-testid="add-reward" onClick={() => setOpt({ kind: 'discount', percent: 10, cost_points: 1000, active: true })}><Plus size={14} /> Add reward</button> : null}
+          <h2>Tiers</h2>
+          {editable ? (
+            <button
+              className="btn sm"
+              data-testid="add-tier"
+              onClick={() => setTier({ isNew: true, name_en: '', name_ar: '', min_points: (tiers.data.at(-1)?.min_points ?? 0) + 300, points_per_product: 10, points_per_thobe: 15, colour: '#B8B8B8' })}
+            >
+              <Plus size={14} /> Add tier
+            </button>
+          ) : null}
         </div>
         <table>
-          <thead><tr><th>Reward</th><th className="right">Cost</th><th className="right">Redeemed</th><th>Status</th></tr></thead>
+          <thead><tr><th>Tier</th><th className="right">Reached at</th><th className="right">Per thobe</th><th className="right">Per product</th><th className="right">Customers</th></tr></thead>
           <tbody>
-            {options.data.map((o) => (
-              <tr key={o.id} className={editable ? 'click' : ''} onClick={() => editable && setOpt(o)}>
-                <td className="strong">{o.kind === 'discount' ? `${o.percent}% off next order` : `Free ${o.product_name_en}`}</td>
-                <td className="right num">{num(o.cost_points)} pts</td>
-                <td className="right num">{o.redeemed_count}</td>
-                <td>{o.active ? <span className="badge ok">Live</span> : <span className="badge">Hidden</span>}</td>
+            {tiers.data.map((t) => (
+              <tr key={t.id} className={editable ? 'click' : ''} data-testid={`tier-${t.id}`} onClick={() => editable && setTier(t)}>
+                <td className="strong">
+                  <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, background: t.colour, marginRight: 8 }} />
+                  {t.name_en} <span className="muted small">{t.name_ar}</span>
+                </td>
+                <td className="right num">{t.min_points ? `${num(t.min_points)} pts` : 'Everyone starts here'}</td>
+                <td className="right num">{num(t.points_per_thobe)} pts</td>
+                <td className="right num">{num(t.points_per_product)} pts</td>
+                <td className="right num">{num(t.customers)}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        <div className="note" style={{ margin: '0 18px 16px' }}>
+          A customer's tier comes from every point they have ever earned, so spending points never moves them down. Thobes and products earn the points of the customer's tier when they order; points arrive on delivery.
+        </div>
       </div>
 
       <div className="card">
@@ -107,30 +137,32 @@ export default function Rewards() {
         </table>
       </div>
 
-      {opt ? (
-        <Modal title={opt.id ? 'Edit reward' : 'New reward'} onClose={() => setOpt(null)} footer={<><button className="btn secondary" onClick={() => setOpt(null)}>Cancel</button><button className="btn" data-testid="reward-save" disabled={saveOpt.isPending} onClick={() => saveOpt.mutate()}>Save</button></>}>
-          {!opt.id ? (
-            <Field label="Type">
-              <Select value={opt.kind} onChange={(e) => setOpt({ ...opt, kind: e.target.value as any })}>
-                <option value="discount">Percentage off next order</option>
-                <option value="product">Free product</option>
-              </Select>
-            </Field>
-          ) : null}
+      {tier ? (
+        <Modal
+          title={tier.isNew ? 'New tier' : `Edit ${tier.name_en}`}
+          onClose={() => setTier(null)}
+          footer={
+            <>
+              {!tier.isNew && tier.min_points !== 0 ? (
+                <button className="btn ghost" style={{ marginRight: 'auto', color: 'var(--error)' }} data-testid="tier-delete" disabled={deleteTier.isPending} onClick={() => confirm(`Remove the ${tier.name_en} tier? Customers in it move to the tier below.`) && deleteTier.mutate(tier.id!)}>
+                  <Trash2 size={14} /> Remove
+                </button>
+              ) : null}
+              <button className="btn secondary" onClick={() => setTier(null)}>Cancel</button>
+              <button className="btn" data-testid="tier-save" disabled={saveTier.isPending} onClick={() => saveTier.mutate()}>Save</button>
+            </>
+          }
+        >
           <div className="grid k2">
-            {opt.kind === 'discount' ? (
-              <Field label="Discount (%)"><Input type="number" min={1} max={100} value={opt.percent ?? ''} onChange={(e) => setOpt({ ...opt, percent: e.target.value as any })} /></Field>
-            ) : (
-              <Field label="Product">
-                <Select disabled={Boolean(opt.id)} value={opt.product_id ?? ''} onChange={(e) => setOpt({ ...opt, product_id: e.target.value })}>
-                  <option value="">Choose…</option>
-                  {(products.data?.products ?? []).map((p) => <option key={p.id} value={p.id}>{p.name_en}</option>)}
-                </Select>
-              </Field>
-            )}
-            <Field label="Cost (points)"><Input data-testid="reward-cost" type="number" min={1} value={opt.cost_points ?? ''} onChange={(e) => setOpt({ ...opt, cost_points: e.target.value as any })} /></Field>
+            <Field label="Name (English)"><Input data-testid="tier-name-en" value={tier.name_en ?? ''} onChange={(e) => setTier({ ...tier, name_en: e.target.value })} /></Field>
+            <Field label="Name (Arabic)"><Input data-testid="tier-name-ar" dir="rtl" value={tier.name_ar ?? ''} onChange={(e) => setTier({ ...tier, name_ar: e.target.value })} /></Field>
+            <Field label="Reached at (points ever earned)" hint={tier.min_points === 0 && !tier.isNew ? 'The starting tier stays at 0.' : 'No two tiers can share a threshold.'}>
+              <Input data-testid="tier-min" type="number" min={0} disabled={!tier.isNew && tier.min_points === 0} value={tier.min_points ?? ''} onChange={(e) => setTier({ ...tier, min_points: e.target.value as any })} />
+            </Field>
+            <Field label="Card colour"><Input data-testid="tier-colour" type="color" value={tier.colour ?? '#B8B8B8'} onChange={(e) => setTier({ ...tier, colour: e.target.value.toUpperCase() })} /></Field>
+            <Field label="Points per thobe"><Input data-testid="tier-thobe" type="number" min={0} value={tier.points_per_thobe ?? ''} onChange={(e) => setTier({ ...tier, points_per_thobe: e.target.value as any })} /></Field>
+            <Field label="Points per product"><Input data-testid="tier-product" type="number" min={0} value={tier.points_per_product ?? ''} onChange={(e) => setTier({ ...tier, points_per_product: e.target.value as any })} /></Field>
           </div>
-          {opt.id ? <label className="check"><input type="checkbox" checked={opt.active} onChange={(e) => setOpt({ ...opt, active: e.target.checked })} /> Show in the app</label> : null}
         </Modal>
       ) : null}
 

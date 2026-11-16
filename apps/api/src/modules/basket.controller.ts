@@ -11,7 +11,7 @@ type AddBody =
       kind: 'thobe';
       collarId: string;
       fabricId: string;
-      colourId: string;
+      colourId?: string | null;
       memberId: string;
       measureMethod: 'saved' | 'branch' | 'home';
       appointmentId?: string;
@@ -47,7 +47,8 @@ export class BasketController {
     if (body?.kind !== 'thobe') fail('invalid_kind');
     const collar = await db.one('select id from collars where id = $1 and active', [need(body.collarId, 'collarId')]);
     const fabric = await db.one('select id from fabrics where id = $1 and active', [need(body.fabricId, 'fabricId')]);
-    const colour = await db.one('select 1 from fabric_colours where fabric_id = $1 and colour_id = $2', [body.fabricId, need(body.colourId, 'colourId')]);
+    // Colour is optional: a re-order picks only the type and the cloth.
+    const colour = body.colourId ? await db.one('select 1 from fabric_colours where fabric_id = $1 and colour_id = $2', [body.fabricId, body.colourId]) : true;
     if (!collar || !fabric || !colour) fail('invalid_thobe_options');
     await memberFor(me.id, need(body.memberId, 'memberId'));
     const method = body.measureMethod;
@@ -64,7 +65,7 @@ export class BasketController {
     await db.pool.query(
       `insert into basket_items (customer_id, kind, qty, thobe, member_id, measure_method, appointment_id, remarks)
        values ($1,'thobe',$2,$3,$4,$5,$6,$7)`,
-      [me.id, qty, { collarId: body.collarId, fabricId: body.fabricId, colourId: body.colourId }, body.memberId, method, method === 'saved' ? null : body.appointmentId, remarks],
+      [me.id, qty, { collarId: body.collarId, fabricId: body.fabricId, colourId: body.colourId || null }, body.memberId, method, method === 'saved' ? null : body.appointmentId, remarks],
     );
     return this.get(me);
   }

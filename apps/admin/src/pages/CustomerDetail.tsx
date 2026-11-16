@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Ruler } from 'lucide-react';
+import { Award, Plus, Ruler, ShoppingBag } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { RELATION, date, money, num, phone } from '../lib/format';
 import { MeasureModal, MeasurementGrid, type Measurement } from '../measure';
+import { PlaceOrderModal } from '../place-order';
 import { Empty, Field, Input, Loading, Modal, PageHead, StageBadge, useToast } from '../ui';
 
 type Detail = {
@@ -20,7 +21,7 @@ type Detail = {
   addresses: { id: string; label: string; line1: string; area: string; city: string; notes: string | null; is_default: boolean }[];
   orders: { id: string; number: string; stage: string; total: number; created_at: string }[];
   ledger: { id: string; kind: string; points: number; remaining: number; expires_at: string | null; label: string | null; created_at: string; staff_name: string | null }[];
-  vouchers: { id: string; code: string; kind: string; percent: number | null; status: string; expires_at: string }[];
+  tier: { tier: { name_en: string; colour: string; points_per_thobe: number; points_per_product: number }; next: { name_en: string } | null; lifetime: number; toNext: number };
 };
 
 export default function CustomerDetail() {
@@ -37,6 +38,7 @@ export default function CustomerDetail() {
   };
   const [measure, setMeasure] = useState<{ id: string; name: string; prev: Measurement | null } | null>(null);
   const [adjust, setAdjust] = useState(false);
+  const [ordering, setOrdering] = useState(false);
   const [points, setPoints] = useState('');
   const [reason, setReason] = useState('');
   const adj = useMutation({
@@ -55,7 +57,13 @@ export default function CustomerDetail() {
   const c = q.data;
   return (
     <div className="stack lg">
-      <PageHead title={c.name ?? phone(c.phone)} sub={`${phone(c.phone)}${c.email ? ` · ${c.email}` : ''} · ${c.language === 'ar' ? 'Arabic' : 'English'} · joined ${date(c.created_at)}`} />
+      <PageHead title={c.name ?? phone(c.phone)} sub={`${phone(c.phone)}${c.email ? ` · ${c.email}` : ''} · ${c.language === 'ar' ? 'Arabic' : 'English'} · joined ${date(c.created_at)}`}>
+        {can('owner', 'manager', 'tailor') && c.family.length ? (
+          <button className="btn" data-testid="customer-place-order" onClick={() => setOrdering(true)}>
+            <ShoppingBag size={16} /> Place order
+          </button>
+        ) : null}
+      </PageHead>
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(280px, 1fr)', alignItems: 'start' }}>
         <div className="stack lg">
@@ -101,8 +109,14 @@ export default function CustomerDetail() {
 
         <div className="stack lg">
           <div className="card dark pad stack" style={{ gap: 6 }}>
-            <div className="overline" style={{ color: 'var(--gold)' }}>Points balance</div>
+            <div className="row" style={{ gap: 8 }}>
+              <Award size={18} color={c.tier.tier.colour} />
+              <span className="overline" style={{ color: c.tier.tier.colour }} data-testid="customer-tier">{c.tier.tier.name_en}</span>
+            </div>
             <div style={{ fontSize: 30, fontWeight: 600, color: 'var(--gold)' }} className="num" data-testid="points-balance">{num(c.balance)}</div>
+            <div className="small" style={{ color: 'rgba(255,255,255,0.7)' }}>
+              Points to use (QAR 1 each) · {num(c.tier.lifetime)} earned in all{c.tier.next ? ` · ${num(c.tier.toNext)} to ${c.tier.next.name_en}` : ''}
+            </div>
             {can('owner', 'manager') ? (
               <button className="btn gold sm" style={{ alignSelf: 'flex-start' }} data-testid="adjust-points" onClick={() => setAdjust(true)}>
                 <Plus size={14} /> Adjust points
@@ -128,18 +142,6 @@ export default function CustomerDetail() {
             </table>
             {!c.ledger.length ? <Empty>No points yet.</Empty> : null}
           </div>
-          {c.vouchers.length ? (
-            <div className="card pad stack" style={{ gap: 8 }}>
-              <div className="overline">Vouchers</div>
-              {c.vouchers.map((v) => (
-                <div key={v.id} className="row spread small">
-                  <span className="strong">{v.code}</span>
-                  <span>{v.kind === 'discount' ? `${v.percent}% off` : 'Product'}</span>
-                  <span className={`badge ${v.status === 'active' ? 'gold' : ''}`}>{v.status}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
           <div className="card pad stack" style={{ gap: 8 }}>
             <div className="overline">Addresses</div>
             {c.addresses.map((a) => (
@@ -155,6 +157,7 @@ export default function CustomerDetail() {
       </div>
 
       {measure ? <MeasureModal memberId={measure.id} memberName={measure.name} previous={measure.prev} onClose={() => setMeasure(null)} /> : null}
+      {ordering ? <PlaceOrderModal customerId={c.id} onClose={() => setOrdering(false)} /> : null}
       {adjust ? (
         <Modal
           title="Adjust points"

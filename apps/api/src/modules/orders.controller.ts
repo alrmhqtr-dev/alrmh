@@ -5,27 +5,9 @@ import { config } from '../config.js';
 import { CustomerGuard, Me, type Customer } from '../auth.js';
 import { fail } from '../lib.js';
 import { quote, type QuoteInput } from '../pricing.js';
-import { closePayment, createOrder, markPaid, stagesFor } from '../orders.js';
+import { closePayment, createOrder, markAppointmentPaid, markPaid, stagesFor } from '../orders.js';
 import { CHECKOUT_MINUTES } from '../housekeeping.js';
-
-/**
- * Where the customer goes after paying. Only the app's own addresses are
- * accepted: the web app's exact origin (or another allowed origin), or the
- * native app's own link scheme. Anything else falls back to the web app.
- */
-function allowedReturn(url: string | undefined) {
-  if (!url) return config.appUrl;
-  try {
-    const u = new URL(url);
-    if (u.protocol === `${config.appScheme}:`) return `${config.appScheme}:/`;
-    if (u.protocol === 'http:' || u.protocol === 'https:') {
-      const origins = new Set([new URL(config.appUrl).origin, ...config.corsOrigins.filter((o) => o !== '*')]);
-      const anyOrigin = !config.production && config.corsOrigins.includes('*');
-      if (origins.has(u.origin) || anyOrigin) return url.replace(/\/$/, '');
-    }
-  } catch {}
-  return config.appUrl;
-}
+import { allowedReturn } from '../returns.js';
 
 /** The test payment page exists only in test mode; with real payments it is not there at all. */
 function mockOnly() {
@@ -37,7 +19,10 @@ const ORDER_SUMMARY = `
   (select max(e.at) from order_events e where e.order_id = o.id and e.stage in ('delivered','cancelled')) as closed_at,
   (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id) as item_count,
   (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobe_count,
-  (select array_agg(distinct i.snapshot->'member'->>'name') from order_items i where i.order_id = o.id and i.kind = 'thobe') as members`;
+  (select array_agg(distinct i.snapshot->'member'->>'name') from order_items i where i.order_id = o.id and i.kind = 'thobe') as members,
+  (select json_agg(json_build_object('collar', i.snapshot->'thobe'->'collar', 'fabric', i.snapshot->'thobe'->'fabric', 'colour', i.snapshot->'thobe'->'colour',
+                                     'member', i.snapshot->'member', 'qty', i.qty) order by i.id)
+     from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobes`;
 
 @Controller('v1')
 export class OrdersController {
@@ -73,6 +58,7 @@ export class OrdersController {
   async detail(@Me() me: Customer, @Param('id') id: string) {
     const order = await db.one(
       `select o.*, (select status from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_status,
+              (select provider from payments p where p.order_id = o.id and p.status = 'paid' order by created_at desc limit 1) as payment_provider,
               (select coalesce(sum(amount),0)::float from refunds r where r.order_id = o.id) as refunded
          from orders o where o.id = $1 and o.customer_id = $2`,
       [id, me.id],
@@ -80,7 +66,7 @@ export class OrdersController {
     if (!order) throw new NotFoundException({ code: 'order_not_found' });
     const [items, events, appointments] = await Promise.all([
       db.many('select id, kind, snapshot, qty, unit_price, line_total from order_items where order_id = $1 order by kind desc', [id]),
-      db.many("select stage, at, note from order_events where order_id = $1 order by at, array_position(array['confirmed','measured','cutting','stitching','ready','out_for_delivery','delivered','cancelled'], stage)", [id]),
+      db.many("select stage, at, note from order_events where order_id = $1 order by at, array_position(array['confirmed','measured','cutting','stitching','quality','ready','out_for_delivery','delivered','cancelled'], stage)", [id]),
       db.many(
         `select a.id, a.kind, a.starts_at, a.status, f.name as member_name, b.name_en as branch_name_en, b.name_ar as branch_name_ar, ad.area
            from appointments a join family_members f on f.id = a.member_id left join branches b on b.id = a.branch_id left join addresses ad on ad.id = a.address_id
@@ -94,7 +80,11 @@ export class OrdersController {
   @Get('pay/mock/:paymentId')
   async mockPage(@Param('paymentId') paymentId: string, @Query('return') ret: string, @Res() res: Response) {
     mockOnly();
-    const p = await db.one('select p.id, p.amount, p.status, o.number from payments p join orders o on o.id = p.order_id where p.id = $1', [paymentId]);
+    const p = await db.one(
+      `select p.id, p.amount, p.status, o.number, a.kind as appt_kind
+         from payments p left join orders o on o.id = p.order_id left join appointments a on a.id = p.appointment_id where p.id = $1`,
+      [paymentId],
+    );
     if (!p) return res.status(404).send('Payment not found');
     const action = `${config.apiUrl}/v1/pay/mock/${paymentId}?return=${encodeURIComponent(ret ?? '')}`;
     res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -106,7 +96,7 @@ h1{font-size:20px;margin:0 0 4px}p{color:#4a4a4a;font-size:14px;margin:0 0 20px}
 button{width:100%;height:52px;border-radius:12px;border:0;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px}
 .pay{background:#0b0b0b;color:#fff}.fail{background:#fff;border:1px solid #e8e2d6;color:#0b0b0b}.cancel{background:none;color:#4a4a4a}
 </style></head><body><form class="card" method="post" action="${action}">
-<span class="badge">Test mode · no money is taken</span><h1>SADAD</h1><p>Order #${p.number}</p>
+<span class="badge">Test mode · no money is taken</span><h1>SADAD</h1><p>${p.number ? `Order #${p.number}` : `Booking fee · ${p.appt_kind === 'home' ? 'home visit' : 'branch visit'}`}</p>
 <div class="amt">QAR ${Number(p.amount).toFixed(2)}</div>
 ${p.status === 'pending' ? `<button class="pay" name="result" value="paid">Pay QAR ${Number(p.amount).toFixed(2)}</button>
 <button class="fail" name="result" value="failed">Simulate a declined card</button>
@@ -118,8 +108,24 @@ ${p.status === 'pending' ? `<button class="pay" name="result" value="paid">Pay Q
   async mockComplete(@Param('paymentId') paymentId: string, @Query('return') ret: string, @Body() body: { result?: string }, @Res() res: Response) {
     mockOnly();
     const base = allowedReturn(ret);
-    const p = await db.one(`select order_id, status, created_at < now() - ($2 || ' minutes')::interval as expired from payments where id = $1`, [paymentId, String(CHECKOUT_MINUTES)]);
+    const p = await db.one(`select order_id, appointment_id, status, created_at < now() - ($2 || ' minutes')::interval as expired from payments where id = $1`, [paymentId, String(CHECKOUT_MINUTES)]);
     if (!p) return res.status(404).send('Payment not found');
+    if (p.appointment_id) {
+      // The booking fee for a measurement appointment (a new order).
+      const back = (r: string) => res.redirect(303, `${base}/book?standalone=1&payment=${r}`);
+      if (body?.result === 'paid') {
+        if (p.status === 'pending' && p.expired) await closePayment(paymentId, 'cancelled');
+        if ((p.status !== 'pending' && p.status !== 'paid') || (p.status === 'pending' && p.expired)) return back('cancelled');
+        try {
+          const apptId = await markAppointmentPaid(paymentId, `MOCK-${Date.now()}`);
+          return res.redirect(303, `${base}/booked/${apptId}`);
+        } catch {
+          return back('cancelled');
+        }
+      }
+      await closePayment(paymentId, body?.result === 'failed' ? 'failed' : 'cancelled');
+      return back(body?.result === 'failed' ? 'failed' : 'cancelled');
+    }
     if (body?.result === 'paid') {
       // A checkout that was replaced by a newer one, or left open too long, can no longer be paid.
       if (p.status === 'pending' && p.expired) await closePayment(paymentId, 'cancelled');

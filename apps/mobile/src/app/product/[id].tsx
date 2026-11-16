@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Star } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
-import { useCatalogue } from '@/api/hooks';
+import { useCatalogue, usePointRates } from '@/api/hooks';
 import { useSession } from '@/state/session';
 import { errorText } from '@/lib/errors';
 import { Button, Chip, ErrorState, Loading, Note, Pill, Stepper, Text } from '@/ui/primitives';
@@ -20,6 +20,7 @@ export default function ProductScreen() {
   const qc = useQueryClient();
   const { signedIn } = useSession();
   const cat = useCatalogue();
+  const rates = usePointRates();
   const product = cat.data?.products.find((p) => p.id === id);
   const [size, setSize] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
@@ -30,7 +31,7 @@ export default function ProductScreen() {
   if (cat.isLoading) return <Screen header={<Header bag />}><Loading /></Screen>;
   if (!product) return <Screen header={<Header bag />}><ErrorState message={t('common.error')} retryLabel={t('common.retry')} onRetry={() => cat.refetch()} /></Screen>;
 
-  const pts = Math.round(product.price * (cat.data?.settings.points.product_per_qar ?? 0.1));
+  const pts = (rates?.points_per_product ?? 0) * qty;
   const add = async () => {
     if (!signedIn) return setGate(true);
     if (product.sizes.length && !size) return setMsg({ tone: 'error', text: t('product.pickSize') });

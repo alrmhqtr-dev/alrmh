@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, Ruler, Scissors, Star, Truck } from 'lucide-react-native';
+import { Check, Ruler, Scissors, Star, Store, Truck } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { useOrder } from '@/api/hooks';
 import { Button, Card, Divider, IconTile, Loading, Text } from '@/ui/primitives';
@@ -12,7 +12,7 @@ import { colors } from '@/theme/tokens';
 
 export default function OrderPlaced() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { t, f } = useLocale();
+  const { t, f, lang } = useLocale();
   const qc = useQueryClient();
   const order = useOrder(id);
 
@@ -30,8 +30,10 @@ export default function OrderPlaced() {
     ? [
         ...(hasThobe ? [{ icon: Ruler, title: t('placed.measure'), body: appt ? t('placed.measureBooked', { when: f.when(appt.starts_at) }) : t('placed.measureSaved') }] : []),
         ...(hasThobe ? [{ icon: Scissors, title: t('placed.tailoring'), body: t('placed.tailoringBody') }] : []),
-        { icon: Truck, title: t('placed.delivery'), body: t('placed.deliveryTo', { address: `${o.address.line1}, ${o.address.area}` }) },
-        { icon: Star, title: t('placed.points', { pts: o.points_to_earn }), body: t('placed.pointsBody'), gold: true },
+        o.address.pickup
+          ? { icon: Store, title: t('placed.collect'), body: t('placed.collectFrom', { branch: lang === 'ar' && o.address.label_ar ? o.address.label_ar : o.address.label }) }
+          : { icon: Truck, title: t('placed.delivery'), body: t('placed.deliveryTo', { address: `${o.address.line1}, ${o.address.area}` }) },
+        { icon: Star, title: t('placed.points', { pts: o.points_to_earn }), body: t(o.address.pickup ? 'placed.pointsCollect' : 'placed.pointsBody'), gold: true },
       ]
     : [];
 

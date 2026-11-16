@@ -2,15 +2,14 @@ import { View } from 'react-native';
 import { router } from 'expo-router';
 import { Scissors, Star, Truck } from 'lucide-react-native';
 import { useLocale, type Format } from '@/i18n';
-import { useCatalogue, type OrderSummary, type Product } from '@/api/hooks';
+import { usePointRates, type OrderSummary, type Product } from '@/api/hooks';
 import { Card, Icon, Pill, Text, Touch } from '@/ui/primitives';
 import { ProductArt } from '@/ui/art';
 import { colors } from '@/theme/tokens';
 
 export function ProductCard({ product, onPress }: { product: Product; onPress: () => void }) {
   const { f, t } = useLocale();
-  const cat = useCatalogue();
-  const pts = Math.round(product.price * (cat.data?.settings.points.product_per_qar ?? 0.1));
+  const pts = usePointRates()?.points_per_product ?? 0;
   return (
     <Touch testID={`product-${product.id}`} onPress={onPress} style={{ flex: 1, gap: 8 }}>
       <ProductArt label={t('shop.render')} uri={product.image_url} />
@@ -36,8 +35,16 @@ export function StageSegments({ stages, current }: { stages: string[]; current: 
   );
 }
 
-export const THOBE_STAGES = ['confirmed', 'measured', 'cutting', 'stitching', 'ready', 'out_for_delivery', 'delivered'];
+/** Thobes: made to measure and collected from the branch. */
+export const THOBE_STAGES = ['measured', 'cutting', 'stitching', 'quality', 'ready', 'delivered'];
+/** Shop-only orders: packed and delivered. */
 export const PRODUCT_STAGES = ['confirmed', 'ready', 'out_for_delivery', 'delivered'];
+
+/** The label for a stage, worded for the kind of order ("Ready for pickup" vs "Packed"). */
+export function stageKey(stage: string, thobes: boolean): any {
+  const flow = thobes ? THOBE_STAGES : PRODUCT_STAGES;
+  return flow.includes(stage) ? `stage.${thobes ? 'thobe' : 'shop'}.${stage}` : `stage.${stage}`;
+}
 
 export function orderLine(o: OrderSummary, t: (k: any, p?: any) => string, f: Format) {
   const names = (o.members ?? []).filter(Boolean).join(t('common.listSep'));
@@ -47,7 +54,8 @@ export function orderLine(o: OrderSummary, t: (k: any, p?: any) => string, f: Fo
 
 export function ActiveOrderCard({ order }: { order: OrderSummary }) {
   const { t, f } = useLocale();
-  const stages = order.thobe_count > 0 ? THOBE_STAGES : PRODUCT_STAGES;
+  const thobes = order.thobe_count > 0;
+  const stages = thobes ? THOBE_STAGES : PRODUCT_STAGES;
   return (
     <Card testID="active-order" onPress={() => router.push(`/orders/${order.id}`)} style={{ padding: 18, gap: 14 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
@@ -57,14 +65,14 @@ export function ActiveOrderCard({ order }: { order: OrderSummary }) {
             {orderLine(order, t, f)}
           </Text>
         </View>
-        <Pill dark icon={Scissors} label={t(`stage.${order.stage}` as any)} />
+        <Pill dark icon={Scissors} label={t(stageKey(order.stage, thobes))} />
       </View>
       <StageSegments stages={stages} current={order.stage} />
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
           <Icon icon={Truck} size={18} color={colors.textSecondary} />
           <Text variant="small" color={colors.textSecondary} numberOfLines={1}>
-            {order.expected_delivery ? t('home.expected', { date: f.weekdayDate(order.expected_delivery) }) : t(`stage.${order.stage}` as any)}
+            {order.expected_delivery ? t(thobes ? 'home.readyBy' : 'home.expected', { date: f.weekdayDate(order.expected_delivery) }) : t(stageKey(order.stage, thobes))}
           </Text>
         </View>
         <Text variant="smallStrong">{t('home.track')}</Text>

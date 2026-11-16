@@ -6,7 +6,7 @@ import { Clock, Star } from 'lucide-react-native';
 import { useLocale } from '@/i18n';
 import { api } from '@/api/client';
 import { useBuilder } from '@/state/builder';
-import { useCatalogue, useFamily } from '@/api/hooks';
+import { useCatalogue, useFamily, usePointRates } from '@/api/hooks';
 import { errorText } from '@/lib/errors';
 import { memberTitle } from '@/lib/people';
 import { Button, Card, Divider, Icon, Note, Pill, Stepper, Text, Touch } from '@/ui/primitives';
@@ -21,6 +21,7 @@ export default function Review() {
   const { state, set, reset } = useBuilder();
   const { collar, fabric, colour } = useDesignData();
   const cat = useCatalogue();
+  const rates = usePointRates();
   const family = useFamily();
   const member = family.data?.find((m) => m.id === state.memberId);
   const [busy, setBusy] = useState(false);
@@ -29,7 +30,7 @@ export default function Review() {
   const unit = fabric?.price ?? 0;
   const fee = state.method === 'home' ? (cat.data?.settings.home_visit_fee ?? 0) : 0;
   const subtotal = unit * state.qty + fee;
-  const pts = (cat.data?.settings.points.thobe_fixed ?? 0) * state.qty;
+  const pts = (rates?.points_per_thobe ?? 0) * state.qty;
   const measureText =
     state.method === 'saved' && member?.measured_at
       ? t('review.saved', { date: f.date(member.measured_at) })
