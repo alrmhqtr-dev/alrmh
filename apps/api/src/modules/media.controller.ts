@@ -2,7 +2,7 @@ import { Controller, Get, NotFoundException, Param, Post, Req, Res, UseGuards } 
 import type { Request, Response } from 'express';
 import { db } from '../db.js';
 import { fail } from '../lib.js';
-import { CurrentStaff, Managers, audit, type StaffUser } from '../staff.js';
+import { CurrentStaff, audit, staffGuard, type StaffUser } from '../staff.js';
 
 export const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export const MEDIA_LIMIT = '2mb';
@@ -21,7 +21,7 @@ function sniff(b: Buffer): string | null {
 export class MediaController {
   /** Upload: the request body is the image itself (JPEG, PNG or WebP, up to 2 MB). */
   @Post('admin/media')
-  @UseGuards(Managers)
+  @UseGuards(staffGuard('manage', 'products', 'workshop'))
   async upload(@CurrentStaff() me: StaffUser, @Req() req: Request) {
     const body = req.body;
     if (!Buffer.isBuffer(body) || !body.length) fail('invalid_image');

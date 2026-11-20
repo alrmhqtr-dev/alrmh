@@ -1,7 +1,37 @@
 import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { db, type Queryable } from '../db.js';
 import { DEFAULT_SETTINGS, fail, getSettings, listTiers, need } from '../lib.js';
-import { AnyStaff, CurrentStaff, Managers, audit, type StaffUser } from '../staff.js';
+import { AnyStaff, CurrentStaff, Managers, audit, staffGuard, type StaffUser } from '../staff.js';
+
+const ProductEditors = staffGuard('products', 'manage');
+const uuidOpt = (v: unknown, field: string) => {
+  if (v === undefined) return undefined;
+  if (v === null || v === '') return null;
+  if (typeof v !== 'string' || !/^[0-9a-f-]{36}$/i.test(v)) fail('invalid_input', { field });
+  return v;
+};
+const qty = (v: unknown, field: string) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 1_000_000) fail('invalid_number', { field });
+  return Math.round(n * 100) / 100;
+};
+/** Stock, cost and labelling fields shared by products and cloth. */
+async function stockFields(b: any, table: 'products' | 'fabrics', id: string | null) {
+  let sku: string | undefined;
+  if (b.sku !== undefined && b.sku !== null && String(b.sku).trim() !== '') {
+    sku = String(b.sku).trim().toUpperCase().slice(0, 40);
+    if (!/^[A-Z0-9\-_.]+$/.test(sku)) fail('invalid_sku');
+    const clash = await db.one(`select id from ${table} where upper(sku) = $1 and id <> coalesce($2, '')`, [sku, id]);
+    if (clash) fail('sku_taken');
+  }
+  return {
+    sku,
+    cost: b.cost !== undefined ? money(b.cost, 'cost') : undefined,
+    track_stock: typeof b.track_stock === 'boolean' ? b.track_stock : undefined,
+    alert_qty: b.alert_qty !== undefined ? qty(b.alert_qty, 'alert_qty') : undefined,
+    tax_rate_id: uuidOpt(b.tax_rate_id, 'tax_rate_id'),
+  };
+}
 import { COLLAR_SHAPES } from './catalogue.controller.js';
 import { MEDIA_PATH } from './media.controller.js';
 
@@ -104,23 +134,27 @@ export class AdminSetupController {
   }
 
   @Post('products')
-  @UseGuards(Managers)
+  @UseGuards(ProductEditors)
   async addProduct(@CurrentStaff() me: StaffUser, @Body() b: any) {
     const category = await categoryId(b?.category);
     const id = await uniqueId('products', b.name_en ?? '');
+    const extra = await stockFields(b ?? {}, 'products', null);
     await db.pool.query(
-      `insert into products (id, category, name_en, name_ar, description_en, description_ar, price, sizes, image_url, active, sort)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,(select coalesce(max(sort),0)+1 from products))`,
-      [id, category, text(b.name_en, 'name_en'), text(b.name_ar, 'name_ar'), String(b.description_en ?? '').slice(0, 400), String(b.description_ar ?? '').slice(0, 400), money(b.price, 'price'), cleanSizes(b.sizes), imageOrNull(b.image_url), b.active !== false],
+      `insert into products (id, category, name_en, name_ar, description_en, description_ar, price, sizes, image_url, active, sort, sku)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,(select coalesce(max(sort),0)+1 from products),$11)`,
+      [id, category, text(b.name_en, 'name_en'), text(b.name_ar, 'name_ar'), String(b.description_en ?? '').slice(0, 400), String(b.description_ar ?? '').slice(0, 400), money(b.price, 'price'), cleanSizes(b.sizes), imageOrNull(b.image_url), b.active !== false, extra.sku ?? await freeSku('products', id.toUpperCase())],
     );
+    await patchRow('products', id, { ...extra, sku: undefined, ...productLinks(b) });
     await audit(me, 'create', 'product', id, b);
     return { id };
   }
 
   @Patch('products/:id')
-  @UseGuards(Managers)
+  @UseGuards(ProductEditors)
   async updateProduct(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
     await patchRow('products', id, {
+      ...(await stockFields(b, 'products', id)),
+      ...productLinks(b),
       category: b.category !== undefined ? await categoryId(b.category) : undefined,
       name_en: b.name_en !== undefined ? text(b.name_en, 'name_en') : undefined,
       name_ar: b.name_ar !== undefined ? text(b.name_ar, 'name_ar') : undefined,
@@ -136,7 +170,7 @@ export class AdminSetupController {
   }
 
   @Post('categories')
-  @UseGuards(Managers)
+  @UseGuards(ProductEditors)
   async addCategory(@CurrentStaff() me: StaffUser, @Body() b: any) {
     const id = await uniqueId('categories', b?.name_en ?? '');
     await db.pool.query('insert into categories (id, name_en, name_ar, sort) values ($1,$2,$3,(select coalesce(max(sort),0)+1 from categories))', [id, text(b.name_en, 'name_en', 40), text(b.name_ar, 'name_ar', 40)]);
@@ -145,7 +179,7 @@ export class AdminSetupController {
   }
 
   @Patch('categories/:id')
-  @UseGuards(Managers)
+  @UseGuards(ProductEditors)
   async updateCategory(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
     await patchRow('categories', id, {
       name_en: b.name_en !== undefined ? text(b.name_en, 'name_en', 40) : undefined,
@@ -190,13 +224,15 @@ export class AdminSetupController {
   @UseGuards(Managers)
   async addFabric(@CurrentStaff() me: StaffUser, @Body() b: any) {
     const id = await uniqueId('fabrics', b?.name_en ?? '');
+    const extra = await stockFields(b ?? {}, 'fabrics', null);
     await db.tx(async (c) => {
       await c.query(
-        'insert into fabrics (id, name_en, name_ar, note_en, note_ar, price, sort) values ($1,$2,$3,$4,$5,$6,(select coalesce(max(sort),0)+1 from fabrics))',
-        [id, text(b.name_en, 'name_en'), text(b.name_ar, 'name_ar'), String(b.note_en ?? '').slice(0, 120), String(b.note_ar ?? '').slice(0, 120), money(b.price, 'price')],
+        'insert into fabrics (id, name_en, name_ar, note_en, note_ar, price, sort, sku) values ($1,$2,$3,$4,$5,$6,(select coalesce(max(sort),0)+1 from fabrics),$7)',
+        [id, text(b.name_en, 'name_en'), text(b.name_ar, 'name_ar'), String(b.note_en ?? '').slice(0, 120), String(b.note_ar ?? '').slice(0, 120), money(b.price, 'price'), extra.sku ?? await freeSku('fabrics', `F-${id.toUpperCase()}`)],
       );
       await setFabricColours(id, b.colour_ids, c);
     });
+    await patchRow('fabrics', id, { ...extra, sku: undefined, metres_per_thobe: b.metres_per_thobe !== undefined ? qty(b.metres_per_thobe, 'metres_per_thobe') : undefined });
     await audit(me, 'create', 'fabric', id, b);
     return { id };
   }
@@ -205,6 +241,8 @@ export class AdminSetupController {
   @UseGuards(Managers)
   async updateFabric(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
     await patchRow('fabrics', id, {
+      ...(await stockFields(b, 'fabrics', id)),
+      metres_per_thobe: b.metres_per_thobe !== undefined ? qty(b.metres_per_thobe, 'metres_per_thobe') : undefined,
       name_en: b.name_en !== undefined ? text(b.name_en, 'name_en') : undefined,
       name_ar: b.name_ar !== undefined ? text(b.name_ar, 'name_ar') : undefined,
       note_en: b.note_en !== undefined ? String(b.note_en).slice(0, 120) : undefined,
@@ -464,6 +502,23 @@ function branchSlotFields(b: any, current: { open_minute: number; close_minute: 
     lng: b.lng !== undefined ? coordOrNull(b.lng, 'lng', 180) : undefined,
     active: typeof b.active === 'boolean' ? b.active : undefined,
   };
+}
+
+function productLinks(b: any) {
+  return {
+    brand_id: uuidOpt(b.brand_id, 'brand_id'),
+    unit_id: uuidOpt(b.unit_id, 'unit_id'),
+    warranty_id: uuidOpt(b.warranty_id, 'warranty_id'),
+    in_app: typeof b.in_app === 'boolean' ? b.in_app : undefined,
+  };
+}
+
+/** The suggested code if free, else the same with a number after it. */
+export async function freeSku(table: 'products' | 'fabrics', base: string) {
+  const root = base.toUpperCase().replace(/[^A-Z0-9\-_.]+/g, '-').slice(0, 36) || 'ITEM';
+  let sku = root;
+  for (let i = 2; await db.one(`select 1 from ${table} where upper(sku) = $1`, [sku]); i++) sku = `${root}-${i}`;
+  return sku;
 }
 
 function cleanSizes(v: unknown): string[] {

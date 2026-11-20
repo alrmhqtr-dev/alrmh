@@ -11,3 +11,40 @@ export function toCsv(header: string[], rows: unknown[][]) {
   };
   return '﻿' + [header, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
 }
+
+/** Reads CSV (from Excel or Google Sheets) into rows keyed by the header, lower-cased with spaces as underscores. */
+export function parseCsv(text: string): Record<string, string>[] {
+  const src = String(text ?? '').replace(/^﻿/, '');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"' && src[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && src[i + 1] === '\n') i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else cell += ch;
+  }
+  if (cell !== '' || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  const clean = rows.filter((r) => r.some((c) => c.trim() !== ''));
+  if (!clean.length) return [];
+  const header = clean[0].map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
+  return clean.slice(1).map((r) => Object.fromEntries(header.map((h, i) => [h, (r[i] ?? '').trim()])));
+}

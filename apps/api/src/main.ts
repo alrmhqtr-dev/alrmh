@@ -22,6 +22,13 @@ import { AdminOpsController } from './modules/admin-ops.controller.js';
 import { AdminSetupController } from './modules/admin-setup.controller.js';
 import { MEDIA_LIMIT, MEDIA_TYPES, MediaController } from './modules/media.controller.js';
 import { ensureOwner } from './staff.js';
+import { PosController } from './modules/pos.controller.js';
+import { ListsController } from './modules/lists.controller.js';
+import { ContactsController } from './modules/contacts.controller.js';
+import { InventoryController } from './modules/inventory.controller.js';
+import { PurchasesController } from './modules/purchases.controller.js';
+import { ReportsController } from './modules/reports.controller.js';
+import { BusinessController } from './modules/business.controller.js';
 import { ErrorFilter } from './errors.js';
 
 @Controller()
@@ -54,6 +61,13 @@ class HealthController {
     AdminSetupController,
     MediaController,
     PushController,
+    PosController,
+    ListsController,
+    ContactsController,
+    InventoryController,
+    PurchasesController,
+    ReportsController,
+    BusinessController,
   ],
 })
 class AppModule {}
@@ -76,6 +90,8 @@ async function bootstrap() {
   app.useGlobalFilters(new ErrorFilter());
   // Photo uploads arrive as the image itself.
   app.useBodyParser('raw', { type: MEDIA_TYPES, limit: MEDIA_LIMIT });
+  // Imports (customers, products, past sales) arrive as CSV text inside JSON.
+  app.useBodyParser('json', { limit: '8mb' });
   app.enableCors({
     origin: config.corsOrigins.includes('*') ? true : config.corsOrigins,
     allowedHeaders: ['Content-Type', 'Authorization'],

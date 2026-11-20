@@ -7,7 +7,20 @@ export type Collar = Bi & { id: string; shape?: string };
 export type Category = Bi & { id: string };
 export type Fabric = Bi & { id: string; note_en: string; note_ar: string; price: number; colour_ids: string[] };
 export type Colour = Bi & { id: string; hex: string };
-export type Product = Bi & { id: string; category: string; description_en: string; description_ar: string; price: number; sizes: string[]; image_url: string | null };
+export type Product = Bi & {
+  id: string;
+  category: string;
+  description_en: string;
+  description_ar: string;
+  price: number;
+  sizes: string[];
+  image_url: string | null;
+  /** The price after an offer, when there is one. */
+  sale_price?: number | null;
+  /** False when every size is sold out (stock is kept for this product). */
+  in_stock?: boolean;
+  sold_out_sizes?: string[];
+};
 export type Branch = Bi & { id: string; address_en: string; address_ar: string; phone: string; whatsapp: string; hours_en: string; hours_ar: string; closed_weekdays: number[]; lat: number | null; lng: number | null };
 export type Catalogue = {
   collars: Collar[];
@@ -113,7 +126,7 @@ export type OrderSummary = {
 };
 /** One thobe line of a past order, as re-order shows it. */
 export type ThobeLine = { collar: Collar; fabric: Bi & { id: string; price: number }; colour: Colour | null; member: { id: string; name: string }; qty: number };
-export type OrderItem = { id: string; kind: 'thobe' | 'product' | 'reward'; snapshot: any; qty: number; unit_price: number; line_total: number };
+export type OrderItem = { id: string; kind: 'thobe' | 'product' | 'reward'; snapshot: any; qty: number; unit_price: number; line_total: number; discount?: number };
 export type OrderDetail = OrderSummary & {
   subtotal: number;
   delivery_fee: number;
@@ -121,13 +134,17 @@ export type OrderDetail = OrderSummary & {
   discount: number;
   discount_label: string | null;
   /** A pickup order (placed in store) carries the branch instead of a home address. */
-  address: Address & { pickup?: boolean; label_ar?: string; line1_ar?: string };
+  address: Address & { pickup?: boolean; counter?: boolean; label_ar?: string; line1_ar?: string };
   points_to_earn: number;
   points_awarded: boolean;
   points_used: number;
   payment_status: string;
   payment_provider: string | null;
   refunded: number;
+  /** Paid so far; after a deposit at the branch, the rest is due at pickup. */
+  paid: number;
+  balance: number;
+  channel: string;
   items: OrderItem[];
   events: { stage: string; at: string; note: string | null }[];
   appointments: { id: string; kind: string; starts_at: string; status: string; member_name: string; branch_name_en: string | null; branch_name_ar: string | null; area: string | null }[];

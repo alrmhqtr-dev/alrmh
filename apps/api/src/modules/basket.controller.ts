@@ -4,6 +4,8 @@ import { CustomerGuard, Me, type Customer } from '../auth.js';
 import { fail, need } from '../lib.js';
 import { quote } from '../pricing.js';
 import { latestMeasurement, memberFor } from './family.controller.js';
+import { onlineBranchId, stockLevel } from '../pos.js';
+import { getSettings } from '../lib.js';
 
 type AddBody =
   | { kind: 'product'; productId: string; size?: string; qty?: number }
@@ -33,9 +35,14 @@ export class BasketController {
     const qty = Number(body?.qty ?? 1);
     if (!Number.isInteger(qty) || qty < 1 || qty > 20) fail('invalid_qty');
     if (body?.kind === 'product') {
-      const p = await db.one('select id, sizes from products where id = $1 and active', [need(body.productId, 'productId')]);
+      const p = await db.one('select id, sizes, track_stock from products where id = $1 and active and in_app', [need(body.productId, 'productId')]);
       if (!p) throw new NotFoundException({ code: 'product_not_found' });
       if (p.sizes.length && !p.sizes.includes(body.size)) fail('size_required');
+      if (p.track_stock && !(await getSettings()).pos.allow_negative_stock) {
+        const branch = await onlineBranchId();
+        const inBasket = await db.one<{ q: number }>(`select coalesce(sum(qty),0)::int as q from basket_items where customer_id = $1 and product_id = $2 and coalesce(size,'') = coalesce($3,'')`, [me.id, p.id, body.size ?? null]);
+        if (branch && (await stockLevel({ kind: 'product', id: p.id, size: body.size ?? '' }, branch)) < qty + (inBasket?.q ?? 0)) fail('out_of_stock');
+      }
       const existing = await db.one(
         `select id from basket_items where customer_id = $1 and kind = 'product' and product_id = $2 and coalesce(size,'') = coalesce($3,'')`,
         [me.id, p.id, body.size ?? null],

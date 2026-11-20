@@ -120,7 +120,9 @@ export default function Tracking() {
       <Card style={{ padding: 16, gap: 8 }}>
         {[
           [t('review.subtotal'), f.money(o.subtotal, true)],
-          o.address?.pickup
+          o.address?.counter
+            ? [t('track.boughtInStore'), lang === 'ar' && o.address.label_ar ? o.address.label_ar : o.address.label]
+            : o.address?.pickup
             ? [t('track.pickup', { branch: lang === 'ar' && o.address.label_ar ? o.address.label_ar : o.address.label }), t('common.free')]
             : [t('checkout.delivery'), f.money(o.delivery_fee, true)],
           ...(o.home_visit_fee ? [[t('checkout.homeVisitFee'), f.money(o.home_visit_fee, true)]] : []),
@@ -143,6 +145,28 @@ export default function Tracking() {
           <Text testID="paid-in-store" variant="small" color={colors.textSecondary}>
             {t('track.paidInStore')}
           </Text>
+        ) : o.payment_provider && o.payment_provider !== 'sadad' ? (
+          <Text testID="paid-at-branch" variant="small" color={colors.textSecondary}>
+            {t('track.paidAtBranch')}
+          </Text>
+        ) : null}
+        {o.balance > 0 && o.stage !== 'cancelled' ? (
+          <>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text variant="small" color={colors.textSecondary}>
+                {t('track.paidSoFar')}
+              </Text>
+              <Text variant="smallStrong">{f.money(o.paid, true)}</Text>
+            </View>
+            <View testID="balance-due" style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text variant="bodyStrong" color={colors.goldInk}>
+                {t('track.balanceDue')}
+              </Text>
+              <Text variant="bodyStrong" color={colors.goldInk}>
+                {f.money(o.balance, true)}
+              </Text>
+            </View>
+          </>
         ) : null}
         {o.refunded ? (
           <View testID="refunded" style={{ flexDirection: 'row', justifyContent: 'space-between' }}>

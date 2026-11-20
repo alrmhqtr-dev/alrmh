@@ -17,8 +17,15 @@ export function ProductCard({ product, onPress }: { product: Product; onPress: (
         {f.name(product)}
       </Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
-        <Text variant="bodyStrong">{f.money(product.price)}</Text>
-        <Pill gold icon={Star} label={`+${pts} ${t('rewards.pts')}`} />
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, flexShrink: 1 }}>
+          <Text variant="bodyStrong">{f.money(product.sale_price ?? product.price)}</Text>
+          {product.sale_price != null ? (
+            <Text variant="caption" color={colors.textMuted} style={{ textDecorationLine: 'line-through' }}>
+              {f.money(product.price)}
+            </Text>
+          ) : null}
+        </View>
+        {product.in_stock === false ? <Pill label={t('product.soldOut')} /> : <Pill gold icon={Star} label={`+${pts} ${t('rewards.pts')}`} />}
       </View>
     </Touch>
   );

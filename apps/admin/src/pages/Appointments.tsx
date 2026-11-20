@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Ruler, ShoppingBag } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { addDays, day, money, phone, time, todayQatar } from '../lib/format';
+import { t } from '../lib/i18n';
 import { MeasureModal } from '../measure';
 import { PlaceOrderModal } from '../place-order';
 import { Empty, Loading, PageHead, Tabs, useToast } from '../ui';
@@ -44,7 +45,7 @@ export default function Appointments() {
   const status = useMutation({
     mutationFn: ({ id, s }: { id: string; s: string }) => api(`/appointments/${id}/status`, { body: { status: s } }),
     onSuccess: (_, v) => {
-      toast(v.s === 'cancelled' ? 'Visit cancelled. The customer was notified.' : 'Visit marked as done.');
+      toast(v.s === 'cancelled' ? t('Visit cancelled. The customer was notified.', 'أُلغيت الزيارة وأُبلغ العميل.') : t('Visit marked as done.', 'تم تسجيل الزيارة كمكتملة.'));
       qc.invalidateQueries({ queryKey: ['appointments'] });
     },
     onError: (e) => toast(errorMessage(e), 'error'),
@@ -53,7 +54,7 @@ export default function Appointments() {
   const feePaid = useMutation({
     mutationFn: (id: string) => api(`/appointments/${id}/fee-paid`, { body: {} }),
     onSuccess: () => {
-      toast('Fee marked as collected.');
+      toast(t('Fee marked as collected.', 'تم تسجيل استلام الرسوم.'));
       qc.invalidateQueries({ queryKey: ['appointments'] });
     },
     onError: (e) => toast(errorMessage(e), 'error'),
@@ -64,12 +65,12 @@ export default function Appointments() {
 
   return (
     <div className="stack lg">
-      <PageHead title="Appointments" sub="Branch and home measurement visits for the next 7 days.">
-        <Tabs value={kind} onChange={setKind} options={[['all', 'All'], ['branch', 'Branch'], ['home', 'Home visits']]} />
+      <PageHead title={t('Appointments', 'المواعيد')} sub={t('Branch and home measurement visits for the next 7 days.', 'زيارات القياس في الفرع والمنزل للأيام السبعة القادمة.')}>
+        <Tabs value={kind} onChange={setKind} options={[['all', t('All', 'الكل')], ['branch', t('Branch', 'الفرع')], ['home', t('Home visits', 'زيارات منزلية')]]} />
         <div className="row" style={{ gap: 4 }}>
-          <button className="btn secondary icon-btn" aria-label="Previous week" onClick={() => setFrom(addDays(from, -7))}><ChevronLeft size={16} /></button>
-          <button className="btn secondary" onClick={() => setFrom(todayQatar())}>Today</button>
-          <button className="btn secondary icon-btn" aria-label="Next week" onClick={() => setFrom(addDays(from, 7))}><ChevronRight size={16} /></button>
+          <button className="btn secondary icon-btn" aria-label={t('Previous week', 'الأسبوع السابق')} onClick={() => setFrom(addDays(from, -7))}><ChevronLeft size={16} className="flip-rtl" /></button>
+          <button className="btn secondary" onClick={() => setFrom(todayQatar())}>{t('Today', 'اليوم')}</button>
+          <button className="btn secondary icon-btn" aria-label={t('Next week', 'الأسبوع التالي')} onClick={() => setFrom(addDays(from, 7))}><ChevronRight size={16} className="flip-rtl" /></button>
         </div>
       </PageHead>
       {!q.data ? (
@@ -80,7 +81,7 @@ export default function Appointments() {
           if (!list.length) return null;
           return (
             <div key={d} className="stack" style={{ gap: 8 }}>
-              <h3>{day(d)}</h3>
+              <h2 className="h3">{day(d)}</h2>
               <div className="card table-wrap">
                 <table>
                   <tbody>
@@ -90,37 +91,40 @@ export default function Appointments() {
                         <td>
                           <div className="strong">{a.member_name} <span className="small muted">· <Link to={`/customers/${a.customer_id}`}>{a.customer_name}</Link> · {phone(a.phone)}</span></div>
                           <div className="small secondary">
-                            {a.kind === 'home' ? `Home visit · ${a.line1}, ${a.area}${a.address_notes ? ` · ${a.address_notes}` : ''}` : `Branch · ${a.branch_name}`}
+                            {a.kind === 'home' ? `${t('Home visit', 'زيارة منزلية')} · ${a.line1}, ${a.area}${a.address_notes ? ` · ${a.address_notes}` : ''}` : `${t('Branch', 'الفرع')} · ${a.branch_name}`}
                           </div>
                         </td>
                         <td>
-                          {a.order_number ? <Link className="badge outline" to={`/orders/${a.order_id}`}>#{a.order_number}</Link> : <span className="badge outline">Measurement only</span>}
+                          {a.order_number ? <Link className="badge outline" to={`/orders/${a.order_id}`}>#{a.order_number}</Link> : <span className="badge outline">{t('Measurement only', 'قياس فقط')}</span>}
                           {a.fee ? (
                             <div style={{ marginTop: 4 }}>
-                              {a.fee_paid_at ? <span className="badge ok">Fee paid · {money(a.fee)}</span> : <span className="badge gold" data-testid={`fee-due-${a.member_name}`}>Collect {money(a.fee)}</span>}
+                              {a.fee_paid_at ? <span className="badge ok">{t('Fee paid', 'الرسوم مدفوعة')} · {money(a.fee)}</span> : <span className="badge gold" data-testid={`fee-due-${a.member_name}`}>{t('Collect', 'استلم')} {money(a.fee)}</span>}
                             </div>
                           ) : null}
                         </td>
-                        <td>{a.status === 'done' || a.measured ? <span className="badge ok">Measured</span> : <span className="badge">Booked</span>}</td>
+                        <td>{a.status === 'done' || a.measured ? <span className="badge ok">{t('Measured', 'تم القياس')}</span> : <span className="badge">{t('Booked', 'محجوز')}</span>}</td>
                         <td className="right">
-                          {can('owner', 'manager', 'tailor') && !a.order_id ? (
+                          {can('pos') && !a.order_id ? (
+                            <Link className="btn sm secondary" style={{ marginBottom: 6, marginInlineEnd: 6 }} to={`/pos?customer=${a.customer_id}`}>{t('At the counter', 'في نقطة البيع')}</Link>
+                          ) : null}
+                          {can('workshop') && !a.order_id ? (
                             <button className="btn sm" style={{ marginBottom: 6 }} data-testid={`appt-order-${a.member_name}`} onClick={() => setOrdering(a)}>
-                              <ShoppingBag size={14} /> Place order
+                              <ShoppingBag size={14} /> {t('Place order', 'تسجيل طلب')}
                             </button>
                           ) : null}
-                          {can('owner', 'manager', 'tailor') && a.status === 'done' && a.fee && !a.fee_paid_at ? (
-                            <button className="btn sm secondary" data-testid={`fee-paid-${a.member_name}`} onClick={() => feePaid.mutate(a.id)}>Fee paid</button>
+                          {can('workshop') && a.status === 'done' && a.fee && !a.fee_paid_at ? (
+                            <button className="btn sm secondary" data-testid={`fee-paid-${a.member_name}`} onClick={() => feePaid.mutate(a.id)}>{t('Fee paid', 'الرسوم مدفوعة')}</button>
                           ) : null}
-                          {can('owner', 'manager', 'tailor') && a.status !== 'done' ? (
+                          {can('workshop') && a.status !== 'done' ? (
                             <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
                               <button className="btn sm" data-testid={`appt-measure-${a.member_name}`} onClick={() => setMeasure({ id: a.member_id, name: a.member_name })}>
-                                <Ruler size={14} /> Record
+                                <Ruler size={14} /> {t('Record', 'تسجيل')}
                               </button>
                               {a.fee && !a.fee_paid_at ? (
-                                <button className="btn sm secondary" data-testid={`fee-paid-${a.member_name}`} onClick={() => feePaid.mutate(a.id)}>Fee paid</button>
+                                <button className="btn sm secondary" data-testid={`fee-paid-${a.member_name}`} onClick={() => feePaid.mutate(a.id)}>{t('Fee paid', 'الرسوم مدفوعة')}</button>
                               ) : null}
-                              <button className="btn sm secondary" onClick={() => status.mutate({ id: a.id, s: 'done' })}>Done</button>
-                              <button className="btn sm ghost" onClick={() => confirm(`Cancel ${a.member_name}'s visit? The customer will be notified.`) && status.mutate({ id: a.id, s: 'cancelled' })}>Cancel</button>
+                              <button className="btn sm secondary" onClick={() => status.mutate({ id: a.id, s: 'done' })}>{t('Done', 'تمت')}</button>
+                              <button className="btn sm ghost" onClick={() => confirm(t(`Cancel ${a.member_name}'s visit? The customer will be notified.`, `إلغاء زيارة ${a.member_name}؟ سيُبلّغ العميل.`)) && status.mutate({ id: a.id, s: 'cancelled' })}>{t('Cancel', 'إلغاء')}</button>
                             </div>
                           ) : null}
                         </td>
@@ -133,7 +137,7 @@ export default function Appointments() {
           );
         })
       )}
-      {q.data && !q.data.length ? <div className="card"><Empty>No visits booked this week.</Empty></div> : null}
+      {q.data && !q.data.length ? <div className="card"><Empty>{t('No visits booked this week.', 'لا زيارات محجوزة هذا الأسبوع.')}</Empty></div> : null}
       {measure ? <MeasureModal memberId={measure.id} memberName={measure.name} onClose={() => setMeasure(null)} /> : null}
       {ordering ? (
         <PlaceOrderModal customerId={ordering.customer_id} memberId={ordering.member_id} appointmentId={ordering.id} branchId={ordering.branch_id} onClose={() => setOrdering(null)} />

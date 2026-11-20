@@ -4,7 +4,8 @@ import { db } from '../db.js';
 import { STAGES, addWorkingDays, expirePoints, fail, getSettings, lifetimePoints, need, notify, pointsBalance, qatarDateString, returnPoints, spendPoints, tierStatus, type Stage } from '../lib.js';
 import { setStage, stagesFor } from '../orders.js';
 import { addMonthsSql } from '../sql-helpers.js';
-import { AnyStaff, CurrentStaff, Managers, Workshop, audit, type StaffUser } from '../staff.js';
+import { AnyStaff, CurrentStaff, ReportsGuard, ReturnsGuard, Managers, Measurers, Workshop, audit, type StaffUser } from '../staff.js';
+import { assertInStock, openRegister, orderBalance, requireRegister, returnStockForOrder, stockNeeds, takeStockForOrder } from '../pos.js';
 import { toCsv } from '../csv.js';
 import { assertSlotFree, slotLockKey } from './booking.controller.js';
 import { round2 } from '../lib.js';
@@ -32,21 +33,26 @@ export class AdminOpsController {
 
   @Get('orders')
   @UseGuards(AnyStaff)
-  orders(@Query('stage') stage?: string, @Query('q') q?: string) {
+  orders(@Query('stage') stage?: string, @Query('q') q?: string, @Query('kind') kind?: string, @Query('board') board?: string) {
     // Phone and order numbers match with spaces ignored; names match as typed.
     const needle = q?.trim() ? `%${q.trim().replace(/\s+/g, '')}%` : null;
     const text = q?.trim() ? `%${q.trim().replace(/\s+/g, ' ')}%` : null;
     return db.many(
-      `select o.id, o.number, o.stage, o.total, o.created_at, o.paid_at, o.expected_delivery, c.id as customer_id, c.name as customer_name, c.phone,
+      `select o.id, o.number, o.stage, o.total, o.created_at, o.paid_at, o.expected_delivery, o.customer_id, coalesce(c.name, o.walk_in_name) as customer_name, coalesce(c.phone, o.walk_in_phone) as phone,
+              o.channel, o.branch_id,
+              greatest(0, o.total - coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0))::float as balance,
               (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobe_count,
               (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id) as item_count,
               (select min(a.starts_at) from appointments a where a.order_id = o.id and a.status = 'confirmed') as next_appointment
-         from orders o join customers c on c.id = o.customer_id
+         from orders o left join customers c on c.id = o.customer_id
         where o.stage not in ('pending_payment','payment_failed')
           and ($1::text is null or o.stage = $1)
-          and ($2::text is null or o.number ilike $2 or replace(c.phone,' ','') ilike $2 or c.name ilike $3)
+          and ($2::text is null or o.number ilike $2 or replace(coalesce(c.phone, o.walk_in_phone, ''),' ','') ilike $2 or coalesce(c.name, o.walk_in_name, '') ilike $3)
+          and ($4::text is null or ($4 = 'thobe') = exists (select 1 from order_items i where i.order_id = o.id and i.kind = 'thobe'))
+          -- Counter sales handed over on the spot are sales, not workshop orders.
+          and not (o.channel = 'pos' and o.stage = 'delivered' and $1::text is null and $2::text is null and $5::boolean)
         order by o.created_at desc limit 300`,
-      [stage || null, needle, text],
+      [stage || null, needle, text, kind === 'thobe' || kind === 'shop' ? kind : null, board === '1'],
     );
   }
 
@@ -54,17 +60,20 @@ export class AdminOpsController {
   @UseGuards(AnyStaff)
   async order(@Param('id') id: string) {
     const o = await db.one(
-      `select o.*, c.name as customer_name, c.phone, c.email,
+      `select o.*, coalesce(c.name, o.walk_in_name) as customer_name, coalesce(c.phone, o.walk_in_phone) as phone, c.email,
+              b.name_en as branch_en, b.name_ar as branch_ar, ag.name as agent_name, st.name_en as service_en, st.name_ar as service_ar,
+              coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0)::float as paid,
               (select status from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_status,
               (select provider_ref from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_ref,
               (select provider from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_provider,
               (select name from staff_users u where u.id = o.placed_by_staff_id) as placed_by
-         from orders o join customers c on c.id = o.customer_id where o.id = $1`,
+         from orders o left join customers c on c.id = o.customer_id left join branches b on b.id = o.branch_id
+         left join agents ag on ag.id = o.agent_id left join service_types st on st.id = o.service_type_id where o.id = $1`,
       [id],
     );
     if (!o) throw new NotFoundException({ code: 'not_found' });
-    const [items, events, appointments, refunds] = await Promise.all([
-      db.many('select id, kind, snapshot, qty, unit_price, line_total from order_items where order_id = $1 order by kind desc', [id]),
+    const [items, events, appointments, refunds, payments, photos, returns] = await Promise.all([
+      db.many('select id, kind, snapshot, qty, unit_price, line_total, discount::float as discount, returned_qty from order_items where order_id = $1 order by kind desc', [id]),
       db.many(`select e.stage, e.at, e.note, u.name as staff_name from order_events e left join staff_users u on u.id = e.staff_id where e.order_id = $1 order by e.at, array_position(array['confirmed','measured','cutting','stitching','quality','ready','out_for_delivery','delivered','cancelled'], e.stage)`, [id]),
       db.many(
         `select a.id, a.kind, a.starts_at, a.status, a.member_id, f.name as member_name, b.name_en as branch_name, ad.line1, ad.area
@@ -72,7 +81,10 @@ export class AdminOpsController {
           where a.order_id = $1 order by a.starts_at`,
         [id],
       ),
-      db.many('select r.id, r.amount::float as amount, r.reference, r.note, r.created_at, u.name as staff_name from refunds r left join staff_users u on u.id = r.staff_id where r.order_id = $1 order by r.created_at', [id]),
+      db.many('select r.id, r.amount::float as amount, r.reference, r.note, r.created_at, r.method, u.name as staff_name from refunds r left join staff_users u on u.id = r.staff_id where r.order_id = $1 order by r.created_at', [id]),
+      db.many(`select p.id, p.provider, p.amount::float as amount, p.completed_at, p.provider_ref, u.name as staff_name from payments p left join staff_users u on u.id = p.staff_id where p.order_id = $1 and p.status = 'paid' order by p.completed_at`, [id]),
+      db.many(`select id, caption, '/v1/media/' || media_id as url, created_at from order_photos where order_id = $1 order by created_at`, [id]),
+      db.many(`select r.id, r.number, r.amount::float as amount, r.method, r.created_at, u.name as staff_name from sales_returns r left join staff_users u on u.id = r.staff_id where r.order_id = $1 order by r.created_at`, [id]),
     ]);
     const memberIds = [...new Set(items.filter((i) => i.kind === 'thobe').map((i) => i.snapshot.member?.id).filter(Boolean))];
     const measurements = memberIds.length
@@ -82,7 +94,20 @@ export class AdminOpsController {
           [memberIds],
         )
       : [];
-    return { ...o, items, events, appointments, measurements, refunds, refunded: round2(refunds.reduce((s, r) => s + r.amount, 0)), stages: stagesFor(items) };
+    return {
+      ...o,
+      items,
+      events,
+      appointments,
+      measurements,
+      refunds,
+      payments,
+      photos,
+      returns,
+      refunded: round2(refunds.reduce((s, r) => s + r.amount, 0)),
+      balance: o.stage === 'cancelled' ? 0 : round2(Math.max(0, Number(o.total) - o.paid)),
+      stages: stagesFor(items),
+    };
   }
 
   @Post('orders/:id/stage')
@@ -98,7 +123,7 @@ export class AdminOpsController {
   }
 
   @Post('orders/:id/cancel')
-  @UseGuards(Managers)
+  @UseGuards(ReturnsGuard)
   async cancel(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() body: { reason?: string }) {
     return db.tx(async (c) => {
       const o = await db.one('select * from orders where id = $1 for update', [id], c);
@@ -107,9 +132,11 @@ export class AdminOpsController {
       await c.query(`update orders set stage = 'cancelled' where id = $1`, [id]);
       await c.query(`insert into order_events (order_id, stage, note, staff_id) values ($1, 'cancelled', $2, $3)`, [id, body?.reason ?? null, me.id]);
       await c.query(`update appointments set status = 'cancelled' where order_id = $1 and status in ('held','confirmed')`, [id]);
+      await returnStockForOrder(id, c, me.id);
+      const { paid } = await orderBalance(id, c);
       // Points spent on the order go back to the customer.
       if (o.paid_at && o.points_used > 0) await returnPoints(o.customer_id, o.points_used, id, `Returned: Order #${o.number}`, c);
-      await notify(
+      if (o.customer_id) await notify(
         o.customer_id,
         'order',
         {
@@ -119,37 +146,46 @@ export class AdminOpsController {
         `/orders/${id}`,
         c,
       );
-      await audit(me, 'cancel', 'order', id, { reason: body?.reason ?? null, refund_due: o.paid_at ? o.total : 0 }, c);
-      return { ok: true, refundDue: o.paid_at ? o.total : 0 };
+      await audit(me, 'cancel', 'order', id, { reason: body?.reason ?? null, refund_due: paid }, c);
+      return { ok: true, refundDue: paid };
     });
   }
 
   /** Records a refund already made in SADAD. Payment is not sent back from here. */
   @Post('orders/:id/refunds')
-  @UseGuards(Managers)
-  async refund(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() body: { amount?: number; reference?: string; note?: string }) {
+  @UseGuards(ReturnsGuard)
+  async refund(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() body: { amount?: number; reference?: string; note?: string; method?: string }) {
     return db.tx(async (c) => {
       const o = await db.one('select id, number, customer_id, total::float as total, paid_at from orders where id = $1 for update', [id], c);
       if (!o) throw new NotFoundException({ code: 'not_found' });
       if (!o.paid_at) fail('not_paid');
+      const method = body?.method ?? 'sadad';
+      if (!['sadad', 'cash', 'card', 'bank_transfer'].includes(method)) fail('invalid_payment');
+      // Cash comes out of the drawer, so it needs the staff member's open register.
+      const register = method === 'cash' ? await requireRegister(me, c) : await openRegister(me.id, c);
+      const { paid } = await orderBalance(id, c);
       const done = await db.one<{ sum: number }>('select coalesce(sum(amount),0)::float as sum from refunds where order_id = $1', [id], c);
-      const left = round2(o.total - done!.sum);
+      const left = round2(paid - done!.sum);
       const amount = round2(Number(body?.amount));
       if (!(amount > 0)) fail('invalid_number', { field: 'amount' });
       if (amount > left) fail('refund_too_large', { left });
       const reference = body?.reference ? String(body.reference).trim().slice(0, 80) : null;
-      await c.query('insert into refunds (order_id, amount, reference, note, staff_id) values ($1,$2,$3,$4,$5)', [id, amount, reference, body?.note ? String(body.note).slice(0, 300) : null, me.id]);
-      await notify(
+      await c.query('insert into refunds (order_id, amount, reference, note, staff_id, method, register_id) values ($1,$2,$3,$4,$5,$6,$7)', [id, amount, reference, body?.note ? String(body.note).slice(0, 300) : null, me.id, method, register?.id ?? null]);
+      if (o.customer_id) await notify(
         o.customer_id,
         'order',
         {
-          en: { title: 'Refund on its way', body: `#${o.number} · QAR ${amount.toFixed(2)} is being returned to your card. Banks can take a few working days.` },
-          ar: { title: 'تم إصدار الاسترداد', body: `#${o.number} · يُعاد مبلغ ${amount.toFixed(2)} ر.ق إلى بطاقتك. قد يستغرق البنك بضعة أيام عمل.` },
+          en: method === 'cash'
+            ? { title: 'Refund given', body: `#${o.number} · QAR ${amount.toFixed(2)} was refunded in cash.` }
+            : { title: 'Refund on its way', body: `#${o.number} · QAR ${amount.toFixed(2)} is being returned to your card. Banks can take a few working days.` },
+          ar: method === 'cash'
+            ? { title: 'تم رد المبلغ', body: `#${o.number} · تم رد ${amount.toFixed(2)} ر.ق نقدًا.` }
+            : { title: 'تم إصدار الاسترداد', body: `#${o.number} · يُعاد مبلغ ${amount.toFixed(2)} ر.ق إلى بطاقتك. قد يستغرق البنك بضعة أيام عمل.` },
         },
         `/orders/${id}`,
         c,
       );
-      await audit(me, 'refund', 'order', id, { amount, reference }, c);
+      await audit(me, 'refund', 'order', id, { amount, reference, method }, c);
       return { ok: true, refunded: round2(done!.sum + amount), left: round2(left - amount) };
     });
   }
@@ -157,29 +193,30 @@ export class AdminOpsController {
   /* ---------- exports ---------- */
 
   @Get('export/orders.csv')
-  @UseGuards(Managers)
+  @UseGuards(ReportsGuard)
   async exportOrders(@CurrentStaff() me: StaffUser, @Query('from') from: string | undefined, @Query('to') to: string | undefined, @Res() res: Response) {
     const range = dateRange(from, to);
     const rows = await db.many(
-      `select o.number, o.created_at, o.paid_at, o.stage, c.name, c.phone, o.subtotal, o.delivery_fee, o.home_visit_fee, o.discount, o.discount_label, o.total,
+      `select o.number, o.created_at, o.paid_at, o.stage, coalesce(c.name, o.walk_in_name) as name, coalesce(c.phone, o.walk_in_phone) as phone, o.subtotal, o.delivery_fee, o.home_visit_fee, o.discount, o.discount_label, o.total, o.channel,
+              coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'), 0) as paid,
               coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0) as refunded,
               (select coalesce(sum(qty),0) from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobes,
               (select coalesce(sum(qty),0) from order_items i where i.order_id = o.id and i.kind = 'product') as products,
               o.address->>'area' as area, o.expected_delivery
-         from orders o join customers c on c.id = o.customer_id
+         from orders o left join customers c on c.id = o.customer_id
         where o.paid_at is not null and (o.paid_at at time zone 'Asia/Qatar')::date between $1::date and $2::date
         order by o.paid_at`,
       [range.from, range.to],
     );
     await audit(me, 'export', 'orders', null, range);
     sendCsv(res, `alrmh-orders-${range.from}-to-${range.to}.csv`, toCsv(
-      ['Order', 'Placed', 'Paid', 'Stage', 'Customer', 'Mobile', 'Subtotal', 'Delivery', 'Home visit', 'Discount', 'Discount code', 'Total', 'Refunded', 'Thobes', 'Products', 'Area', 'Due'],
-      rows.map((r) => [r.number, r.created_at, r.paid_at, r.stage, r.name, r.phone, r.subtotal, r.delivery_fee, r.home_visit_fee, r.discount, r.discount_label?.split(':')[1] ?? '', r.total, r.refunded, r.thobes, r.products, r.area, r.expected_delivery]),
+      ['Order', 'Placed', 'Paid', 'Stage', 'Customer', 'Mobile', 'Subtotal', 'Delivery', 'Home visit', 'Discount', 'Discount code', 'Total', 'Refunded', 'Thobes', 'Products', 'Area', 'Due', 'Channel', 'Amount paid'],
+      rows.map((r) => [r.number, r.created_at, r.paid_at, r.stage, r.name, r.phone, r.subtotal, r.delivery_fee, r.home_visit_fee, r.discount, r.discount_label?.split(':')[1] ?? '', r.total, r.refunded, r.thobes, r.products, r.area, r.expected_delivery, r.channel, r.paid]),
     ));
   }
 
   @Get('export/customers.csv')
-  @UseGuards(Managers)
+  @UseGuards(ReportsGuard)
   async exportCustomers(@CurrentStaff() me: StaffUser, @Res() res: Response) {
     const rows = await db.many(
       `select c.name, c.phone, c.email, c.language, c.created_at,
@@ -264,11 +301,13 @@ export class AdminOpsController {
     const needle = q?.trim() ? `%${q.trim().replace(/\s+/g, '')}%` : null;
     const text = q?.trim() ? `%${q.trim().replace(/\s+/g, ' ')}%` : null;
     return db.many(
-      `select c.id, c.name, c.phone, c.email, c.language, c.created_at,
+      `select c.id, c.name, c.phone, c.email, c.language, c.created_at, c.source, c.group_id, g.name_en as group_en, g.name_ar as group_ar,
               (select count(*)::int from orders o where o.customer_id = c.id and o.paid_at is not null) as orders,
+              (select coalesce(sum(greatest(0, o.total - coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0))),0)::float
+                 from orders o where o.customer_id = c.id and o.stage not in ('cancelled','pending_payment','payment_failed')) as due,
               (select coalesce(sum(total),0)::float from orders o where o.customer_id = c.id and o.paid_at is not null and o.stage <> 'cancelled') as spent,
               (select coalesce(sum(points),0)::int from points_ledger p where p.customer_id = c.id) as points
-         from customers c
+         from customers c left join customer_groups g on g.id = c.group_id
         where c.deleted_at is null and ($1::text is null or replace(c.phone,' ','') ilike $1 or c.name ilike $2 or c.email ilike $1)
         order by c.created_at desc limit 200`,
       [needle, text],
@@ -279,7 +318,7 @@ export class AdminOpsController {
   @UseGuards(AnyStaff)
   async customer(@Param('id') id: string) {
     await expirePoints(id);
-    const c = await db.one('select id, name, phone, email, language, created_at from customers where id = $1 and deleted_at is null', [id]);
+    const c = await db.one('select id, name, phone, email, language, created_at, source, notes, group_id from customers where id = $1 and deleted_at is null', [id]);
     if (!c) throw new NotFoundException({ code: 'not_found' });
     const [family, addresses, orders, ledger, tier, balance] = await Promise.all([
       db.many(
@@ -290,7 +329,12 @@ export class AdminOpsController {
         [id],
       ),
       db.many('select id, label, line1, area, city, notes, is_default from addresses where customer_id = $1 order by is_default desc', [id]),
-      db.many(`select id, number, stage, total, created_at from orders where customer_id = $1 and stage not in ('pending_payment','payment_failed') order by created_at desc`, [id]),
+      db.many(
+        `select o.id, o.number, o.stage, o.total, o.created_at, o.channel,
+                greatest(0, o.total - coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0))::float as balance
+           from orders o where o.customer_id = $1 and o.stage not in ('pending_payment','payment_failed') order by o.created_at desc`,
+        [id],
+      ),
       db.many(
         `select p.id, p.kind, p.points, p.remaining, p.expires_at, p.label, p.created_at, u.name as staff_name
            from points_ledger p left join staff_users u on u.id = p.staff_id where p.customer_id = $1 order by p.created_at desc limit 50`,
@@ -329,13 +373,14 @@ export class AdminOpsController {
         const qty = Math.trunc(Number(l?.qty));
         if (!(qty >= 1 && qty <= 20)) fail('invalid_qty');
         const collar = await db.one('select id, name_en, name_ar, shape from collars where id = $1 and active', [l.collarId], c);
-        const fabric = await db.one('select id, name_en, name_ar, price::float as price from fabrics where id = $1 and active', [l.fabricId], c);
+        const fabric = await db.one('select id, name_en, name_ar, price::float as price, (cost * metres_per_thobe)::float as unit_cost from fabrics where id = $1 and active', [l.fabricId], c);
         if (!collar || !fabric) fail('invalid_thobe_options');
         items.push({ qty, unit: fabric.price, collar, fabric });
       }
       // Thobes are always collected from the branch.
       const b = await db.one('select id, name_en, name_ar, address_en, address_ar from branches where active and ($1::uuid is null or id = $1) order by sort limit 1', [body.branchId || null], c);
       if (!b) fail('branch_not_found');
+      await assertInStock(await stockNeeds(items.map((i) => ({ kind: 'thobe', qty: i.qty, fabricId: i.fabric.id })), c), b.id, c);
       const address = { pickup: true, branchId: b.id, label: b.name_en, label_ar: b.name_ar, line1: b.address_en, line1_ar: b.address_ar, area: '', city: 'Doha' };
       const deliveryFee = 0;
       const subtotal = round2(items.reduce((a, i) => a + i.unit * i.qty, 0));
@@ -346,17 +391,17 @@ export class AdminOpsController {
       const number = `AR-${(await db.one<{ n: number }>(`select nextval('order_number_seq')::int as n`, [], c))!.n}`;
       const expected = addWorkingDays(qatarDateString(new Date()), s.lead_working_days);
       const order = await db.one(
-        `insert into orders (number, customer_id, stage, subtotal, delivery_fee, total, address, points_to_earn, expected_delivery, paid_at, placed_by_staff_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), $10) returning id, number, total`,
-        [number, id, stage, subtotal, deliveryFee, total, address, pointsToEarn, expected, me.id],
+        `insert into orders (number, customer_id, stage, subtotal, delivery_fee, total, address, points_to_earn, expected_delivery, paid_at, placed_by_staff_id, channel, branch_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), $10, 'staff', $11) returning id, number, total`,
+        [number, id, stage, subtotal, deliveryFee, total, address, pointsToEarn, expected, me.id, b.id],
         c,
       );
       for (const i of items)
-        await c.query('insert into order_items (order_id, kind, snapshot, qty, unit_price, line_total) values ($1,$2,$3,$4,$5,$6)', [
+        await c.query('insert into order_items (order_id, kind, snapshot, qty, unit_price, line_total, unit_cost) values ($1,$2,$3,$4,$5,$6,$7)', [
           order!.id,
           'thobe',
           {
-            thobe: { collar: i.collar, fabric: i.fabric, colour: null },
+            thobe: { collar: i.collar, fabric: { id: i.fabric.id, name_en: i.fabric.name_en, name_ar: i.fabric.name_ar, price: i.fabric.price }, colour: null },
             member: { id: member.id, name: member.name, relation: member.relation, size: member.size },
             measureMethod: 'saved',
             points: i.qty * tier.points_per_thobe,
@@ -365,12 +410,17 @@ export class AdminOpsController {
           i.qty,
           i.unit,
           round2(i.unit * i.qty),
+          round2(i.fabric.unit_cost ?? 0),
         ]);
-      await c.query(`insert into payments (order_id, provider, amount, status, provider_ref, completed_at) values ($1, 'card_machine', $2, 'paid', $3, now())`, [
+      const register = await openRegister(me.id, c);
+      await c.query(`insert into payments (order_id, provider, amount, status, provider_ref, completed_at, staff_id, register_id) values ($1, 'card_machine', $2, 'paid', $3, now(), $4, $5)`, [
         order!.id,
         total,
         `CARD-${me.id.slice(0, 8)}`,
+        me.id,
+        register?.id ?? null,
       ]);
+      await takeStockForOrder(order!.id, c, me.id);
       await c.query(`insert into order_events (order_id, stage, note, staff_id) values ($1, 'measured', $2, $3)`, [order!.id, measured ? 'saved' : null, me.id]);
       if (body.appointmentId)
         await c.query(`update appointments set order_id = $2, status = 'done' where id = $1 and customer_id = $3 and status in ('confirmed','done')`, [body.appointmentId, order!.id, id]);
@@ -428,7 +478,7 @@ export class AdminOpsController {
   }
 
   @Post('members/:id/measurements')
-  @UseGuards(Workshop)
+  @UseGuards(Measurers)
   async measure(@CurrentStaff() me: StaffUser, @Param('id') memberId: string, @Body() body: Record<string, any>) {
     const member = await db.one('select id, customer_id, name from family_members where id = $1', [memberId]);
     if (!member) throw new NotFoundException({ code: 'member_not_found' });

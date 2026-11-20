@@ -127,6 +127,8 @@ export const ar: Record<StringKey, string> = {
   'product.earn': 'اكسب {pts} نقطة',
   'product.add': 'أضف إلى السلة',
   'product.added': 'أُضيف إلى السلة',
+  'product.soldOut': 'نفدت الكمية',
+  'product.wasPrice': 'كان {price}',
   'product.pickSize': 'اختر المقاس أولاً',
   'product.renderFromClient': 'صورة المنتج — من العميل',
 
@@ -550,6 +552,7 @@ export const ar: Record<StringKey, string> = {
   'err.no_saved_measurements': 'لا توجد مقاسات محفوظة لهذا الشخص بعد.',
   'err.address_required': 'أضف عنوان التوصيل أولاً.',
   'err.basket_empty': 'سلتك فارغة.',
+  'err.out_of_stock': 'عذرًا، نفدت الكمية حاليًا.',
   'err.too_soon': 'انتظر قليلاً قبل طلب رمز جديد.',
   'err.invalid_phone': 'أدخل رقم جوال قطري من 8 أرقام.',
   'err.invalid_email': 'تحقّق من البريد الإلكتروني.',
@@ -642,5 +645,9 @@ export const ar: Record<StringKey, string> = {
   'track.discount': "خصم",
   'track.pickup': "الاستلام من {branch}",
   'track.paidInStore': "دُفع بجهاز البطاقات في المتجر",
+  'track.paidAtBranch': 'دُفع في الفرع',
+  'track.paidSoFar': 'المدفوع حتى الآن',
+  'track.balanceDue': 'المتبقي عند الاستلام',
+  'track.boughtInStore': 'شراء من المحل',
   'again.one': "ثوب واحد",
 };

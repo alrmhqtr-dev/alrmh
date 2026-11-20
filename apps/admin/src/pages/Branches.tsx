@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
+import { L, t } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
-import { WEEKDAYS, minuteToTime, timeToMinute } from '../lib/format';
+import { weekdays, minuteToTime, timeToMinute } from '../lib/format';
 import { Field, Input, Loading, PageHead, useToast } from '../ui';
 
 type Branch = {
@@ -37,7 +38,7 @@ function slotsPreview(open: number, close: number, step: number) {
 function Days({ value, onChange, disabled }: { value: number[]; onChange: (v: number[]) => void; disabled?: boolean }) {
   return (
     <div className="chips">
-      {WEEKDAYS.map((d, i) => {
+      {weekdays().map((d, i) => {
         const closed = value.includes(i);
         return (
           <button key={d} type="button" disabled={disabled} className={`chip ${closed ? 'on' : ''}`} onClick={() => onChange(closed ? value.filter((x) => x !== i) : [...value, i].sort())}>
@@ -54,19 +55,19 @@ function SlotFields({ open, close, step, capacity, onChange, disabled }: { open:
   return (
     <>
       <div className="grid k4">
-        <Field label="First visit from"><Input type="time" disabled={disabled} value={minuteToTime(open)} onChange={(e) => onChange({ open: timeToMinute(e.target.value) })} /></Field>
-        <Field label="Last visit ends by"><Input type="time" disabled={disabled} value={minuteToTime(close)} onChange={(e) => onChange({ close: timeToMinute(e.target.value) })} /></Field>
-        <Field label="Slot length (min)"><Input type="number" min={15} max={240} step={15} disabled={disabled} value={step} onChange={(e) => onChange({ step: Number(e.target.value) })} /></Field>
-        <Field label="Visits per slot" hint="How many customers at once"><Input type="number" min={1} max={50} disabled={disabled} value={capacity} onChange={(e) => onChange({ capacity: Number(e.target.value) })} /></Field>
+        <Field label={t('First visit from', 'أول زيارة من')}><Input type="time" disabled={disabled} value={minuteToTime(open)} onChange={(e) => onChange({ open: timeToMinute(e.target.value) })} /></Field>
+        <Field label={t('Last visit ends by', 'آخر زيارة تنتهي')}><Input type="time" disabled={disabled} value={minuteToTime(close)} onChange={(e) => onChange({ close: timeToMinute(e.target.value) })} /></Field>
+        <Field label={t('Slot length (min)', 'مدة الموعد (دقيقة)')}><Input type="number" min={15} max={240} step={15} disabled={disabled} value={step} onChange={(e) => onChange({ step: Number(e.target.value) })} /></Field>
+        <Field label={t('Visits per slot', 'زيارات لكل موعد')} hint={t('How many customers at once', 'عدد العملاء في الوقت نفسه')}><Input type="number" min={1} max={50} disabled={disabled} value={capacity} onChange={(e) => onChange({ capacity: Number(e.target.value) })} /></Field>
       </div>
-      <div className="small secondary">Customers see: {preview.length ? preview.join(' · ') : 'no times — check the hours'}</div>
+      <div className="small secondary">{t('Customers see:', 'يرى العملاء:')} {preview.length ? preview.join(' · ') : t('no times — check the hours', 'لا أوقات — تحقق من الساعات')}</div>
     </>
   );
 }
 
 export default function Branches() {
   const { can } = useAuth();
-  const editable = can('owner', 'manager');
+  const editable = can('manage');
   const qc = useQueryClient();
   const toast = useToast();
   const branches = useQuery({ queryKey: ['branches'], queryFn: () => api<Branch[]>('/branches') });
@@ -83,7 +84,7 @@ export default function Branches() {
   const saveBranch = useMutation({
     mutationFn: () => (b!.id ? api(`/branches/${b!.id}`, { method: 'PATCH', body: b }) : api<{ id: string }>('/branches', { body: b })),
     onSuccess: (r: any) => {
-      toast(b!.id ? 'Branch saved. New times show in the app now.' : 'Branch added. Customers can book there now.');
+      toast(b!.id ? t('Branch saved. New times show in the app now.', 'تم حفظ الفرع وتظهر الأوقات الجديدة في التطبيق.') : t('Branch added. Customers can book there now.', 'تمت إضافة الفرع ويمكن للعملاء الحجز فيه.'));
       if (!b!.id && r?.id) setB({ ...b!, id: r.id });
       qc.invalidateQueries({ queryKey: ['branches'] });
     },
@@ -92,7 +93,7 @@ export default function Branches() {
   const saveHome = useMutation({
     mutationFn: () => api('/settings', { method: 'PATCH', body: { home_visit: h } }),
     onSuccess: () => {
-      toast('Home visit times saved.');
+      toast(t('Home visit times saved.', 'تم حفظ أوقات الزيارات المنزلية.'));
       qc.invalidateQueries({ queryKey: ['settings'] });
     },
     onError: (e) => toast(errorMessage(e), 'error'),
@@ -103,15 +104,15 @@ export default function Branches() {
 
   return (
     <div className="stack lg">
-      <PageHead title="Branches & visits" sub="Opening details and the measurement times customers can book." />
+      <PageHead title={t('Branches & visits', 'الفروع والزيارات')} sub={t('Opening details and the measurement times customers can book.', 'بيانات الفروع وأوقات القياس المتاحة للحجز.')} />
       <div className="row wrap" style={{ gap: 8 }}>
         <div className="tabs" role="tablist">
           {(branches.data ?? []).map((x) => (
             <button key={x.id} role="tab" data-testid={`branch-tab-${x.id}`} aria-selected={x.id === b.id} className={x.id === b.id ? 'on' : ''} onClick={() => setB(x)}>
-              {x.name_en}{x.active ? '' : ' (hidden)'}
+              {L(x)}{x.active ? '' : ` (${t('hidden', 'مخفي')})`}
             </button>
           ))}
-          {!b.id ? <button role="tab" aria-selected className="on">New branch</button> : null}
+          {!b.id ? <button role="tab" aria-selected className="on">{t('New branch', 'فرع جديد')}</button> : null}
         </div>
         {editable && b.id ? (
           <button className="btn secondary" data-testid="add-branch" onClick={() => setB(NEW_BRANCH)}>
@@ -121,26 +122,26 @@ export default function Branches() {
       </div>
       <div className="card pad stack lg">
         <div className="row spread">
-          <h2>{b.id ? `${b.name_en} branch` : 'New branch'}</h2>
-          {editable ? <button className="btn" data-testid="branch-save" disabled={saveBranch.isPending} onClick={() => saveBranch.mutate()}>Save branch</button> : null}
+          <h2>{b.id ? `${t('Branch', 'فرع')} ${L(b)}` : t('New branch', 'فرع جديد')}</h2>
+          {editable ? <button className="btn" data-testid="branch-save" disabled={saveBranch.isPending} onClick={() => saveBranch.mutate()}>{t('Save branch', 'حفظ الفرع')}</button> : null}
         </div>
         <div className="grid k2">
-          <Field label="Name (English)"><Input data-testid="branch-name-en" disabled={!editable} value={b.name_en} onChange={(e) => set({ name_en: e.target.value })} /></Field>
-          <Field label="Name (Arabic)"><Input data-testid="branch-name-ar" disabled={!editable} dir="rtl" value={b.name_ar} onChange={(e) => set({ name_ar: e.target.value })} /></Field>
-          <Field label="Address (English)"><Input data-testid="branch-address-en" disabled={!editable} value={b.address_en} onChange={(e) => set({ address_en: e.target.value })} /></Field>
-          <Field label="Address (Arabic)"><Input data-testid="branch-address-ar" disabled={!editable} dir="rtl" value={b.address_ar} onChange={(e) => set({ address_ar: e.target.value })} /></Field>
-          <Field label="Opening hours shown to customers (English)"><Input data-testid="branch-hours-en" disabled={!editable} value={b.hours_en} onChange={(e) => set({ hours_en: e.target.value })} /></Field>
-          <Field label="Opening hours (Arabic)"><Input data-testid="branch-hours-ar" disabled={!editable} dir="rtl" value={b.hours_ar} onChange={(e) => set({ hours_ar: e.target.value })} /></Field>
-          <Field label="Phone"><Input data-testid="branch-phone" disabled={!editable} value={b.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
-          <Field label="WhatsApp"><Input data-testid="branch-whatsapp" disabled={!editable} value={b.whatsapp} onChange={(e) => set({ whatsapp: e.target.value })} /></Field>
-          <Field label="Map position: latitude" hint="For the Directions button. In Google Maps, right-click the branch and copy the two numbers."><Input data-testid="branch-lat" disabled={!editable} type="number" step="any" placeholder="25.2425" value={b.lat ?? ''} onChange={(e) => set({ lat: e.target.value })} /></Field>
-          <Field label="Map position: longitude" hint="Blank hides the Directions button."><Input data-testid="branch-lng" disabled={!editable} type="number" step="any" placeholder="51.4520" value={b.lng ?? ''} onChange={(e) => set({ lng: e.target.value })} /></Field>
+          <Field label={t('Name (English)', 'الاسم (إنجليزي)')}><Input data-testid="branch-name-en" disabled={!editable} value={b.name_en} onChange={(e) => set({ name_en: e.target.value })} /></Field>
+          <Field label={t('Name (Arabic)', 'الاسم (عربي)')}><Input data-testid="branch-name-ar" disabled={!editable} dir="rtl" value={b.name_ar} onChange={(e) => set({ name_ar: e.target.value })} /></Field>
+          <Field label={t('Address (English)', 'العنوان (إنجليزي)')}><Input data-testid="branch-address-en" disabled={!editable} value={b.address_en} onChange={(e) => set({ address_en: e.target.value })} /></Field>
+          <Field label={t('Address (Arabic)', 'العنوان (عربي)')}><Input data-testid="branch-address-ar" disabled={!editable} dir="rtl" value={b.address_ar} onChange={(e) => set({ address_ar: e.target.value })} /></Field>
+          <Field label={t('Opening hours shown to customers (English)', 'ساعات العمل للعملاء (إنجليزي)')}><Input data-testid="branch-hours-en" disabled={!editable} value={b.hours_en} onChange={(e) => set({ hours_en: e.target.value })} /></Field>
+          <Field label={t('Opening hours (Arabic)', 'ساعات العمل (عربي)')}><Input data-testid="branch-hours-ar" disabled={!editable} dir="rtl" value={b.hours_ar} onChange={(e) => set({ hours_ar: e.target.value })} /></Field>
+          <Field label={t('Phone', 'الهاتف')}><Input data-testid="branch-phone" disabled={!editable} value={b.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
+          <Field label={t('WhatsApp', 'واتساب')}><Input data-testid="branch-whatsapp" disabled={!editable} value={b.whatsapp} onChange={(e) => set({ whatsapp: e.target.value })} /></Field>
+          <Field label={t('Map position: latitude', 'الموقع: خط العرض')} hint={t('For the Directions button. In Google Maps, right-click the branch and copy the two numbers.', 'لزر الاتجاهات. في خرائط جوجل انقر بالزر الأيمن على الفرع وانسخ الرقمين.')}><Input data-testid="branch-lat" disabled={!editable} type="number" step="any" placeholder="25.2425" value={b.lat ?? ''} onChange={(e) => set({ lat: e.target.value })} /></Field>
+          <Field label={t('Map position: longitude', 'الموقع: خط الطول')} hint={t('Blank hides the Directions button.', 'تركه فارغًا يخفي زر الاتجاهات.')}><Input data-testid="branch-lng" disabled={!editable} type="number" step="any" placeholder="51.4520" value={b.lng ?? ''} onChange={(e) => set({ lng: e.target.value })} /></Field>
         </div>
         <label className="check">
           <input type="checkbox" disabled={!editable} checked={b.active} onChange={(e) => set({ active: e.target.checked })} /> Show this branch in the app
         </label>
         <div className="divider" />
-        <h3>Branch measurement slots</h3>
+        <h3>{t('Branch measurement slots', 'مواعيد القياس في الفرع')}</h3>
         <SlotFields
           disabled={!editable}
           open={b.open_minute}
@@ -149,16 +150,16 @@ export default function Branches() {
           capacity={b.slot_capacity}
           onChange={(p) => set({ open_minute: p.open ?? b.open_minute, close_minute: p.close ?? b.close_minute, slot_minutes: p.step ?? b.slot_minutes, slot_capacity: p.capacity ?? b.slot_capacity })}
         />
-        <Field label="Closed on" hint="Highlighted days can't be booked."><Days disabled={!editable} value={b.closed_weekdays} onChange={(v) => set({ closed_weekdays: v })} /></Field>
+        <Field label={t('Closed on', 'مغلق يوم')} hint={t('Highlighted days can\'t be booked.', 'الأيام المميزة لا يمكن حجزها.')}><Days disabled={!editable} value={b.closed_weekdays} onChange={(v) => set({ closed_weekdays: v })} /></Field>
       </div>
 
       <div className="card pad stack lg">
         <div className="row spread">
           <div>
-            <h2>Home visits</h2>
-            <div className="small secondary">Fee is set under Fees & rules (currently QAR {settings.data?.home_visit_fee}).</div>
+            <h2>{t('Home visits', 'الزيارات المنزلية')}</h2>
+            <div className="small secondary">{t(`Fee is set under Fees & rules (currently QAR ${settings.data?.home_visit_fee}).`, `الرسوم تُحدد في الرسوم والقواعد (حاليًا ${settings.data?.home_visit_fee} ر.ق).`)}</div>
           </div>
-          {editable ? <button className="btn" data-testid="home-save" disabled={saveHome.isPending} onClick={() => saveHome.mutate()}>Save home visits</button> : null}
+          {editable ? <button className="btn" data-testid="home-save" disabled={saveHome.isPending} onClick={() => saveHome.mutate()}>{t('Save home visits', 'حفظ الزيارات المنزلية')}</button> : null}
         </div>
         <SlotFields
           disabled={!editable}
@@ -168,7 +169,7 @@ export default function Branches() {
           capacity={h.capacity}
           onChange={(p) => setH({ ...h, open_minute: p.open ?? h.open_minute, close_minute: p.close ?? h.close_minute, slot_minutes: p.step ?? h.slot_minutes, capacity: p.capacity ?? h.capacity })}
         />
-        <Field label="No home visits on"><Days disabled={!editable} value={h.closed_weekdays} onChange={(v) => setH({ ...h, closed_weekdays: v })} /></Field>
+        <Field label={t('No home visits on', 'لا زيارات منزلية يوم')}><Days disabled={!editable} value={h.closed_weekdays} onChange={(v) => setH({ ...h, closed_weekdays: v })} /></Field>
       </div>
     </div>
   );

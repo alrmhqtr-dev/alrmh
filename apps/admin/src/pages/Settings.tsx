@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../lib/api';
+import { L, t } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { Field, Input, Loading, PageHead, useToast } from '../ui';
 
@@ -16,7 +17,7 @@ type S = {
 
 export default function Settings() {
   const { can } = useAuth();
-  const editable = can('owner', 'manager');
+  const editable = can('manage');
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['settings'], queryFn: () => api<S>('/settings') });
@@ -39,7 +40,7 @@ export default function Settings() {
         },
       }),
     onSuccess: (next) => {
-      toast('Saved. Checkout and rewards use the new values now.');
+      toast(t('Saved. Checkout and rewards use the new values now.', 'تم الحفظ. يستخدم الدفع والمكافآت القيم الجديدة الآن.'));
       qc.setQueryData(['settings'], next);
     },
     onError: (e) => toast(errorMessage(e), 'error'),
@@ -50,35 +51,35 @@ export default function Settings() {
 
   return (
     <div className="stack lg">
-      <PageHead title="Fees & rules" sub="Prices and rules the app applies at checkout and in rewards.">
-        {editable ? <button className="btn" data-testid="settings-save" disabled={save.isPending} onClick={() => save.mutate()}>Save changes</button> : null}
+      <PageHead title={t('Fees & rules', 'الرسوم والقواعد')} sub={t('Prices and rules the app applies at checkout and in rewards.', 'الأسعار والقواعد التي يطبقها التطبيق عند الدفع وفي المكافآت.')}>
+        {editable ? <button className="btn" data-testid="settings-save" disabled={save.isPending} onClick={() => save.mutate()}>{t('Save changes', 'حفظ التغييرات')}</button> : null}
       </PageHead>
       <div className="grid k2" style={{ alignItems: 'start' }}>
         <div className="card pad stack lg">
-          <h2>Fees & timing</h2>
+          <h2>{t('Fees & timing', 'الرسوم والمواعيد')}</h2>
           <div className="grid k2">
-            <Field label="Appointment booking fee (QAR)" hint="Paid in the app when a customer books a visit (New order). 0 makes booking free.">
+            <Field label={t('Appointment booking fee (QAR)', 'رسوم حجز الموعد (ر.ق)')} hint={t('Paid in the app when a customer books a visit (New order). 0 makes booking free.', 'تُدفع في التطبيق عند حجز زيارة (طلب جديد). 0 يجعل الحجز مجانيًا.')}>
               <Input data-testid="appointment-fee" disabled={!editable} type="number" min={0} value={s.appointment_fee} onChange={(e) => set({ appointment_fee: e.target.value as any })} />
             </Field>
-            <Field label="Delivery fee (QAR)"><Input data-testid="delivery-fee" disabled={!editable} type="number" min={0} value={s.delivery_fee} onChange={(e) => set({ delivery_fee: e.target.value as any })} /></Field>
-            <Field label="Home visit fee (QAR)" hint="Only for a home visit added while designing a thobe."><Input data-testid="home-fee" disabled={!editable} type="number" min={0} value={s.home_visit_fee} onChange={(e) => set({ home_visit_fee: e.target.value as any })} /></Field>
-            <Field label="Ready in (working days)" hint="After measurement. Fridays don't count."><Input disabled={!editable} type="number" min={1} value={s.lead_working_days} onChange={(e) => set({ lead_working_days: e.target.value as any })} /></Field>
-            <Field label="Re-measure after (months)" hint="Older measurements show a reminder."><Input disabled={!editable} type="number" min={1} value={s.measurements_valid_months} onChange={(e) => set({ measurements_valid_months: e.target.value as any })} /></Field>
+            <Field label={t('Delivery fee (QAR)', 'رسوم التوصيل (ر.ق)')}><Input data-testid="delivery-fee" disabled={!editable} type="number" min={0} value={s.delivery_fee} onChange={(e) => set({ delivery_fee: e.target.value as any })} /></Field>
+            <Field label={t('Home visit fee (QAR)', 'رسوم الزيارة المنزلية (ر.ق)')} hint={t('Only for a home visit added while designing a thobe.', 'فقط للزيارة المنزلية المضافة أثناء تصميم الثوب.')}><Input data-testid="home-fee" disabled={!editable} type="number" min={0} value={s.home_visit_fee} onChange={(e) => set({ home_visit_fee: e.target.value as any })} /></Field>
+            <Field label={t('Ready in (working days)', 'الجاهزية خلال (أيام عمل)')} hint={t('After measurement. Fridays don\'t count.', 'بعد القياس. لا تُحتسب أيام الجمعة.')}><Input disabled={!editable} type="number" min={1} value={s.lead_working_days} onChange={(e) => set({ lead_working_days: e.target.value as any })} /></Field>
+            <Field label={t('Re-measure after (months)', 'إعادة القياس بعد (أشهر)')} hint={t('Older measurements show a reminder.', 'تظهر تذكرة للمقاسات الأقدم.')}><Input disabled={!editable} type="number" min={1} value={s.measurements_valid_months} onChange={(e) => set({ measurements_valid_months: e.target.value as any })} /></Field>
           </div>
           <div className="divider" />
-          <h3>Customer support</h3>
+          <h3>{t('Customer support', 'خدمة العملاء')}</h3>
           <div className="grid k2">
-            <Field label="WhatsApp number"><Input disabled={!editable} value={s.support.whatsapp} onChange={(e) => set({ support: { ...s.support, whatsapp: e.target.value } })} /></Field>
-            <Field label="Phone number"><Input disabled={!editable} value={s.support.phone} onChange={(e) => set({ support: { ...s.support, phone: e.target.value } })} /></Field>
+            <Field label={t('WhatsApp number', 'رقم واتساب')}><Input disabled={!editable} value={s.support.whatsapp} onChange={(e) => set({ support: { ...s.support, whatsapp: e.target.value } })} /></Field>
+            <Field label={t('Phone number', 'رقم الهاتف')}><Input disabled={!editable} value={s.support.phone} onChange={(e) => set({ support: { ...s.support, phone: e.target.value } })} /></Field>
           </div>
         </div>
         <div className="card pad stack lg">
-          <h2>Points rules</h2>
+          <h2>{t('Points rules', 'قواعد النقاط')}</h2>
           <div className="grid k2">
-            <Field label="Points expire after (months)"><Input disabled={!editable} type="number" min={1} value={s.points.expiry_months} onChange={(e) => setP({ expiry_months: e.target.value as any })} /></Field>
-            <Field label="Warn customers (days before expiry)"><Input disabled={!editable} type="number" min={1} value={s.points.warn_days} onChange={(e) => setP({ warn_days: e.target.value as any })} /></Field>
+            <Field label={t('Points expire after (months)', 'تنتهي النقاط بعد (أشهر)')}><Input disabled={!editable} type="number" min={1} value={s.points.expiry_months} onChange={(e) => setP({ expiry_months: e.target.value as any })} /></Field>
+            <Field label={t('Warn customers (days before expiry)', 'تنبيه العملاء (أيام قبل الانتهاء)')}><Input disabled={!editable} type="number" min={1} value={s.points.warn_days} onChange={(e) => setP({ warn_days: e.target.value as any })} /></Field>
           </div>
-          <div className="note">Points are credited when an order is delivered and are worth QAR 1 each at checkout. How many points each thobe and product earns is set per tier on the Rewards page.</div>
+          <div className="note">{t('Points are credited when an order is delivered and are worth QAR 1 each at checkout. How many points each thobe and product earns is set per tier on the Rewards page.', 'تُضاف النقاط عند تسليم الطلب وقيمة كل نقطة 1 ر.ق عند الدفع. عدد نقاط كل ثوب ومنتج يُحدد لكل فئة في صفحة المكافآت.')}</div>
         </div>
       </div>
     </div>

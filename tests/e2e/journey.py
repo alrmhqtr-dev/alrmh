@@ -115,6 +115,8 @@ def journey(browser, lang, method, phone, name, reorder):
     actx = browser.new_context(viewport={"width": 1280, "height": 900})
     admin = actx.new_page()
     admin.on("pageerror", lambda e: errors.append(f"{tag} admin: {e}"))
+    # Staff use the admin in the same language as this run.
+    sql(f"update staff_users set language = '{lang}' where email = '{ADMIN_EMAIL}'")
     admin.goto(ADMIN + "/")
     admin.fill('[data-testid="login-email"]', ADMIN_EMAIL); admin.fill('[data-testid="login-password"]', ADMIN_PASSWORD); admin.click('[data-testid="login-submit"]')
     admin.click('[data-testid="nav-appointments"]'); admin.wait_for_selector(f'[data-testid="appt-order-{name}"]', timeout=15000)
@@ -133,7 +135,7 @@ def journey(browser, lang, method, phone, name, reorder):
     order_id = admin.url.rstrip("/").split("/")[-1]
     number = sql(f"select number from orders where id = '{order_id}'")
     check(f"{tag}: staff place the order at the visit (2 thobes, QAR {total:.2f}, card machine, to collect from the branch); it starts at Taking measurements",
-          float(po_total.replace("QAR", "").strip()) == total and sql(f"select stage || ':' || total::numeric(10,2) from orders where id = '{order_id}'") == f"measured:{total:.2f}"
+          float("".join(ch for ch in po_total if ch.isdigit() or ch == ".")) == total and sql(f"select stage || ':' || total::numeric(10,2) from orders where id = '{order_id}'") == f"measured:{total:.2f}"
           and sql(f"select provider from payments where order_id = '{order_id}'") == "card_machine", f"{po_total} {sql(f'select stage, total from orders where id = {chr(39)}{order_id}{chr(39)}')}")
 
     page.goto(APP + "/orders"); page.wait_for_timeout(2500)
@@ -177,7 +179,7 @@ def journey(browser, lang, method, phone, name, reorder):
         admin.click('[data-testid="adjust-save"]'); admin.wait_for_timeout(1500)
         bal = pts + gold["min_points"]
         check(f"{tag}: staff add points from the customer page; the customer is now Gold",
-              admin.locator('[data-testid="points-balance"]').inner_text().strip().replace(",", "") == str(bal) and gold["name_en"].lower() in admin.locator('[data-testid="customer-tier"]').inner_text().lower(),
+              admin.locator('[data-testid="points-balance"]').inner_text().strip().replace(",", "") == str(bal) and gold[f"name_{lang}"].lower() in admin.locator('[data-testid="customer-tier"]').inner_text().lower(),
               admin.locator('[data-testid="customer-tier"]').inner_text())
         page.goto(APP + "/rewards"); page.wait_for_timeout(2000)
         check(f"{tag}: the rewards card shows Gold", vis(page, '[data-testid="tier-name"]').inner_text().strip() == gold["name_en"])

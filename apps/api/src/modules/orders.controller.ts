@@ -15,7 +15,8 @@ function mockOnly() {
 }
 
 const ORDER_SUMMARY = `
-  o.id, o.number, o.stage, o.total, o.created_at, o.expected_delivery, o.points_to_earn, o.points_awarded,
+  o.id, o.number, o.stage, o.total, o.created_at, o.expected_delivery, o.points_to_earn, o.points_awarded, o.channel,
+  greatest(0, o.total - coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0))::float as balance,
   (select max(e.at) from order_events e where e.order_id = o.id and e.stage in ('delivered','cancelled')) as closed_at,
   (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id) as item_count,
   (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobe_count,
@@ -59,7 +60,8 @@ export class OrdersController {
     const order = await db.one(
       `select o.*, (select status from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_status,
               (select provider from payments p where p.order_id = o.id and p.status = 'paid' order by created_at desc limit 1) as payment_provider,
-              (select coalesce(sum(amount),0)::float from refunds r where r.order_id = o.id) as refunded
+              (select coalesce(sum(amount),0)::float from refunds r where r.order_id = o.id) as refunded,
+              coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0)::float as paid
          from orders o where o.id = $1 and o.customer_id = $2`,
       [id, me.id],
     );
@@ -74,7 +76,9 @@ export class OrdersController {
         [id],
       ),
     ]);
-    return { ...order, items, events, appointments, stages: stagesFor(items) };
+    // After a deposit at the branch, the rest is paid when the thobes are collected.
+    const balance = order.stage === 'cancelled' ? 0 : Math.max(0, Math.round((Number(order.total) - order.paid) * 100) / 100);
+    return { ...order, balance, items, events, appointments, stages: stagesFor(items) };
   }
 
   @Get('pay/mock/:paymentId')

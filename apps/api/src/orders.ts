@@ -1,9 +1,9 @@
 import { NotFoundException } from '@nestjs/common';
 import { db, type Queryable } from './db.js';
-import { addMonthsSql } from './sql-helpers.js';
-import { SHOP_FLOW, THOBE_FLOW, addWorkingDays, stageText, expirePoints, fail, getSettings, notify, pointsBalance, qatarDateString, spendPoints, tierStatus, type Stage } from './lib.js';
+import { SHOP_FLOW, THOBE_FLOW, addWorkingDays, stageText, expirePoints, fail, getSettings, notify, pointsBalance, qatarDateString, spendPoints, type Stage } from './lib.js';
 import { quote, type QuoteInput } from './pricing.js';
 import { assertSlotFree, slotLockKey } from './modules/booking.controller.js';
+import { assertInStock, awardPoints, onlineBranchId, orderBalance, stockNeeds, takeStockForOrder } from './pos.js';
 
 export function stagesFor(items: { kind: string }[]): Stage[] {
   return items.some((i) => i.kind === 'thobe') ? [...THOBE_FLOW] : [...SHOP_FLOW];
@@ -50,10 +50,19 @@ export async function createOrder(customerId: string, input: QuoteInput) {
       }
       await c.query('update appointments set created_at = now() where id = $1', [apptId]);
     }
+    // Tracked items must be in stock where the order will be packed or made.
+    const stockBranch = q.pickup ? q.address?.branchId : await onlineBranchId(c);
+    if (stockBranch) {
+      const needs = await stockNeeds(
+        (q.items as any[]).map((i) => ({ kind: i.kind, qty: i.qty, productId: i.product?.id, size: i.size, fabricId: i.thobe?.fabric?.id })),
+        c,
+      );
+      await assertInStock(needs, stockBranch, c);
+    }
     const number = `AR-${(await db.one<{ n: number }>(`select nextval('order_number_seq')::int as n`, [], c))!.n}`;
     const order = await db.one(
-      `insert into orders (number, customer_id, subtotal, delivery_fee, home_visit_fee, discount, discount_label, total, coupon_code, address, points_to_earn, points_used)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id, number, total`,
+      `insert into orders (number, customer_id, subtotal, delivery_fee, home_visit_fee, discount, discount_label, total, coupon_code, address, points_to_earn, points_used, branch_id, tax)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id, number, total`,
       [
         number,
         customerId,
@@ -67,18 +76,23 @@ export async function createOrder(customerId: string, input: QuoteInput) {
         q.address,
         q.pointsToEarn,
         q.pointsUsed,
+        q.pickup ? q.address?.branchId ?? null : null,
+        q.tax,
       ],
       c,
     );
     for (const i of q.items as any[]) {
-      const { id: _id, qty, unitPrice, lineTotal, kind, ...rest } = i;
-      await c.query('insert into order_items (order_id, kind, snapshot, qty, unit_price, line_total) values ($1,$2,$3,$4,$5,$6)', [
+      const { id: _id, qty, unitPrice, lineTotal, kind, discount, unitCost, tax, ...rest } = i;
+      await c.query('insert into order_items (order_id, kind, snapshot, qty, unit_price, line_total, discount, unit_cost, tax) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [
         order!.id,
         kind,
         { ...rest, basketItemId: i.id },
         qty,
         unitPrice,
         lineTotal,
+        discount ?? 0,
+        unitCost ?? 0,
+        tax ?? 0,
       ]);
     }
     const payment = await db.one(`insert into payments (order_id, amount) values ($1,$2) returning id`, [order!.id, q.total], c);
@@ -125,6 +139,7 @@ export async function markPaid(paymentId: string, providerRef: string) {
       }
       if (take !== order.points_used) await c.query('update orders set points_used = $2 where id = $1', [order.id, take]);
     }
+    await takeStockForOrder(order.id, c);
     const basketIds = items.map((i) => i.snapshot.basketItemId).filter(Boolean);
     await c.query('delete from basket_items where id = any($1::uuid[])', [basketIds]);
     await notify(
@@ -185,42 +200,18 @@ export async function setStage(orderId: string, stage: Stage, client?: Queryable
     const to = flow.indexOf(stage);
     if (to < 0) fail('invalid_stage');
     if (from < 0 || to <= from) fail('stage_not_forward', { current: order.stage });
+    // Thobes are handed over only once the balance (after a deposit) is paid.
+    if (stage === 'delivered') {
+      const { balance } = await orderBalance(orderId, c);
+      if (balance > 0) fail('balance_due', { due: balance });
+    }
     for (const s of flow.slice(from + 1, to + 1)) await c.query('insert into order_events (order_id, stage, staff_id) values ($1, $2, $3)', [orderId, s, staffId]);
     await c.query('update orders set stage = $2 where id = $1', [orderId, stage]);
     const thobes = items.some((i) => i.kind === 'thobe');
-    await notify(order.customer_id, 'order', withNumber(stageText(stage, thobes), order.number), `/orders/${orderId}`, c);
-    if (stage === 'delivered' && !order.points_awarded && order.points_to_earn > 0) {
-      const s = await getSettings(c);
-      const before = await tierStatus(order.customer_id, c);
-      await c.query(
-        `insert into points_ledger (customer_id, kind, points, remaining, expires_at, order_id, label)
-         values ($1, 'earn', $2, $2, ${addMonthsSql('now()', '$3')}, $4, $5)`,
-        [order.customer_id, order.points_to_earn, s.points.expiry_months, orderId, `Order #${order.number}`],
-      );
-      await c.query('update orders set points_awarded = true where id = $1', [orderId]);
+    if (order.customer_id) await notify(order.customer_id, 'order', withNumber(stageText(stage, thobes), order.number), `/orders/${orderId}`, c);
+    if (stage === 'delivered') {
       await c.query(`update appointments set status = 'done' where order_id = $1`, [orderId]);
-      await notify(
-        order.customer_id,
-        'points',
-        {
-          en: { title: `You earned ${order.points_to_earn} points`, body: `Order #${order.number} ${thobes ? 'collected' : 'delivered'}. Points expire in ${s.points.expiry_months} months.` },
-          ar: { title: `ربحت ${order.points_to_earn} نقطة`, body: `${thobes ? 'تم استلام' : 'تم توصيل'} الطلب #${order.number}. تنتهي صلاحية النقاط بعد ${s.points.expiry_months} شهرًا.` },
-        },
-        '/rewards',
-        c,
-      );
-      const after = await tierStatus(order.customer_id, c);
-      if (after.tier.id !== before.tier.id && after.tier.min_points > before.tier.min_points)
-        await notify(
-          order.customer_id,
-          'points',
-          {
-            en: { title: `You're now ${after.tier.name_en}`, body: `Every thobe now earns ${after.tier.points_per_thobe} points and every product ${after.tier.points_per_product}.` },
-            ar: { title: `أصبحت في الفئة ${after.tier.name_ar}`, body: `كل ثوب يمنحك الآن ${after.tier.points_per_thobe} نقطة وكل منتج ${after.tier.points_per_product} نقاط.` },
-          },
-          '/rewards',
-          c,
-        );
+      await awardPoints(orderId, c);
     }
     return { ok: true, stage };
   };

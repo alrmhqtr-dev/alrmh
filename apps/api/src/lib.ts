@@ -14,6 +14,16 @@ export type Settings = {
   points: { expiry_months: number; warn_days: number };
   home_visit: { open_minute: number; close_minute: number; slot_minutes: number; capacity: number; closed_weekdays: number[] };
   support: { whatsapp: string; phone: string };
+  /** The business as printed on invoices and receipts. */
+  company: { name_en: string; name_ar: string; cr_number: string; tax_number: string; phone: string; email: string; address_en: string; address_ar: string; logo_url: string | null; currency: string };
+  invoice: { prefix: string; footer_en: string; footer_ar: string; terms_en: string; terms_ar: string; show_tax: boolean; show_points: boolean; show_qr: boolean };
+  /** Product labels. Sizes in millimetres. */
+  barcode: { width_mm: number; height_mm: number; per_row: number; show_name: boolean; show_price: boolean; show_business: boolean; show_size: boolean };
+  /** Paper and copies per document, printed from the browser. */
+  printing: { receipt_paper: '80mm' | '58mm' | 'a4'; receipt_copies: number; invoice_paper: 'a4' | 'a5'; ticket_paper: '80mm' | 'a4' | 'a5'; ticket_copies: number; auto_print: boolean };
+  /** Messages opened in WhatsApp; {name}, {number}, {total}, {balance}, {link}, {branch} are filled in. */
+  whatsapp: { receipt_en: string; receipt_ar: string; ready_en: string; ready_ar: string; balance_en: string; balance_ar: string };
+  pos: { online_branch_id: string | null; allow_negative_stock: boolean; require_register: boolean; min_deposit_percent: number };
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -26,13 +36,28 @@ export const DEFAULT_SETTINGS: Settings = {
   points: { expiry_months: 12, warn_days: 30 },
   home_visit: { open_minute: 960, close_minute: 1320, slot_minutes: 90, capacity: 1, closed_weekdays: [5] },
   support: { whatsapp: '+97455550000', phone: '+97444440000' },
+  company: { name_en: 'AlRmh', name_ar: 'الرمح', cr_number: '', tax_number: '', phone: '', email: '', address_en: 'Doha, Qatar', address_ar: 'الدوحة، قطر', logo_url: null, currency: 'QAR' },
+  invoice: { prefix: 'AR-', footer_en: 'Thank you for choosing AlRmh.', footer_ar: 'شكرًا لاختياركم الرمح.', terms_en: '', terms_ar: '', show_tax: false, show_points: true, show_qr: true },
+  barcode: { width_mm: 50, height_mm: 25, per_row: 1, show_name: true, show_price: true, show_business: true, show_size: true },
+  printing: { receipt_paper: '80mm', receipt_copies: 1, invoice_paper: 'a4', ticket_paper: '80mm', ticket_copies: 1, auto_print: true },
+  whatsapp: {
+    receipt_en: 'Hello {name}, thank you for shopping at AlRmh. Your invoice #{number} for QAR {total}: {link}',
+    receipt_ar: 'مرحبًا {name}، شكرًا لتسوقك من الرمح. فاتورتك رقم {number} بمبلغ {total} ر.ق: {link}',
+    ready_en: 'Hello {name}, your thobes (order #{number}) are ready to collect from {branch}. Balance due: QAR {balance}.',
+    ready_ar: 'مرحبًا {name}، ثيابك (طلب رقم {number}) جاهزة للاستلام من {branch}. المبلغ المتبقي: {balance} ر.ق.',
+    balance_en: 'Hello {name}, a balance of QAR {balance} is due on order #{number}. {link}',
+    balance_ar: 'مرحبًا {name}، يتبقى مبلغ {balance} ر.ق على الطلب رقم {number}. {link}',
+  },
+  pos: { online_branch_id: null, allow_negative_stock: false, require_register: true, min_deposit_percent: 0 },
 };
 
 export async function getSettings(client: Queryable = db.pool): Promise<Settings> {
   const rows = await db.many<{ key: string; value: any }>('select key, value from settings', [], client);
   const out: any = structuredClone(DEFAULT_SETTINGS);
   // `seed.*` rows are the seed's own bookkeeping, not settings.
-  for (const r of rows) if (!r.key.startsWith('seed.')) out[r.key] = r.key === 'points' ? { ...out.points, ...r.value } : r.value;
+  // Object settings are merged over the defaults, so a setting added later still has a value.
+  for (const r of rows)
+    if (!r.key.startsWith('seed.')) out[r.key] = out[r.key] && typeof out[r.key] === 'object' && !Array.isArray(out[r.key]) ? { ...out[r.key], ...r.value } : r.value;
   return out as Settings;
 }
 

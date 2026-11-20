@@ -1,5 +1,6 @@
 import { db, type Queryable } from './db.js';
 import { expirePoints, getSettings, pointsBalance, round2, tierStatus, type Tier } from './lib.js';
+import { activeDiscounts, groupPercent, taxInside, unitDiscount } from './pos.js';
 
 /** usePoints: spend the customer's points on this order, 1 point = QAR 1, up to the amount due. */
 export type QuoteInput = { addressId?: string; branchId?: string; couponCode?: string | null; usePoints?: boolean };
@@ -8,11 +9,13 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
   const t = tier ?? (await tierStatus(customerId, client)).tier;
   const rows = await db.many(
     `select bi.*, p.name_en as p_name_en, p.name_ar as p_name_ar, p.price as p_price, p.category as p_category, p.image_url as p_image_url,
+            p.brand_id as p_brand_id, p.cost as p_cost, p.sku as p_sku, coalesce(pt.percent, 0)::float as p_tax,
             f.name as member_name, f.relation as member_relation, f.size as member_size,
             a.kind as appt_kind, a.starts_at as appt_starts_at, a.branch_id as appt_branch_id,
             b.name_en as appt_branch_en, b.name_ar as appt_branch_ar, ad.area as appt_area
        from basket_items bi
        left join products p on p.id = bi.product_id
+       left join tax_rates pt on pt.id = p.tax_rate_id and pt.active
        left join family_members f on f.id = bi.member_id
        left join appointments a on a.id = bi.appointment_id
        left join branches b on b.id = a.branch_id
@@ -23,32 +26,49 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
   );
   const [collars, fabrics, colours] = await Promise.all([
     db.many('select id, name_en, name_ar, shape from collars', [], client),
-    db.many('select id, name_en, name_ar, price from fabrics', [], client),
+    db.many('select f.id, f.name_en, f.name_ar, f.price, f.cost, f.metres_per_thobe, coalesce(t.percent,0)::float as tax from fabrics f left join tax_rates t on t.id = f.tax_rate_id and t.active', [], client),
     db.many('select id, name_en, name_ar, hex from colours', [], client),
   ]);
   const byId = (list: any[], id: string) => list.find((x) => x.id === id);
+  // The same automatic discounts as the counter (rules for the app, and the customer's group).
+  const rules = await activeDiscounts('app', null, client);
+  const gp = await groupPercent(customerId, client);
   return rows.map((r) => {
     if (r.kind === 'product') {
-      const line = round2(r.p_price * r.qty);
+      const off = unitDiscount({ kind: 'product', id: r.product_id, category: r.p_category, brand_id: r.p_brand_id, price: r.p_price }, rules, gp);
+      const discount = round2(off.amount * r.qty);
+      const line = round2(r.p_price * r.qty - discount);
       return {
         id: r.id,
         kind: 'product' as const,
         qty: r.qty,
         unitPrice: r.p_price,
+        discount,
+        discountLabel: off.label,
+        unitCost: r.p_cost ?? 0,
+        tax: taxInside(line, r.p_tax),
         lineTotal: line,
         points: t.points_per_product * r.qty,
         product: { id: r.product_id, name_en: r.p_name_en, name_ar: r.p_name_ar, category: r.p_category, image_url: r.p_image_url },
         size: r.size,
       };
     }
-    const fabric = byId(fabrics, r.thobe.fabricId);
+    const fabricRow = byId(fabrics, r.thobe.fabricId);
+    const fabric = fabricRow ? { id: fabricRow.id, name_en: fabricRow.name_en, name_ar: fabricRow.name_ar, price: fabricRow.price } : undefined;
     const unit = fabric?.price ?? 0;
+    const off = unitDiscount({ kind: 'thobe', fabricId: r.thobe.fabricId, price: unit }, rules, gp);
+    const discount = round2(off.amount * r.qty);
+    const line = round2(unit * r.qty - discount);
     return {
       id: r.id,
       kind: 'thobe' as const,
       qty: r.qty,
       unitPrice: unit,
-      lineTotal: round2(unit * r.qty),
+      discount,
+      discountLabel: off.label,
+      unitCost: round2((fabricRow?.cost ?? 0) * (fabricRow?.metres_per_thobe ?? 0)),
+      tax: taxInside(line, fabricRow?.tax ?? 0),
+      lineTotal: line,
       points: t.points_per_thobe * r.qty,
       thobe: {
         collar: byId(collars, r.thobe.collarId),
@@ -133,6 +153,8 @@ export async function quote(customerId: string, input: QuoteInput, client: Query
   const pointsUsed = input.usePoints ? Math.max(0, Math.min(pointsBalance_, Math.floor(due))) : 0;
   const total = round2(due - pointsUsed);
   const pointsToEarn = items.reduce((a, i) => a + i.points, 0);
+  const lineTax = items.reduce((a, i) => a + i.tax, 0);
+  const tax = subtotal > 0 ? round2((lineTax * (subtotal - discount)) / subtotal) : 0;
 
   return {
     items,
@@ -146,6 +168,7 @@ export async function quote(customerId: string, input: QuoteInput, client: Query
     pointsUsed,
     total,
     pointsToEarn,
+    tax,
     tier: status.tier,
     address: address ?? null,
     pickup,

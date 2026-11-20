@@ -112,6 +112,11 @@ jobs:
           PUSH_TEST_CERT: /tmp/push-test.crt
           PUSH_TEST_KEY: /tmp/push-test.key
 
+      - name: Point of sale checks
+        run: python3 apps/api/scripts/pos.py
+        env:
+          API: http://localhost:4000
+
       - name: API log
         if: failure()
         run: cat /tmp/api.log
@@ -196,6 +201,11 @@ jobs:
 
       - name: Accessibility of 25 screens in both languages
         run: python3 tests/e2e/a11y.py
+        env:
+          AXE: /tmp/axe/node_modules/axe-core/axe.min.js
+
+      - name: Point of sale and admin pages in Arabic and English, with accessibility
+        run: python3 tests/e2e/pos.py
         env:
           AXE: /tmp/axe/node_modules/axe-core/axe.min.js
 

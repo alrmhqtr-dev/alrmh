@@ -126,6 +126,8 @@ export const en = {
   'product.add': 'Add to basket',
   'product.added': 'Added to basket',
   'product.pickSize': 'Pick a size first',
+  'product.soldOut': 'Sold out',
+  'product.wasPrice': 'Was {price}',
   'product.renderFromClient': 'Product render — from client',
 
   'gate.title': 'Sign in to add to basket',
@@ -548,6 +550,7 @@ export const en = {
   'err.no_saved_measurements': 'No saved measurements for this person yet.',
   'err.address_required': 'Add a delivery address first.',
   'err.basket_empty': 'Your basket is empty.',
+  'err.out_of_stock': 'Sorry, that is out of stock right now.',
   'err.too_soon': 'Wait a moment before asking for a new code.',
   'err.invalid_phone': 'Enter an 8-digit Qatar mobile number.',
   'err.invalid_email': 'Check the email address.',
@@ -640,6 +643,10 @@ export const en = {
   'track.discount': "Discount",
   'track.pickup': "Collect from {branch}",
   'track.paidInStore': "Paid on the card machine in store",
+  'track.paidAtBranch': 'Paid at the branch',
+  'track.paidSoFar': 'Paid so far',
+  'track.balanceDue': 'Balance due at pickup',
+  'track.boughtInStore': 'Bought in store',
   'again.one': "1 thobe",
 } as const;
 

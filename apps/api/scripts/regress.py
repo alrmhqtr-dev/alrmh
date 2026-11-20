@@ -394,7 +394,7 @@ with urllib.request.urlopen(req) as r:
     rows = r.read().decode("utf-8").strip().split("\r\n")
 number = call("GET", f"/orders/{paid['orderId']}", token=tf)[1]["number"]
 line = next((r.split(",") for r in rows if r.startswith(number + ",")), [])
-check("export: orders CSV lists paid orders with their refunds", rows[0].startswith("\ufeffOrder,") and len(line) == 17 and float(line[11]) == total and float(line[12]) == total, f"{rows[0][:60]} {line}")
+check("export: orders CSV lists paid orders with their refunds", rows[0].startswith("\ufeffOrder,") and len(line) == 19 and float(line[11]) == total and float(line[12]) == total, f"{rows[0][:60]} {line}")
 sql("insert into staff_users (email, name, role, password_hash) select 'support-x@alrmh.qa', 'Support X', 'support', password_hash from staff_users where email = 'lock-test@alrmh.qa' on conflict (email) do nothing")
 support = staff("support-x@alrmh.qa", "correct-horse-battery")
 check("export: support staff cannot export", call("GET", "/admin/export/customers.csv", token=support)[0] == 403)

@@ -1,0 +1,683 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Minus, Plus, Printer, Ruler, Send, Shirt, Trash2, UserPlus, X } from 'lucide-react';
+import { ApiError, api, errorMessage, mediaUrl } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import { L, t } from '../lib/i18n';
+import { date, methodLabel, money, money2, num, phone, RELATION } from '../lib/format';
+import { fill, receiptUrl, waLink, type Templates } from '../lib/whatsapp';
+import { Empty, Field, Input, Loading, Modal, Select, TextArea, openPrint, useToast } from '../ui';
+import { OpenRegisterForm, useRegister } from '../register';
+import { MeasureModal, type Measurement } from '../measure';
+
+type Items = {
+  branchId: string;
+  branches: { id: string; name_en: string; name_ar: string }[];
+  categories: { id: string; name_en: string; name_ar: string }[];
+  services: { id: string; name_en: string; name_ar: string; charge_kind: string; charge: number; lead_days: number | null }[];
+  agents: { id: string; name: string }[];
+  collars: { id: string; name_en: string; name_ar: string }[];
+  colours: { id: string; name_en: string; name_ar: string; hex: string }[];
+  products: { id: string; sku: string; category: string; name_en: string; name_ar: string; price: number; sizes: string[]; image_url: string | null; track_stock: boolean; unit: string | null; stock: Record<string, number> | null }[];
+  fabrics: { id: string; sku: string; name_en: string; name_ar: string; price: number; colour_ids: string[]; stock: number | null; metres_per_thobe: number }[];
+};
+type Line =
+  | { key: string; kind: 'product'; productId: string; size?: string | null; qty: number; price?: number | null; discount?: number | null }
+  | { key: string; kind: 'thobe'; memberId: string; collarId: string; fabricId: string; colourId?: string | null; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
+type Cust = { id: string; name: string | null; phone: string };
+type CustomerFull = {
+  id: string;
+  name: string | null;
+  phone: string;
+  group_id: string | null;
+  family: { id: string; name: string; relation: string; size: string; latest: Measurement | null }[];
+  addresses: { id: string; label: string; line1: string; area: string }[];
+  balance: number;
+  tier: { tier: { name_en: string; name_ar: string } };
+};
+type Quote = {
+  lines: any[];
+  subtotal: number;
+  orderDiscount: number;
+  serviceCharge: number;
+  deliveryFee: number;
+  pointsUsed: number;
+  pointsBalance: number;
+  pointsToEarn: number;
+  total: number;
+  tax: number;
+  hasThobes: boolean;
+  expectedDelivery: string | null;
+  stockError: { code: string; item?: string; size?: string; available?: number } | null;
+};
+type SaleResult = { orderId: string; number: string; total: number; paid: number; balance: number; change: number; receiptToken: string; pointsToEarn: number };
+
+const key = () => Math.random().toString(36).slice(2);
+
+function CustomerPicker({ value, onPick, walkIn, setWalkIn }: { value: Cust | null; onPick: (c: Cust | null) => void; walkIn: { name: string; phone: string }; setWalkIn: (w: { name: string; phone: string }) => void }) {
+  const [q, setQ] = useState('');
+  const [adding, setAdding] = useState<{ name: string; phone: string } | null>(null);
+  const toast = useToast();
+  const found = useQuery({ queryKey: ['pos-customers', q], queryFn: () => api<Cust[]>(`/customers?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 });
+  const add = useMutation({
+    mutationFn: () => api<Cust & { existing: boolean }>('/customers', { body: adding }),
+    onSuccess: (c) => {
+      toast(c.existing ? t('This mobile already has an account. Selected it.', 'لهذا الرقم حساب مسبق. تم اختياره.') : t('Customer added.', 'تمت إضافة العميل.'));
+      onPick({ id: c.id, name: c.name, phone: c.phone });
+      setAdding(null);
+      setQ('');
+    },
+    onError: (e) => toast(errorMessage(e), 'error'),
+  });
+  if (value)
+    return (
+      <div className="row spread" data-testid="pos-customer">
+        <div>
+          <div className="strong">{value.name ?? t('No name', 'بدون اسم')}</div>
+          <div className="small muted num">{phone(value.phone)}</div>
+        </div>
+        <button className="btn sm ghost" onClick={() => onPick(null)} aria-label={t('Remove customer', 'إزالة العميل')}><X size={16} /></button>
+      </div>
+    );
+  if (adding)
+    return (
+      <div className="stack" style={{ gap: 8 }}>
+        <div className="grid k2" style={{ gap: 8 }}>
+          <Input data-testid="pos-new-name" placeholder={t('Name', 'الاسم')} value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} autoFocus />
+          <Input data-testid="pos-new-phone" placeholder={t('Mobile (8 digits)', 'الجوال (8 أرقام)')} dir="ltr" inputMode="tel" value={adding.phone} onChange={(e) => setAdding({ ...adding, phone: e.target.value })} />
+        </div>
+        <div className="row">
+          <button className="btn sm secondary" onClick={() => setAdding(null)}>{t('Cancel', 'إلغاء')}</button>
+          <button className="btn sm" data-testid="pos-new-save" disabled={!adding.name.trim() || adding.phone.replace(/\D/g, '').length < 8 || add.isPending} onClick={() => add.mutate()}>{t('Add customer', 'إضافة العميل')}</button>
+        </div>
+      </div>
+    );
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <div className="row" style={{ gap: 8 }}>
+        <Input data-testid="pos-customer-search" placeholder={t('Customer mobile or name', 'جوال العميل أو اسمه')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <button className="btn sm secondary" data-testid="pos-add-customer" onClick={() => setAdding({ name: '', phone: /^\d+$/.test(q.replace(/\s/g, '')) ? q.replace(/\s/g, '') : '' })}>
+          <UserPlus size={15} /> {t('New', 'جديد')}
+        </button>
+      </div>
+      {q.trim().length >= 2 && found.data ? (
+        <div className="card" style={{ maxHeight: 180, overflowY: 'auto' }}>
+          {found.data.length ? (
+            found.data.slice(0, 8).map((c) => (
+              <button key={c.id} className="btn ghost" data-testid={`pos-pick-${c.phone}`} style={{ width: '100%', justifyContent: 'space-between' }} onClick={() => { onPick(c); setQ(''); }}>
+                <span>{c.name ?? '—'}</span>
+                <span className="small muted num">{phone(c.phone)}</span>
+              </button>
+            ))
+          ) : (
+            <div className="small muted" style={{ padding: 10 }}>{t('No customer found. Add a new one.', 'لا يوجد عميل. أضف عميلًا جديدًا.')}</div>
+          )}
+        </div>
+      ) : (
+        <div className="grid k2" style={{ gap: 8 }}>
+          <Input placeholder={t('Walk-in name (optional)', 'اسم الزبون (اختياري)')} value={walkIn.name} onChange={(e) => setWalkIn({ ...walkIn, name: e.target.value })} />
+          <Input placeholder={t('Walk-in mobile (optional)', 'جوال الزبون (اختياري)')} dir="ltr" value={walkIn.phone} onChange={(e) => setWalkIn({ ...walkIn, phone: e.target.value })} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PayModal({ total, allowPartial, onClose, onPay, busy }: { total: number; allowPartial: boolean; onClose: () => void; onPay: (p: { method: string; amount: number; reference?: string }[]) => void; busy: boolean }) {
+  const [amounts, setAmounts] = useState<Record<string, string>>({ cash: '', card: '', bank_transfer: '', cheque: '' });
+  const [ref, setRef] = useState('');
+  const given = Object.values(amounts).reduce((a, v) => a + (Number(v) || 0), 0);
+  const cash = Number(amounts.cash) || 0;
+  const over = Math.round((given - total) * 100) / 100;
+  const change = over > 0 ? Math.min(over, cash) : 0;
+  const left = Math.max(0, Math.round((total - given) * 100) / 100);
+  const invalid = over > cash + 0.001 || given <= 0 && total > 0 || (left > 0 && !allowPartial);
+  const set = (m: string, v: string) => setAmounts((a) => ({ ...a, [m]: v }));
+  const quick = [total, Math.ceil(total / 50) * 50, Math.ceil(total / 100) * 100, Math.ceil(total / 500) * 500].filter((v, i, arr) => v > 0 && arr.indexOf(v) === i);
+  return (
+    <Modal
+      title={t('Payment', 'الدفع')}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <button className="btn secondary" onClick={onClose}>{t('Back', 'رجوع')}</button>
+          <button
+            className="btn"
+            data-testid="pay-confirm"
+            disabled={invalid || busy}
+            onClick={() => onPay(Object.entries(amounts).filter(([, v]) => Number(v) > 0).map(([method, v]) => ({ method, amount: Number(v), reference: method !== 'cash' ? ref || undefined : undefined })))}
+          >
+            {left > 0 ? t(`Take ${money(given)} now`, `استلام ${money(given)} الآن`) : t('Complete sale', 'إتمام البيع')}
+          </button>
+        </>
+      }
+    >
+      <div className="sum-row total"><span>{t('Total due', 'الإجمالي المستحق')}</span><span data-testid="pay-total">{money(total)}</span></div>
+      <div className="grid k2">
+        {(['cash', 'card', 'bank_transfer', 'cheque'] as const).map((m) => (
+          <Field key={m} label={methodLabel(m)}>
+            <div className="row" style={{ gap: 6 }}>
+              <Input data-testid={`pay-${m}`} type="number" inputMode="decimal" min={0} value={amounts[m]} onChange={(e) => set(m, e.target.value)} autoFocus={m === 'cash'} />
+              <button className="btn sm secondary" onClick={() => setAmounts({ cash: '', card: '', bank_transfer: '', cheque: '', [m]: String(Math.max(0, Math.round((total - (given - (Number(amounts[m]) || 0))) * 100) / 100)) })}>{t('Rest', 'الباقي')}</button>
+            </div>
+          </Field>
+        ))}
+      </div>
+      <div className="row wrap" style={{ gap: 6 }}>
+        <span className="small muted">{t('Cash given:', 'النقد المستلم:')}</span>
+        {quick.map((v) => (
+          <button key={v} className="chip" onClick={() => setAmounts({ cash: String(v), card: '', bank_transfer: '', cheque: '' })}>{money(v)}</button>
+        ))}
+      </div>
+      {(Number(amounts.card) || Number(amounts.bank_transfer) || Number(amounts.cheque)) ? (
+        <Field label={t('Card / transfer / cheque reference (optional)', 'مرجع البطاقة / التحويل / الشيك (اختياري)')}><Input value={ref} onChange={(e) => setRef(e.target.value)} /></Field>
+      ) : null}
+      {change > 0 ? <div className="note gold" data-testid="pay-change">{t('Change to give', 'الباقي للعميل')}: <b className="num">{money(change)}</b></div> : null}
+      {left > 0 ? (
+        allowPartial ? (
+          <div className="note">{t(`Balance left on the order: ${money(left)}. It is collected at pickup.`, `المتبقي على الطلب: ${money(left)}، يُستلم عند الاستلام.`)}</div>
+        ) : (
+          <div className="note error">{t(`${money(left)} still to pay. Walk-in sales are paid in full; choose a customer to leave a balance.`, `يتبقى ${money(left)}. مبيعات الزبون العابر تُدفع كاملة؛ اختر عميلًا لترك مبلغ متبقٍ.`)}</div>
+        )
+      ) : null}
+      {over > cash + 0.001 ? <div className="note error">{t('Change can only be given from cash.', 'الباقي يُعاد من النقد فقط.')}</div> : null}
+    </Modal>
+  );
+}
+
+function Done({ result, customer, phoneHint, hasThobes, onNew }: { result: SaleResult; customer: Cust | null; phoneHint: string; hasThobes: boolean; onNew: () => void }) {
+  const biz = useQuery({ queryKey: ['business'], queryFn: () => api<{ whatsapp: Templates; printing: { auto_print: boolean } }>('/business') });
+  const printed = useRef(false);
+  useEffect(() => {
+    if (biz.data?.printing.auto_print && !printed.current) {
+      printed.current = true;
+      openPrint(`receipt/${result.orderId}`);
+    }
+  }, [biz.data, result.orderId]);
+  const tel = customer?.phone ?? phoneHint;
+  const text = biz.data ? fill(t(biz.data.whatsapp.receipt_en, biz.data.whatsapp.receipt_ar), { name: customer?.name ?? '', number: result.number, total: money2(result.total), balance: money2(result.balance), link: receiptUrl(result.receiptToken) }) : '';
+  return (
+    <div className="card pad stack lg" data-testid="sale-done" style={{ maxWidth: 560, margin: '24px auto' }}>
+      <div className="stack" style={{ gap: 4, alignItems: 'center' }}>
+        <div className="overline">{t('Sale complete', 'تمت عملية البيع')}</div>
+        <h1 data-testid="sale-number">#{result.number}</h1>
+        <div className="secondary">{t('Total', 'الإجمالي')} {money(result.total)} · {t('paid', 'المدفوع')} {money(result.paid)}</div>
+      </div>
+      {result.change > 0 ? <div className="note gold" style={{ fontSize: 18, textAlign: 'center' }}>{t('Change', 'الباقي')}: <b className="num">{money(result.change)}</b></div> : null}
+      {result.balance > 0 ? <div className="note">{t('Balance due at pickup', 'المتبقي عند الاستلام')}: <b className="num">{money(result.balance)}</b></div> : null}
+      {result.pointsToEarn > 0 ? <div className="small muted" style={{ textAlign: 'center' }}>{t(`${result.pointsToEarn} points when the order is complete.`, `${result.pointsToEarn} نقطة عند اكتمال الطلب.`)}</div> : null}
+      <div className="grid k2">
+        <button className="btn secondary" data-testid="print-receipt" onClick={() => openPrint(`receipt/${result.orderId}`)}><Printer size={16} /> {t('Print receipt', 'طباعة الإيصال')}</button>
+        <button className="btn secondary" onClick={() => openPrint(`invoice/${result.orderId}`)}><Printer size={16} /> {t('A4 invoice', 'فاتورة A4')}</button>
+        {hasThobes ? <button className="btn secondary" onClick={() => openPrint(`ticket/${result.orderId}`)}><Ruler size={16} /> {t('Tailor ticket', 'ورقة الخياط')}</button> : null}
+        {tel ? (
+          <a className="btn secondary" data-testid="send-whatsapp" href={waLink(tel, text)} target="_blank" rel="noreferrer"><Send size={16} /> WhatsApp</a>
+        ) : null}
+      </div>
+      <div className="row">
+        <Link className="btn ghost" to={`/orders/${result.orderId}`}>{t('Open order', 'فتح الطلب')}</Link>
+        <div className="grow" />
+        <button className="btn big-btn" style={{ width: 'auto' }} data-testid="new-sale" onClick={onNew} autoFocus>{t('New sale', 'عملية بيع جديدة')}</button>
+      </div>
+    </div>
+  );
+}
+
+export default function Pos() {
+  const { can, staff } = useAuth();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const reg = useRegister();
+  const [branchId, setBranchId] = useState<string>('');
+  const items = useQuery({ queryKey: ['pos-items', branchId], queryFn: () => api<Items>(`/pos/items${branchId ? `?branch=${branchId}` : ''}`) });
+  const [tab, setTab] = useState<'products' | 'thobes'>('products');
+  const [search, setSearch] = useState('');
+  const [cat, setCat] = useState('');
+  const [sizeFor, setSizeFor] = useState<Items['products'][number] | null>(null);
+  const [customer, setCustomer] = useState<Cust | null>(null);
+  const [walkIn, setWalkIn] = useState({ name: '', phone: '' });
+  const [lines, setLines] = useState<Line[]>([]);
+  const [serviceTypeId, setServiceTypeId] = useState('');
+  const [agentId, setAgentId] = useState('');
+  const [orderDiscount, setOrderDiscount] = useState<{ kind: 'percent' | 'fixed'; amount: string }>({ kind: 'fixed', amount: '' });
+  const [points, setPoints] = useState('');
+  const [notes, setNotes] = useState('');
+  const [deliver, setDeliver] = useState('');
+  const [paying, setPaying] = useState(false);
+  const [done, setDone] = useState<SaleResult | null>(null);
+  const [draftId, setDraftId] = useState<string | null>(params.get('draft'));
+  const [measure, setMeasure] = useState<{ id: string; name: string; latest: Measurement | null } | null>(null);
+  const [thobe, setThobe] = useState({ memberId: '', collarId: '', fabricId: '', colourId: '', qty: '1', remarks: '' });
+  const [addMember, setAddMember] = useState<{ name: string; relation: string; size: string } | null>(null);
+  const mode = (params.get('mode') as 'draft' | 'quotation' | null) ?? null;
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // The register's branch is where this sale happens.
+  useEffect(() => {
+    if (reg.data?.open && !branchId) setBranchId(reg.data.register.branch_id);
+    else if (!branchId && items.data?.branchId) setBranchId(items.data.branchId);
+  }, [reg.data, items.data, branchId]);
+
+  // Arriving from the tailor or a customer page with ?customer=… starts the sale for them.
+  const fromParam = params.get('customer');
+  useEffect(() => {
+    if (fromParam && !customer)
+      api<CustomerFull>(`/customers/${fromParam}`).then((c) => {
+        setCustomer({ id: c.id, name: c.name, phone: c.phone });
+        setTab('thobes');
+      }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromParam]);
+
+  const cust = useQuery({ queryKey: ['customer', customer?.id], queryFn: () => api<CustomerFull>(`/customers/${customer!.id}`), enabled: Boolean(customer) });
+
+  // Opening a saved draft or quotation loads its basket.
+  const draft = useQuery({ queryKey: ['draft', draftId], queryFn: () => api<any>(`/drafts/${draftId}`), enabled: Boolean(draftId) });
+  const loadedDraft = useRef<string | null>(null);
+  useEffect(() => {
+    const d = draft.data;
+    if (!d || loadedDraft.current === d.id) return;
+    loadedDraft.current = d.id;
+    const c = d.cart;
+    setLines((c.lines ?? []).map((l: any) => ({ ...l, key: key() })));
+    if (c.customerId) setCustomer({ id: c.customerId, name: d.customer_name, phone: d.phone });
+    setWalkIn({ name: c.walkInName ?? '', phone: c.walkInPhone ?? '' });
+    setServiceTypeId(c.serviceTypeId ?? '');
+    setAgentId(c.agentId ?? '');
+    setNotes(c.notes ?? '');
+    if (c.branchId) setBranchId(c.branchId);
+    if (c.orderDiscount) setOrderDiscount({ kind: c.orderDiscount.kind, amount: String(c.orderDiscount.amount) });
+  }, [draft.data]);
+
+  const sale = useMemo(
+    () => ({
+      branchId: branchId || undefined,
+      customerId: customer?.id ?? null,
+      walkInName: customer ? null : walkIn.name || null,
+      walkInPhone: customer ? null : walkIn.phone || null,
+      lines: lines.map(({ key: _k, ...l }) => l),
+      orderDiscount: Number(orderDiscount.amount) > 0 ? { kind: orderDiscount.kind, amount: Number(orderDiscount.amount) } : null,
+      points: customer && Number(points) > 0 ? Math.trunc(Number(points)) : 0,
+      serviceTypeId: serviceTypeId || null,
+      agentId: agentId || null,
+      notes: notes || null,
+      deliveryAddressId: customer && deliver ? deliver : null,
+    }),
+    [branchId, customer, walkIn, lines, orderDiscount, points, serviceTypeId, agentId, notes, deliver],
+  );
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!lines.length) {
+      setQuote(null);
+      setQuoteError(null);
+      return;
+    }
+    const h = setTimeout(() => {
+      api<Quote>('/pos/quote', { body: sale })
+        .then((q) => {
+          setQuote(q);
+          setQuoteError(null);
+        })
+        .catch((e) => setQuoteError(errorMessage(e)));
+    }, 180);
+    return () => clearTimeout(h);
+  }, [sale, lines.length]);
+
+  const reset = () => {
+    setLines([]);
+    setCustomer(null);
+    setWalkIn({ name: '', phone: '' });
+    setServiceTypeId('');
+    setAgentId('');
+    setOrderDiscount({ kind: 'fixed', amount: '' });
+    setPoints('');
+    setNotes('');
+    setDeliver('');
+    setDone(null);
+    setDraftId(null);
+    loadedDraft.current = null;
+    setParams({});
+    setTimeout(() => searchRef.current?.focus(), 50);
+  };
+
+  const sell = useMutation({
+    mutationFn: (payments: { method: string; amount: number; reference?: string }[]) => api<SaleResult>('/pos/sales', { body: { sale, payments, draftId: draftId ?? undefined } }),
+    onSuccess: (r) => {
+      setPaying(false);
+      setDone(r);
+      qc.invalidateQueries({ queryKey: ['register'] });
+      qc.invalidateQueries({ queryKey: ['pos-items'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (e) => toast(errorMessage(e), 'error'),
+  });
+  const save = useMutation({
+    mutationFn: (kind: 'draft' | 'quotation') =>
+      draftId && draft.data?.kind === kind ? api(`/drafts/${draftId}`, { method: 'PATCH', body: { sale } }).then(() => ({ id: draftId, number: draft.data.number })) : api<{ id: string; number: string }>('/drafts', { body: { kind, sale } }),
+    onSuccess: (r: any, kind) => {
+      toast(kind === 'quotation' ? t(`Quotation ${r.number} saved.`, `تم حفظ عرض السعر ${r.number}.`) : t(`Draft ${r.number} saved.`, `تم حفظ المسودة ${r.number}.`));
+      if (kind === 'quotation') openPrint(`quotation/${r.id}`);
+      reset();
+      navigate(kind === 'quotation' ? '/quotations' : '/drafts');
+    },
+    onError: (e) => toast(errorMessage(e), 'error'),
+  });
+  const newMember = useMutation({
+    mutationFn: () => api<{ id: string }>(`/customers/${customer!.id}/members`, { body: addMember }),
+    onSuccess: (m) => {
+      qc.invalidateQueries({ queryKey: ['customer', customer?.id] });
+      setThobe((x) => ({ ...x, memberId: m.id }));
+      setAddMember(null);
+    },
+    onError: (e) => toast(errorMessage(e), 'error'),
+  });
+
+  const data = items.data;
+  const products = useMemo(() => {
+    if (!data) return [];
+    const s = search.trim().toLowerCase();
+    return data.products.filter((p) => (!cat || p.category === cat) && (!s || p.sku.toLowerCase().includes(s) || p.name_en.toLowerCase().includes(s) || p.name_ar.includes(search.trim())));
+  }, [data, search, cat]);
+
+  if (reg.data && !reg.data.open && reg.data.required)
+    return (
+      <div className="card pad stack lg" style={{ maxWidth: 560, margin: '24px auto' }} data-testid="register-gate">
+        <h2>{t('Open your cash register', 'افتح صندوق النقد')}</h2>
+        <div className="secondary">{t('Count the cash in the drawer to start selling. Every sale and payment is counted against your register until you close it.', 'عُدّ النقد في الدرج لتبدأ البيع. تُحسب كل عملية بيع ودفعة على صندوقك حتى تغلقه.')}</div>
+        <OpenRegisterForm />
+      </div>
+    );
+  if (!data) return <Loading />;
+  if (done) return <Done result={done} customer={customer} phoneHint={walkIn.phone} hasThobes={lines.some((l) => l.kind === 'thobe')} onNew={reset} />;
+
+  const addProduct = (p: Items['products'][number], size?: string) => {
+    if (p.sizes.length && !size) return setSizeFor(p);
+    setSizeFor(null);
+    setLines((ls) => {
+      const i = ls.findIndex((l) => l.kind === 'product' && l.productId === p.id && (l.size ?? null) === (size ?? null) && l.price == null);
+      if (i >= 0) return ls.map((l, k) => (k === i ? { ...l, qty: l.qty + 1 } : l));
+      return [...ls, { key: key(), kind: 'product', productId: p.id, size: size ?? null, qty: 1 }];
+    });
+  };
+  const onSearchKey = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter') return;
+    // A barcode scanner types the code and presses Enter.
+    const code = search.trim().toUpperCase();
+    const hit = data.products.find((p) => p.sku.toUpperCase() === code) ?? (products.length === 1 ? products[0] : null);
+    if (hit) {
+      addProduct(hit);
+      setSearch('');
+    }
+  };
+  const setLine = (k: string, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === k ? ({ ...l, ...patch } as Line) : l)));
+  const family = cust.data?.family ?? [];
+  const member = family.find((m) => m.id === (thobe.memberId || family[0]?.id));
+  const fabric = data.fabrics.find((f) => f.id === thobe.fabricId);
+  const canDiscount = can('pos.discount');
+  const nameOf = (l: Line) => {
+    if (l.kind === 'product') {
+      const p = data.products.find((x) => x.id === l.productId);
+      return `${L(p)}${l.size ? ` · ${l.size}` : ''}`;
+    }
+    const f = data.fabrics.find((x) => x.id === l.fabricId);
+    const c = data.collars.find((x) => x.id === l.collarId);
+    const m = family.find((x) => x.id === l.memberId);
+    return `${t('Thobe', 'ثوب')} · ${L(c)} · ${L(f)}${m ? ` · ${m.name}` : ''}`;
+  };
+  const q = quote;
+
+  return (
+    <div className="stack">
+      <div className="row spread wrap">
+        <div className="row wrap">
+          <h1>{mode === 'quotation' ? t('New quotation', 'عرض سعر جديد') : mode === 'draft' ? t('New draft', 'مسودة جديدة') : t('Point of sale', 'نقطة البيع')}</h1>
+          {draft.data ? <span className="badge gold">{draft.data.kind === 'quotation' ? t('Quotation', 'عرض سعر') : t('Draft', 'مسودة')} {draft.data.number}</span> : null}
+        </div>
+        <div className="row wrap">
+          <select className="input" style={{ width: 200 }} value={branchId} onChange={(e) => setBranchId(e.target.value)} disabled={Boolean(reg.data?.open)} aria-label={t('Branch', 'الفرع')}>
+            {data.branches.map((b) => <option key={b.id} value={b.id}>{L(b)}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="pos">
+        <div className="stack">
+          <div className="row wrap">
+            <div className="tabs" role="tablist">
+              <button role="tab" aria-selected={tab === 'products'} className={tab === 'products' ? 'on' : ''} onClick={() => setTab('products')} data-testid="pos-tab-products">{t('Products', 'المنتجات')}</button>
+              <button role="tab" aria-selected={tab === 'thobes'} className={tab === 'thobes' ? 'on' : ''} onClick={() => setTab('thobes')} data-testid="pos-tab-thobes"><Shirt size={14} /> {t('Thobes', 'الثياب')}</button>
+            </div>
+            {tab === 'products' ? (
+              <input ref={searchRef} className="input" style={{ maxWidth: 320 }} data-testid="pos-search" placeholder={t('Search or scan barcode', 'ابحث أو امسح الباركود')} value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={onSearchKey} autoFocus aria-label={t('Search or scan barcode', 'ابحث أو امسح الباركود')} />
+            ) : null}
+          </div>
+          {tab === 'products' ? (
+            <>
+              <div className="chips">
+                <button className={`chip ${!cat ? 'on' : ''}`} onClick={() => setCat('')}>{t('All', 'الكل')}</button>
+                {data.categories.map((c) => <button key={c.id} className={`chip ${cat === c.id ? 'on' : ''}`} onClick={() => setCat(c.id)}>{L(c)}</button>)}
+              </div>
+              {products.length ? (
+                <div className="pos-items">
+                  {products.map((p) => {
+                    const stock = p.stock ? Object.values(p.stock).reduce((a, b) => a + b, 0) : null;
+                    return (
+                      <button key={p.id} className="pos-item" data-testid={`pos-item-${p.sku}`} onClick={() => addProduct(p)}>
+                        {p.image_url ? <img src={mediaUrl(p.image_url)} alt="" /> : <div className="ph" />}
+                        <span className="strong small">{L(p)}</span>
+                        <span className="row spread small">
+                          <span className="num">{money(p.price)}</span>
+                          {stock !== null ? <span className={stock <= 0 ? 'tone-error' : 'muted'}>{num(stock)} {p.unit ?? ''}</span> : null}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <Empty>{t('No products match.', 'لا منتجات مطابقة.')}</Empty>
+              )}
+            </>
+          ) : !customer ? (
+            <div className="note">{t('Choose or add the customer first: thobes are made to their measurements.', 'اختر العميل أو أضفه أولًا: الثياب تُفصّل على مقاساته.')}</div>
+          ) : !cust.data ? (
+            <Loading />
+          ) : (
+            <div className="card pad stack">
+              <div className="grid k2">
+                <Field label={t('For', 'لـ')}>
+                  <div className="row" style={{ gap: 6 }}>
+                    <Select data-testid="thobe-member" value={thobe.memberId || family[0]?.id || ''} onChange={(e) => setThobe({ ...thobe, memberId: e.target.value })}>
+                      {family.map((m) => <option key={m.id} value={m.id}>{m.name} · {RELATION[m.relation]}</option>)}
+                    </Select>
+                    <button className="btn sm secondary" onClick={() => setAddMember({ name: '', relation: 'son', size: 'adult' })} aria-label={t('Add person', 'إضافة شخص')}><Plus size={15} /></button>
+                  </div>
+                </Field>
+                <Field label={t('Measurements', 'المقاسات')}>
+                  <div className="row" style={{ gap: 6 }}>
+                    <span className={`small ${member?.latest ? 'secondary' : 'tone-error'}`} style={{ flex: 1 }}>{member?.latest ? `${t('Taken', 'أُخذت')} ${date(member.latest.taken_at)}` : t('No measurements yet', 'لا توجد مقاسات')}</span>
+                    {member ? <button className="btn sm secondary" data-testid="thobe-measure" onClick={() => setMeasure({ id: member.id, name: member.name, latest: member.latest })}><Ruler size={14} /> {member.latest ? t('Update', 'تحديث') : t('Measure', 'قياس')}</button> : null}
+                  </div>
+                </Field>
+              </div>
+              {addMember ? (
+                <div className="row wrap" style={{ gap: 8 }}>
+                  <Input placeholder={t('Name', 'الاسم')} value={addMember.name} onChange={(e) => setAddMember({ ...addMember, name: e.target.value })} style={{ maxWidth: 200 }} autoFocus />
+                  <Select value={addMember.relation} onChange={(e) => setAddMember({ ...addMember, relation: e.target.value })} style={{ maxWidth: 140 }}>
+                    {['father', 'son', 'brother', 'friend', 'other'].map((r) => <option key={r} value={r}>{RELATION[r]}</option>)}
+                  </Select>
+                  <Select value={addMember.size} onChange={(e) => setAddMember({ ...addMember, size: e.target.value })} style={{ maxWidth: 120 }}>
+                    <option value="adult">{t('Adult', 'بالغ')}</option>
+                    <option value="child">{t('Child', 'طفل')}</option>
+                  </Select>
+                  <button className="btn sm" disabled={!addMember.name.trim() || newMember.isPending} onClick={() => newMember.mutate()}>{t('Add', 'إضافة')}</button>
+                  <button className="btn sm ghost" onClick={() => setAddMember(null)}>{t('Cancel', 'إلغاء')}</button>
+                </div>
+              ) : null}
+              <div className="grid k3">
+                <Field label={t('Type (collar)', 'النوع (الياقة)')}>
+                  <Select data-testid="thobe-collar" value={thobe.collarId} onChange={(e) => setThobe({ ...thobe, collarId: e.target.value })}>
+                    <option value="">—</option>
+                    {data.collars.map((c) => <option key={c.id} value={c.id}>{L(c)}</option>)}
+                  </Select>
+                </Field>
+                <Field label={t('Cloth', 'القماش')}>
+                  <Select data-testid="thobe-fabric" value={thobe.fabricId} onChange={(e) => setThobe({ ...thobe, fabricId: e.target.value, colourId: '' })}>
+                    <option value="">—</option>
+                    {data.fabrics.map((f) => (
+                      <option key={f.id} value={f.id}>{L(f)} · {money(f.price)}{f.stock !== null ? ` · ${num(f.stock)} ${t('m', 'م')}` : ''}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label={t('Colour (optional)', 'اللون (اختياري)')}>
+                  <Select value={thobe.colourId} onChange={(e) => setThobe({ ...thobe, colourId: e.target.value })} disabled={!fabric}>
+                    <option value="">—</option>
+                    {data.colours.filter((c) => fabric?.colour_ids.includes(c.id)).map((c) => <option key={c.id} value={c.id}>{L(c)}</option>)}
+                  </Select>
+                </Field>
+              </div>
+              <div className="grid" style={{ gridTemplateColumns: '120px 1fr auto', alignItems: 'end' }}>
+                <Field label={t('Thobes', 'عدد الثياب')}><Input data-testid="thobe-qty" type="number" min={1} max={50} value={thobe.qty} onChange={(e) => setThobe({ ...thobe, qty: e.target.value })} /></Field>
+                <Field label={t('Notes for the tailor', 'ملاحظات للخياط')}><Input value={thobe.remarks} onChange={(e) => setThobe({ ...thobe, remarks: e.target.value })} /></Field>
+                <button
+                  className="btn"
+                  data-testid="thobe-add"
+                  disabled={!thobe.collarId || !thobe.fabricId || !(Number(thobe.qty) >= 1) || !member}
+                  onClick={() => {
+                    setLines((ls) => [...ls, { key: key(), kind: 'thobe', memberId: member!.id, collarId: thobe.collarId, fabricId: thobe.fabricId, colourId: thobe.colourId || null, qty: Math.trunc(Number(thobe.qty)), remarks: thobe.remarks || null }]);
+                    setThobe({ ...thobe, qty: '1', remarks: '' });
+                  }}
+                >
+                  <Plus size={16} /> {t('Add thobes', 'إضافة الثياب')}
+                </button>
+              </div>
+              {member && !member.latest ? <div className="note gold">{t('Take the measurements before the order goes to the workshop.', 'خذ المقاسات قبل إرسال الطلب إلى الورشة.')}</div> : null}
+            </div>
+          )}
+        </div>
+
+        <div className="pos-cart">
+          <div className="card pad stack">
+            <CustomerPicker value={customer} onPick={(c) => { setCustomer(c); setPoints(''); setDeliver(''); }} walkIn={walkIn} setWalkIn={setWalkIn} />
+            {cust.data ? (
+              <div className="small secondary">{L(cust.data.tier.tier)} · {t('points', 'النقاط')} <b className="num">{num(cust.data.balance)}</b></div>
+            ) : null}
+          </div>
+          <div className="card pad stack" style={{ gap: 8 }}>
+            {lines.length ? (
+              <div className="cart-lines" data-testid="cart-lines">
+                {lines.map((l, i) => {
+                  const ql = q?.lines?.[i];
+                  return (
+                    <div key={l.key} className="cart-line">
+                      <div className="stack" style={{ gap: 4 }}>
+                        <span className="strong small">{nameOf(l)}</span>
+                        <div className="row" style={{ gap: 8 }}>
+                          <span className="stepper">
+                            <button onClick={() => (l.qty > 1 ? setLine(l.key, { qty: l.qty - 1 }) : setLines((ls) => ls.filter((x) => x.key !== l.key)))} aria-label={t('One less', 'نقص واحد')}><Minus size={14} /></button>
+                            <span data-testid={`qty-${i}`}>{l.qty}</span>
+                            <button onClick={() => setLine(l.key, { qty: l.qty + 1 })} aria-label={t('One more', 'زد واحدًا')}><Plus size={14} /></button>
+                          </span>
+                          {canDiscount ? (
+                            <>
+                              <input className="input" style={{ width: 84, height: 30 }} type="number" placeholder={t('Price', 'السعر')} aria-label={t('Unit price', 'سعر الوحدة')} value={l.price ?? ''} onChange={(e) => setLine(l.key, { price: e.target.value === '' ? null : Number(e.target.value) })} />
+                              <input className="input" style={{ width: 84, height: 30 }} type="number" placeholder={t('Discount', 'خصم')} aria-label={t('Line discount', 'خصم السطر')} value={l.discount ?? ''} onChange={(e) => setLine(l.key, { discount: e.target.value === '' ? null : Number(e.target.value) })} />
+                            </>
+                          ) : null}
+                        </div>
+                        {ql?.discount > 0 ? <span className="small tone-ok">{t('Discount', 'خصم')} −{money(ql.discount)}{ql.discountLabel && ql.discountLabel !== 'group' ? ` · ${ql.discountLabel}` : ql.discountLabel === 'group' ? ` · ${t('customer group', 'مجموعة العميل')}` : ''}</span> : null}
+                      </div>
+                      <div className="stack" style={{ gap: 4, alignItems: 'flex-end' }}>
+                        <span className="num strong">{ql ? money(ql.lineTotal) : '…'}</span>
+                        <button className="btn sm ghost" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label={t('Remove', 'حذف')}><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty>{t('Scan or tap items to add them.', 'امسح الأصناف أو اضغط عليها لإضافتها.')}</Empty>
+            )}
+            <div className="grid k2" style={{ gap: 8 }}>
+              <Select value={serviceTypeId} onChange={(e) => setServiceTypeId(e.target.value)} aria-label={t('Service type', 'نوع الخدمة')}>
+                <option value="">{t('Service: standard', 'الخدمة: عادي')}</option>
+                {data.services.filter((s) => s.charge > 0 || s.lead_days != null).map((s) => <option key={s.id} value={s.id}>{L(s)}{s.charge ? ` +${s.charge_kind === 'percent' ? `${s.charge}%` : money(s.charge)}` : ''}</option>)}
+              </Select>
+              <Select value={agentId} onChange={(e) => setAgentId(e.target.value)} aria-label={t('Agent', 'الوكيل')}>
+                <option value="">{t('No agent', 'بدون وكيل')}</option>
+                {data.agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </Select>
+              {canDiscount ? (
+                <div className="row" style={{ gap: 4 }}>
+                  <input className="input" type="number" min={0} data-testid="order-discount" placeholder={t('Discount', 'الخصم')} aria-label={t('Discount on sale', 'خصم على الفاتورة')} value={orderDiscount.amount} onChange={(e) => setOrderDiscount({ ...orderDiscount, amount: e.target.value })} />
+                  <select className="input" style={{ width: 74 }} value={orderDiscount.kind} onChange={(e) => setOrderDiscount({ ...orderDiscount, kind: e.target.value as 'percent' | 'fixed' })} aria-label={t('Discount type', 'نوع الخصم')}>
+                    <option value="fixed">{t('QAR', 'ر.ق')}</option>
+                    <option value="percent">%</option>
+                  </select>
+                </div>
+              ) : null}
+              {customer && cust.data && cust.data.balance > 0 ? (
+                <input className="input" type="number" min={0} max={cust.data.balance} data-testid="use-points" placeholder={t(`Use points (up to ${cust.data.balance})`, `استخدم النقاط (حتى ${cust.data.balance})`)} aria-label={t('Points to use', 'النقاط المستخدمة')} value={points} onChange={(e) => setPoints(e.target.value)} />
+              ) : null}
+              {customer && cust.data?.addresses.length && !lines.some((l) => l.kind === 'thobe') ? (
+                <Select value={deliver} onChange={(e) => setDeliver(e.target.value)} aria-label={t('Delivery', 'التوصيل')}>
+                  <option value="">{t('Hand over now', 'التسليم الآن')}</option>
+                  {cust.data.addresses.map((a) => <option key={a.id} value={a.id}>{t('Deliver to', 'التوصيل إلى')} {a.label} · {a.area}</option>)}
+                </Select>
+              ) : null}
+            </div>
+            <TextArea placeholder={t('Notes on the sale', 'ملاحظات على الفاتورة')} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ minHeight: 44 }} />
+            {quoteError ? <div className="note error">{quoteError}</div> : null}
+            {q?.stockError ? <div className="note error">{errorMessage(new ApiError(q.stockError.code, 400, q.stockError))}</div> : null}
+            {q ? (
+              <div className="stack" style={{ gap: 4 }}>
+                <div className="sum-row"><span className="secondary">{t('Subtotal', 'المجموع')}</span><span>{money(q.subtotal)}</span></div>
+                {q.orderDiscount ? <div className="sum-row"><span className="secondary">{t('Discount', 'الخصم')}</span><span>−{money(q.orderDiscount)}</span></div> : null}
+                {q.serviceCharge ? <div className="sum-row"><span className="secondary">{t('Service', 'الخدمة')}</span><span>{money(q.serviceCharge)}</span></div> : null}
+                {q.deliveryFee ? <div className="sum-row"><span className="secondary">{t('Delivery', 'التوصيل')}</span><span>{money(q.deliveryFee)}</span></div> : null}
+                {q.pointsUsed ? <div className="sum-row"><span className="secondary">{t('Points', 'النقاط')}</span><span>−{money(q.pointsUsed)}</span></div> : null}
+                <div className="sum-row total"><span>{t('Total', 'الإجمالي')}</span><span data-testid="cart-total">{money(q.total)}</span></div>
+                {q.tax ? <div className="sum-row small muted"><span>{t('Includes tax', 'شامل الضريبة')}</span><span>{money(q.tax)}</span></div> : null}
+                {q.expectedDelivery ? <div className="small muted">{t('Thobes ready by', 'الثياب جاهزة في')} {date(q.expectedDelivery)}</div> : null}
+                {customer && q.pointsToEarn ? <div className="small muted">{t(`Earns ${q.pointsToEarn} points`, `يكسب ${q.pointsToEarn} نقطة`)}</div> : null}
+              </div>
+            ) : null}
+            <div className="grid k2" style={{ gap: 8 }}>
+              <button className="btn secondary" data-testid="save-draft" disabled={!lines.length || save.isPending} onClick={() => save.mutate('draft')}>{t('Save draft', 'حفظ مسودة')}</button>
+              <button className="btn secondary" data-testid="save-quotation" disabled={!lines.length || save.isPending} onClick={() => save.mutate('quotation')}>{t('Quotation', 'عرض سعر')}</button>
+            </div>
+            {mode !== 'draft' && mode !== 'quotation' ? (
+              <button className="btn big-btn" data-testid="pay" disabled={!q || Boolean(quoteError) || Boolean(q.stockError) || Boolean(reg.data && !reg.data.open && reg.data.required)} onClick={() => setPaying(true)}>
+                {t('Pay', 'الدفع')} {q ? money(q.total) : ''}
+              </button>
+            ) : null}
+            {lines.length ? <button className="btn ghost sm" onClick={reset}>{t('Clear', 'مسح الفاتورة')}</button> : null}
+          </div>
+          {staff && !can('pos.discount') ? <div className="small muted">{t('Prices and discounts can be changed by a manager.', 'يمكن للمدير تغيير الأسعار والخصومات.')}</div> : null}
+        </div>
+      </div>
+
+      {sizeFor ? (
+        <Modal title={L(sizeFor)} onClose={() => setSizeFor(null)}>
+          <div className="chips">
+            {sizeFor.sizes.map((s) => {
+              const left = sizeFor.stock ? sizeFor.stock[s] ?? 0 : null;
+              return (
+                <button key={s} className="chip" data-testid={`size-${s}`} onClick={() => addProduct(sizeFor, s)} disabled={left !== null && left <= 0}>
+                  {s}{left !== null ? <span className="small muted"> · {num(left)}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </Modal>
+      ) : null}
+      {paying && q ? <PayModal total={q.total} allowPartial={Boolean(customer)} busy={sell.isPending} onClose={() => setPaying(false)} onPay={(p) => sell.mutate(p)} /> : null}
+      {measure ? (
+        <MeasureModal memberId={measure.id} memberName={measure.name} previous={measure.latest} onClose={() => setMeasure(null)} onSaved={() => qc.invalidateQueries({ queryKey: ['customer', customer?.id] })} />
+      ) : null}
+    </div>
+  );
+}

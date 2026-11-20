@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { db } from '../db.js';
 import { fail, getSettings, need, newToken, sha256 } from '../lib.js';
-import { AnyStaff, CurrentStaff, Managers, OwnerOnly, ROLES, audit, hashPassword, verifyPassword, type Role, type StaffUser } from '../staff.js';
+import { AnyStaff, AuditGuard, CurrentStaff, OwnerOnly, PERMISSIONS, audit, hashPassword, verifyPassword, type Role, type StaffUser } from '../staff.js';
 
 import { rateLimit } from '../ratelimit.js';
 
@@ -35,7 +35,8 @@ export class AdminCoreController {
     const token = newToken();
     await db.pool.query(`insert into staff_sessions (token_hash, staff_id, expires_at) values ($1, $2, now() + ($3 || ' hours')::interval)`, [sha256(token), user.id, String(SESSION_HOURS)]);
     await db.pool.query('update staff_users set last_login_at = now(), failed_logins = 0, locked_until = null where id = $1', [user.id]);
-    return { token, staff: { id: user.id, email: user.email, name: user.name, role: user.role, branch_id: user.branch_id } };
+    const role = await db.one<{ permissions: string[]; name_en: string; name_ar: string }>('select permissions, name_en, name_ar from roles where id = $1', [user.role]);
+    return { token, staff: { id: user.id, email: user.email, name: user.name, role: user.role, branch_id: user.branch_id, language: user.language, permissions: role?.permissions ?? [], role_en: role?.name_en, role_ar: role?.name_ar } };
   }
 
   @Post('auth/logout')
@@ -50,6 +51,16 @@ export class AdminCoreController {
   @UseGuards(AnyStaff)
   me(@CurrentStaff() staff: StaffUser) {
     return staff;
+  }
+
+  /** Each staff member picks the admin's language (Arabic or English). */
+  @Post('me/language')
+  @HttpCode(200)
+  @UseGuards(AnyStaff)
+  async setLanguage(@CurrentStaff() me: StaffUser, @Body() body: { language?: string }) {
+    if (!['ar', 'en'].includes(String(body?.language))) fail('invalid_language');
+    await db.pool.query('update staff_users set language = $2 where id = $1', [me.id, body.language]);
+    return { ok: true };
   }
 
   @Post('me/password')
@@ -97,17 +108,18 @@ export class AdminCoreController {
         [String(settings.points.warn_days)],
       ),
       db.many(
-        `select o.id, o.number, o.stage, o.expected_delivery, c.name as customer_name from orders o join customers c on c.id = o.customer_id
+        `select o.id, o.number, o.stage, o.expected_delivery, coalesce(c.name, o.walk_in_name) as customer_name from orders o left join customers c on c.id = o.customer_id
           where o.stage not in ('pending_payment','payment_failed','delivered','cancelled','out_for_delivery','ready')
             and o.expected_delivery is not null and o.expected_delivery <= (now() at time zone 'Asia/Qatar')::date + 1
           order by o.expected_delivery limit 20`,
       ),
       db.many(
-        `select o.id, o.number, o.total::float as total, c.name as customer_name,
-                (o.total - coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0))::float as due
-           from orders o join customers c on c.id = o.customer_id
+        `select o.id, o.number, o.total::float as total, coalesce(c.name, o.walk_in_name) as customer_name,
+                (paid.amount - coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0))::float as due
+           from orders o left join customers c on c.id = o.customer_id
+           cross join lateral (select coalesce(sum(p.amount),0) as amount from payments p where p.order_id = o.id and p.status = 'paid') paid
           where o.stage = 'cancelled' and o.paid_at is not null
-            and o.total > coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0)
+            and paid.amount > coalesce((select sum(amount) from refunds r where r.order_id = o.id), 0)
           order by o.created_at limit 20`,
       ),
     ]);
@@ -118,24 +130,25 @@ export class AdminCoreController {
   @UseGuards(OwnerOnly)
   staff() {
     return db.many(
-      `select u.id, u.email, u.name, u.role, u.active, u.branch_id, b.name_en as branch_name, u.created_at, u.last_login_at
-         from staff_users u left join branches b on b.id = u.branch_id order by u.active desc, u.role, u.name`,
+      `select u.id, u.email, u.name, u.phone, u.role, r.name_en as role_en, r.name_ar as role_ar, u.active, u.branch_id, b.name_en as branch_name, b.name_ar as branch_name_ar,
+              u.language, u.created_at, u.last_login_at
+         from staff_users u join roles r on r.id = u.role left join branches b on b.id = u.branch_id order by u.active desc, u.role, u.name`,
     );
   }
 
   @Post('staff')
   @UseGuards(OwnerOnly)
-  async addStaff(@CurrentStaff() me: StaffUser, @Body() body: { email: string; name: string; role: Role; password: string; branchId?: string | null }) {
+  async addStaff(@CurrentStaff() me: StaffUser, @Body() body: { email: string; name: string; role: Role; password: string; branchId?: string | null; phone?: string; language?: string }) {
     const email = String(need(body?.email, 'email')).trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail('invalid_email');
-    if (!ROLES.includes(body.role)) fail('invalid_role');
+    if (!(await roleExists(body.role))) fail('invalid_role');
     const password = String(need(body.password, 'password'));
     if (password.length < 10) fail('password_too_short');
     const exists = await db.one('select 1 from staff_users where email = $1', [email]);
     if (exists) fail('email_taken');
     const u = await db.one(
-      'insert into staff_users (email, name, role, branch_id, password_hash) values ($1,$2,$3,$4,$5) returning id, email, name, role',
-      [email, String(need(body.name, 'name')).trim(), body.role, body.branchId || null, await hashPassword(password)],
+      'insert into staff_users (email, name, role, branch_id, password_hash, phone, language) values ($1,$2,$3,$4,$5,$6,$7) returning id, email, name, role',
+      [email, String(need(body.name, 'name')).trim(), body.role, body.branchId || null, await hashPassword(password), body.phone ? String(body.phone).trim().slice(0, 30) : null, body.language === 'en' ? 'en' : 'ar'],
     );
     await audit(me, 'create', 'staff', u!.id, { email, role: body.role });
     return u;
@@ -143,17 +156,18 @@ export class AdminCoreController {
 
   @Patch('staff/:id')
   @UseGuards(OwnerOnly)
-  async updateStaff(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() body: { name?: string; role?: Role; active?: boolean; password?: string; branchId?: string | null }) {
+  async updateStaff(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() body: { name?: string; role?: Role; active?: boolean; password?: string; branchId?: string | null; phone?: string | null }) {
     const u = await db.one('select * from staff_users where id = $1', [id]);
     if (!u) throw new NotFoundException({ code: 'not_found' });
     if (id === me.id && (body.active === false || (body.role && body.role !== 'owner'))) fail('cannot_demote_self');
-    if (body.role && !ROLES.includes(body.role)) fail('invalid_role');
+    if (body.role && !(await roleExists(body.role))) fail('invalid_role');
     if (body.password !== undefined && String(body.password).length < 10) fail('password_too_short');
     await db.pool.query(
       `update staff_users set name = coalesce($2, name), role = coalesce($3, role), active = coalesce($4, active),
               branch_id = case when $5::boolean then $6::uuid else branch_id end,
-              password_hash = coalesce($7, password_hash) where id = $1`,
-      [id, body.name ?? null, body.role ?? null, body.active ?? null, body.branchId !== undefined, body.branchId || null, body.password ? await hashPassword(body.password) : null],
+              password_hash = coalesce($7, password_hash),
+              phone = case when $8::boolean then $9 else phone end where id = $1`,
+      [id, body.name ?? null, body.role ?? null, body.active ?? null, body.branchId !== undefined, body.branchId || null, body.password ? await hashPassword(body.password) : null, body.phone !== undefined, body.phone ? String(body.phone).trim().slice(0, 30) : null],
     );
     if (body.active === false || body.password) await db.pool.query('delete from staff_sessions where staff_id = $1', [id]);
     if (body.password) await db.pool.query('update staff_users set failed_logins = 0, locked_until = null where id = $1', [id]);
@@ -161,12 +175,77 @@ export class AdminCoreController {
     return { ok: true };
   }
 
+  /* ---------- roles (الصلاحيات) ---------- */
+
+  @Get('roles')
+  @UseGuards(AnyStaff)
+  roles() {
+    return db.many(`select r.*, (select count(*)::int from staff_users u where u.role = r.id and u.active) as staff_count from roles r order by r.builtin desc, r.created_at`);
+  }
+
+  @Get('permissions')
+  @UseGuards(AnyStaff)
+  permissions() {
+    return PERMISSIONS;
+  }
+
+  @Post('roles')
+  @UseGuards(OwnerOnly)
+  async addRole(@CurrentStaff() me: StaffUser, @Body() b: { name_en?: string; name_ar?: string; permissions?: string[] }) {
+    const name_en = String(need(b?.name_en, 'name_en')).trim().slice(0, 40);
+    const name_ar = String(need(b?.name_ar, 'name_ar')).trim().slice(0, 40);
+    let id = name_en.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'role';
+    for (let i = 2; await roleExists(id); i++) id = `${id.replace(/-\d+$/, '')}-${i}`;
+    await db.pool.query('insert into roles (id, name_en, name_ar, permissions) values ($1,$2,$3,$4)', [id, name_en, name_ar, cleanPerms(b.permissions)]);
+    await audit(me, 'create', 'role', id, b);
+    return { id };
+  }
+
+  @Patch('roles/:id')
+  @UseGuards(OwnerOnly)
+  async updateRole(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: { name_en?: string; name_ar?: string; permissions?: string[] }) {
+    const r = await db.one('select * from roles where id = $1', [id]);
+    if (!r) throw new NotFoundException({ code: 'not_found' });
+    // The owner role always keeps every permission, so nobody can lock the business out.
+    if (id === 'owner' && b.permissions !== undefined) fail('owner_role_fixed');
+    await db.pool.query('update roles set name_en = coalesce($2, name_en), name_ar = coalesce($3, name_ar), permissions = coalesce($4, permissions) where id = $1', [
+      id,
+      b.name_en ? String(b.name_en).trim().slice(0, 40) : null,
+      b.name_ar ? String(b.name_ar).trim().slice(0, 40) : null,
+      b.permissions !== undefined ? cleanPerms(b.permissions) : null,
+    ]);
+    await audit(me, 'update', 'role', id, b);
+    return { ok: true };
+  }
+
+  @Post('roles/:id/delete')
+  @HttpCode(200)
+  @UseGuards(OwnerOnly)
+  async deleteRole(@CurrentStaff() me: StaffUser, @Param('id') id: string) {
+    const r = await db.one('select builtin, (select count(*)::int from staff_users u where u.role = roles.id) as n from roles where id = $1', [id]);
+    if (!r) throw new NotFoundException({ code: 'not_found' });
+    if (r.builtin) fail('role_builtin');
+    if (r.n > 0) fail('role_in_use');
+    await db.pool.query('delete from roles where id = $1', [id]);
+    await audit(me, 'delete', 'role', id);
+    return { ok: true };
+  }
+
   @Get('audit')
-  @UseGuards(Managers)
+  @UseGuards(AuditGuard)
   auditLog(@Query('entity') entity?: string, @Query('limit') limit?: string) {
     return db.many(
       `select id, staff_name, action, entity, entity_id, data, at from audit_log where ($1::text is null or entity = $1) order by at desc limit $2`,
       [entity ?? null, Math.min(Number(limit ?? 200), 500)],
     );
   }
+}
+
+async function roleExists(id: unknown) {
+  return Boolean(typeof id === 'string' && id && (await db.one('select 1 from roles where id = $1', [id])));
+}
+
+function cleanPerms(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map(String).filter((p) => (PERMISSIONS as readonly string[]).includes(p)))];
 }

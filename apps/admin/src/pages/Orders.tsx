@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Download, Search } from 'lucide-react';
+import { ArrowRight, Download } from 'lucide-react';
 import { api, downloadCsv, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { SHOP_FLOW, STAGES, STAGE_LABEL, THOBE_FLOW, date, stageLabel, dateTime, money, phone, todayQatar } from '../lib/format';
-import { Empty, Field, Input, Loading, Modal, PageHead, StageBadge, Tabs, useToast } from '../ui';
+import { SHOP_FLOW, STAGES, STAGE_LABEL, THOBE_FLOW, channelLabel, date, stageLabel, dateTime, money, phone, todayQatar } from '../lib/format';
+import { t } from '../lib/i18n';
+import { Empty, Field, Input, Loading, Modal, PageHead, SearchBox, StageBadge, Tabs, useToast } from '../ui';
 
 export type OrderRow = {
   id: string;
@@ -20,6 +21,8 @@ export type OrderRow = {
   thobe_count: number;
   item_count: number;
   next_appointment: string | null;
+  channel: string;
+  balance: number;
 };
 
 const BOARD = ['confirmed', 'measured', 'cutting', 'stitching', 'quality', 'ready', 'out_for_delivery'] as const;
@@ -40,13 +43,13 @@ export default function Orders() {
   const { can } = useAuth();
   const orders = useQuery({
     queryKey: ['orders', view === 'list' ? stage : '', q],
-    queryFn: () => api<OrderRow[]>(`/orders?${new URLSearchParams({ ...(view === 'list' && stage ? { stage } : {}), ...(q ? { q } : {}) })}`),
+    queryFn: () => api<OrderRow[]>(`/orders?${new URLSearchParams({ ...(view === 'list' && stage ? { stage } : {}), ...(q ? { q } : {}), ...(view === 'board' ? { board: '1' } : {}) })}`),
     refetchInterval: 30_000,
   });
   const move = useMutation({
     mutationFn: ({ id, to }: { id: string; to: string; thobes: boolean }) => api(`/orders/${id}/stage`, { body: { stage: to } }),
     onSuccess: (_, v) => {
-      toast(`Moved to ${stageLabel(v.to, v.thobes)}. The customer was notified.`);
+      toast(t(`Moved to ${stageLabel(v.to, v.thobes)}. The customer was notified.`, `نُقل إلى ${stageLabel(v.to, v.thobes)} وأُبلغ العميل.`));
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['overview'] });
     },
@@ -70,33 +73,30 @@ export default function Orders() {
 
   return (
     <div className="stack lg">
-      <PageHead title="Orders" sub="Move orders through the workshop. Each move notifies the customer.">
-        <div className="row" style={{ position: 'relative' }}>
-          <Search size={16} style={{ position: 'absolute', left: 12, color: 'var(--muted)' }} />
-          <input className="input" data-testid="orders-search" placeholder="Order #, name or phone" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 34, width: 240 }} />
-        </div>
-        <Tabs value={view} onChange={setView} options={[['board', 'Board'], ['list', 'List']]} />
-        {can('owner', 'manager') ? (
+      <PageHead title={t('Workshop orders', 'طلبات الورشة')} sub={t('Move orders through the workshop. Each move notifies the customer.', 'انقل الطلبات بين مراحل الورشة. كل نقل يُبلّغ العميل.')}>
+        <SearchBox value={q} onChange={setQ} placeholder={t('Order #, name or phone', 'رقم الطلب أو الاسم أو الجوال')} width={240} testid="orders-search" />
+        <Tabs value={view} onChange={setView} options={[['board', t('Board', 'اللوحة')], ['list', t('List', 'القائمة')]]} />
+        {can('reports') ? (
           <button className="btn secondary" data-testid="export-orders" onClick={() => setExportOpen(true)}>
-            <Download size={16} /> Export
+            <Download size={16} /> {t('Export', 'تصدير')}
           </button>
         ) : null}
       </PageHead>
       {exportOpen ? (
         <Modal
-          title="Export paid orders"
+          title={t('Export paid orders', 'تصدير الطلبات المدفوعة')}
           onClose={() => setExportOpen(false)}
           footer={
             <>
-              <button className="btn secondary" onClick={() => setExportOpen(false)}>Cancel</button>
-              <button className="btn" data-testid="export-orders-go" disabled={exporting} onClick={exportCsv}>Download CSV</button>
+              <button className="btn secondary" onClick={() => setExportOpen(false)}>{t('Cancel', 'إلغاء')}</button>
+              <button className="btn" data-testid="export-orders-go" disabled={exporting} onClick={exportCsv}>{t('Download CSV', 'تحميل CSV')}</button>
             </>
           }
         >
-          <div className="note">Orders paid between these dates, with totals, discounts and refunds. Opens in Excel or Google Sheets.</div>
+          <div className="note">{t('Orders paid between these dates, with totals, discounts and refunds. Opens in Excel or Google Sheets.', 'الطلبات المدفوعة بين هذين التاريخين مع الإجماليات والخصومات والاستردادات. تُفتح في Excel أو Google Sheets.')}</div>
           <div className="grid k2">
-            <Field label="From"><Input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></Field>
-            <Field label="To"><Input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></Field>
+            <Field label={t('From', 'من')}><Input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></Field>
+            <Field label={t('To', 'إلى')}><Input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></Field>
           </div>
         </Modal>
       ) : null}
@@ -121,22 +121,23 @@ export default function Orders() {
                       <Link to={`/orders/${o.id}`} className="stack" style={{ gap: 2 }}>
                         <div className="row spread">
                           <span className="strong">#{o.number}</span>
-                          <span className="small muted">{o.thobe_count ? `${o.thobe_count} thobe${o.thobe_count > 1 ? 's' : ''}` : `${o.item_count} items`}</span>
+                          <span className="small muted">{o.thobe_count ? t(`${o.thobe_count} thobe${o.thobe_count > 1 ? 's' : ''}`, `${o.thobe_count} ثوب`) : t(`${o.item_count} items`, `${o.item_count} صنف`)}</span>
                         </div>
                         <span className="small secondary">{o.customer_name}</span>
                         <span className={`small ${late ? 'error-text' : 'muted'}`}>
-                          {o.stage === 'measured' && o.next_appointment ? `Measuring ${dateTime(o.next_appointment)}` : o.expected_delivery ? `Due ${date(o.expected_delivery)}` : ''}
+                          {o.stage === 'measured' && o.next_appointment ? `${t('Measuring', 'القياس')} ${dateTime(o.next_appointment)}` : o.expected_delivery ? `${t('Due', 'التسليم')} ${date(o.expected_delivery)}` : ''}
                         </span>
+                        {o.balance > 0 ? <span className="small tone-gold">{t('Balance', 'المتبقي')} {money(o.balance)}</span> : null}
                       </Link>
-                      {next && can('owner', 'manager', 'tailor') ? (
+                      {next && can('workshop') ? (
                         <button className="btn sm secondary" data-testid={`advance-${o.number}`} disabled={move.isPending} onClick={() => move.mutate({ id: o.id, to: next, thobes: o.thobe_count > 0 })}>
-                          {stageLabel(next, o.thobe_count > 0)} <ArrowRight size={14} />
+                          {stageLabel(next, o.thobe_count > 0)} <ArrowRight size={14} className="flip-rtl" />
                         </button>
                       ) : null}
                     </div>
                   );
                 })}
-                {!list.length ? <div className="small muted" style={{ padding: 6 }}>Nothing here</div> : null}
+                {!list.length ? <div className="small muted" style={{ padding: 6 }}>{t('Nothing here', 'لا شيء هنا')}</div> : null}
               </div>
             );
           })}
@@ -146,7 +147,7 @@ export default function Orders() {
           <div className="chips">
             {['', ...STAGES, 'cancelled'].map((s) => (
               <button key={s || 'all'} className={`chip ${stage === s ? 'on' : ''}`} onClick={() => setParams(s ? { stage: s } : {})}>
-                {s ? STAGE_LABEL[s] : 'All'}
+                {s ? STAGE_LABEL[s] : t('All', 'الكل')}
               </button>
             ))}
           </div>
@@ -155,12 +156,13 @@ export default function Orders() {
               <table>
                 <thead>
                   <tr>
-                    <th>Order</th>
-                    <th>Customer</th>
-                    <th>Stage</th>
-                    <th>Placed</th>
-                    <th>Due</th>
-                    <th className="right">Total</th>
+                    <th>{t('Order', 'الطلب')}</th>
+                    <th>{t('Customer', 'العميل')}</th>
+                    <th>{t('Channel', 'القناة')}</th>
+                    <th>{t('Stage', 'المرحلة')}</th>
+                    <th>{t('Placed', 'التاريخ')}</th>
+                    <th>{t('Due', 'التسليم')}</th>
+                    <th className="right">{t('Total', 'الإجمالي')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -168,9 +170,10 @@ export default function Orders() {
                     <tr key={o.id} className="click" onClick={() => nav(`/orders/${o.id}`)}>
                       <td className="strong">#{o.number}</td>
                       <td>
-                        <div>{o.customer_name}</div>
-                        <div className="small muted">{phone(o.phone)}</div>
+                        <div>{o.customer_name ?? t('Walk-in', 'زبون عابر')}</div>
+                        <div className="small muted">{o.phone ? phone(o.phone) : ''}</div>
                       </td>
+                      <td className="small">{channelLabel(o.channel)}</td>
                       <td><StageBadge stage={o.stage} thobes={o.thobe_count > 0} /></td>
                       <td className="small">{date(o.created_at)}</td>
                       <td className="small">{date(o.expected_delivery)}</td>
@@ -180,7 +183,7 @@ export default function Orders() {
                 </tbody>
               </table>
             ) : (
-              <Empty>No orders match.</Empty>
+              <Empty>{t('No orders match.', 'لا طلبات مطابقة.')}</Empty>
             )}
           </div>
         </div>

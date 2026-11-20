@@ -32,6 +32,8 @@ export default function ProductScreen() {
   if (!product) return <Screen header={<Header bag />}><ErrorState message={t('common.error')} retryLabel={t('common.retry')} onRetry={() => cat.refetch()} /></Screen>;
 
   const pts = (rates?.points_per_product ?? 0) * qty;
+  const unit = product.sale_price ?? product.price;
+  const soldOut = product.in_stock === false || Boolean(size && product.sold_out_sizes?.includes(size));
   const add = async () => {
     if (!signedIn) return setGate(true);
     if (product.sizes.length && !size) return setMsg({ tone: 'error', text: t('product.pickSize') });
@@ -53,8 +55,8 @@ export default function ProductScreen() {
     <Screen
       header={<Header bag />}
       footer={
-        <BottomBar label={t('common.qty', { n: qty })} value={f.money(product.price * qty)}>
-          <Button testID="product-add" label={t('product.add')} onPress={add} loading={busy} style={{ minWidth: 190 }} />
+        <BottomBar label={t('common.qty', { n: qty })} value={f.money(unit * qty)}>
+          <Button testID="product-add" label={soldOut ? t('product.soldOut') : t('product.add')} onPress={add} loading={busy} disabled={soldOut} style={{ minWidth: 190 }} />
         </BottomBar>
       }
       contentStyle={{ gap: 16 }}
@@ -64,7 +66,12 @@ export default function ProductScreen() {
         <Text variant="overline">{f.name(cat.data?.categories.find((c) => c.id === product.category)) || product.category}</Text>
         <Text variant="h1">{f.name(product)}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Text variant="price">{f.money(product.price)}</Text>
+          <Text variant="price">{f.money(unit)}</Text>
+          {product.sale_price != null ? (
+            <Text variant="small" color={colors.textMuted} style={{ textDecorationLine: 'line-through' }}>
+              {f.money(product.price)}
+            </Text>
+          ) : null}
           <Pill gold icon={Star} label={t('product.earn', { pts })} />
         </View>
       </View>
@@ -73,7 +80,13 @@ export default function ProductScreen() {
           <Text variant="overline">{t('product.size')}</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {product.sizes.map((s) => (
-              <Chip key={s} testID={`size-${s}`} label={s} selected={size === s} onPress={() => { setSize(s); setMsg(null); }} />
+              <Chip
+                key={s}
+                testID={`size-${s}`}
+                label={product.sold_out_sizes?.includes(s) ? `${s} · ${t('product.soldOut')}` : s}
+                selected={size === s}
+                onPress={() => { setSize(s); setMsg(null); }}
+              />
             ))}
           </View>
         </View>
