@@ -10,15 +10,14 @@ import { BottomBar, Header, Screen } from './layout';
 import { ThobeArt } from './art';
 import { colors } from '@/theme/tokens';
 
-export const STEP_ROUTES = ['/design/collar', '/design/fabric', '/design/colour', '/design/for-whom', '/design/measure'] as const;
+export const STEP_ROUTES = ['/design/collar', '/design/fabric', '/design/for-whom', '/design/measure'] as const;
 
 export function useDesignData() {
   const cat = useCatalogue();
   const { state } = useBuilder();
   const collar = cat.data?.collars.find((c) => c.id === state.collarId) ?? null;
   const fabric = cat.data?.fabrics.find((x) => x.id === state.fabricId) ?? null;
-  const colour = cat.data?.colours.find((c) => c.id === state.colourId) ?? null;
-  return { cat, collar, fabric, colour };
+  return { cat, collar, fabric, colour: null as { hex: string; name_en: string; name_ar: string } | null };
 }
 
 export function ThobePreview({ height = 200 }: { height?: number }) {

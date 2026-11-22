@@ -6,7 +6,7 @@ import { api, downloadCsv, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
 import { channelLabel, date, dateTime, methodLabel, money, phone, stageLabel } from '../lib/format';
-import { BranchSelect, DateRange, Empty, Field, Input, Loading, Modal, PageHead, SearchBox, StageBadge, Tabs, lastDays, openPrint, useToast, type Range } from '../ui';
+import { BranchSelect, DateRange, Empty, Field, Input, Loading, Modal, PageHead, SearchBox, StageBadge, Tabs, lastDays, openPrint, useToast, type Range, confirmSave } from '../ui';
 
 type SaleRow = {
   id: string;
@@ -92,7 +92,7 @@ export function Sales() {
                 </thead>
                 <tbody>
                   {list.data.rows.map((r) => (
-                    <tr key={r.id} className="click" onClick={() => nav(`/orders/${r.id}`)} data-testid={`sale-${r.number}`}>
+                    <tr key={r.id} className="click" onClick={() => nav(`/orders/${r.id}?view=invoice`)} data-testid={`sale-${r.number}`}>
                       <td className="strong">#{r.number}</td>
                       <td className="small">{dateTime(r.created_at)}</td>
                       <td>{r.customer_name ?? <span className="muted">{t('Walk-in', 'زبون عابر')}</span>}<div className="small muted num">{r.phone ? phone(r.phone) : ''}</div></td>
@@ -265,7 +265,7 @@ export function Shipments() {
         ) : <Empty>{t('No shipments here.', 'لا شحنات هنا.')}</Empty>}
       </div>
       {edit ? (
-        <Modal title={`${t('Shipment', 'الشحنة')} #${edit.number}`} onClose={() => setEdit(null)} footer={<><button className="btn secondary" onClick={() => setEdit(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" onClick={() => save.mutate()}>{t('Save', 'حفظ')}</button></>}>
+        <Modal title={`${t('Shipment', 'الشحنة')} #${edit.number}`} onClose={() => setEdit(null)} footer={<><button className="btn secondary" onClick={() => setEdit(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" onClick={async () => (await confirmSave()) && save.mutate()}>{t('Save', 'حفظ')}</button></>}>
           <div className="grid k2">
             <Field label={t('Courier', 'شركة التوصيل / المندوب')}><Input value={edit.shipping.courier} onChange={(e) => setEdit({ ...edit, shipping: { ...edit.shipping, courier: e.target.value } })} /></Field>
             <Field label={t('Tracking number', 'رقم التتبع')}><Input value={edit.shipping.tracking} onChange={(e) => setEdit({ ...edit, shipping: { ...edit.shipping, tracking: e.target.value } })} /></Field>

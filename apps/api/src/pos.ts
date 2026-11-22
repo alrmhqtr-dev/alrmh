@@ -87,6 +87,46 @@ export async function groupPercent(customerId: string | null, client: Queryable 
 /** Tax already inside a price. */
 export const taxInside = (amount: number, percent: number) => (percent > 0 ? round2((amount * percent) / (100 + percent)) : 0);
 
+/* ---------- thobes ---------- */
+
+/** Cloth for one thobe: 0.5 to 20 metres, to the centimetre. */
+export function cleanMetres(v: unknown, fallback: number) {
+  if (v === null || v === undefined || v === '') return round2(fallback);
+  const m = Number(v);
+  if (!Number.isFinite(m) || m < 0.5 || m > 20) fail('invalid_metres');
+  return round2(m);
+}
+
+/**
+ * The options of one thobe as they are sold: collar, cuff (when the business has cuff styles) and
+ * cloth, priced by the metre. Without a length the cloth's usual metres per thobe are used.
+ */
+export async function thobeOptions(o: { collarId?: string | null; cuffId?: string | null; fabricId?: string | null; metres?: unknown }, client: Queryable, needCuff = false) {
+  const collar = await db.one('select id, name_en, name_ar, shape, image_url from collars where id = $1 and active', [o.collarId ?? null], client);
+  const fabric = await db.one(
+    'select id, sku, name_en, name_ar, price::float as price, cost::float as cost, metres_per_thobe::float as metres, tax_rate_id from fabrics where id = $1 and active',
+    [o.fabricId ?? null],
+    client,
+  );
+  if (!collar || !fabric) fail('invalid_thobe_options');
+  let cuff = null;
+  if (o.cuffId) {
+    cuff = await db.one('select id, name_en, name_ar, image_url from cuffs where id = $1 and active', [o.cuffId], client);
+    if (!cuff) fail('invalid_thobe_options');
+  } else if (needCuff && (await db.one('select 1 from cuffs where active limit 1', [], client))) fail('cuff_required');
+  const metres = cleanMetres(o.metres, fabric.metres || 3.5);
+  return {
+    collar,
+    cuff,
+    fabric,
+    metres,
+    /** One thobe: metres × the cloth's price per metre. */
+    unit: round2(metres * fabric.price),
+    unitCost: round2(fabric.cost * metres),
+    snapshot: { collar, cuff, fabric: { id: fabric.id, name_en: fabric.name_en, name_ar: fabric.name_ar, price: fabric.price, per: 'metre' }, metres, colour: null },
+  };
+}
+
 /* ---------- stock ---------- */
 
 export type StockKey = { kind: 'product' | 'fabric'; id: string; size?: string | null };
@@ -122,7 +162,7 @@ export async function onlineBranchId(client: Queryable = db.pool) {
 type StockNeed = { kind: 'product' | 'fabric'; id: string; size: string; qty: number; name: string };
 
 /** What an order's lines take from stock: tracked products, and the cloth for each thobe. */
-export async function stockNeeds(lines: { kind: string; qty: number; productId?: string; size?: string | null; fabricId?: string; memberSize?: string }[], client: Queryable): Promise<StockNeed[]> {
+export async function stockNeeds(lines: { kind: string; qty: number; productId?: string; size?: string | null; fabricId?: string; metres?: number | null }[], client: Queryable): Promise<StockNeed[]> {
   const out = new Map<string, StockNeed>();
   for (const l of lines) {
     if (l.kind === 'product' && l.productId) {
@@ -134,10 +174,11 @@ export async function stockNeeds(lines: { kind: string; qty: number; productId?:
       out.set(key, cur);
     } else if (l.kind === 'thobe' && l.fabricId) {
       const f = await db.one('select id, name_en, track_stock, metres_per_thobe::float as m from fabrics where id = $1', [l.fabricId], client);
-      if (!f?.track_stock || !(f.m > 0)) continue;
+      const metres = l.metres ?? f?.m ?? 0;
+      if (!f?.track_stock || !(metres > 0)) continue;
       const key = `fabric:${f.id}:`;
       const cur = out.get(key) ?? { kind: 'fabric' as const, id: f.id, size: '', qty: 0, name: f.name_en };
-      cur.qty = round2(cur.qty + f.m * l.qty);
+      cur.qty = round2(cur.qty + metres * l.qty);
       out.set(key, cur);
     }
   }
@@ -165,7 +206,7 @@ export async function takeStockForOrder(orderId: string, client: Queryable, staf
   const branchId = o.branch_id ?? (hasThobes ? o.address?.branchId : null) ?? (await onlineBranchId(client));
   if (!branchId) return;
   const needs = await stockNeeds(
-    items.map((i) => ({ kind: i.kind, qty: i.qty, productId: i.snapshot.product?.id, size: i.snapshot.size, fabricId: i.snapshot.thobe?.fabric?.id })),
+    items.map((i) => ({ kind: i.kind, qty: i.qty, productId: i.snapshot.product?.id, size: i.snapshot.size, fabricId: i.snapshot.thobe?.fabric?.id, metres: i.snapshot.thobe?.metres ?? null })),
     client,
   );
   for (const n of needs) await moveStock(client, { branchId, kind: n.kind, id: n.id, size: n.size, qty: -n.qty, reason: 'sale', refType: 'order', refId: orderId, staffId });
@@ -220,7 +261,7 @@ export async function registerTotals(registerId: string, client: Queryable = db.
 
 export type SaleLineInput =
   | { kind: 'product'; productId: string; size?: string | null; qty: number; price?: number | null; discount?: number | null }
-  | { kind: 'thobe'; memberId: string; collarId: string; fabricId: string; colourId?: string | null; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
+  | { kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
 
 export type SaleInput = {
   branchId?: string;
@@ -231,8 +272,6 @@ export type SaleInput = {
   /** A discount on the whole sale, given at the counter. */
   orderDiscount?: { kind: 'percent' | 'fixed'; amount: number } | null;
   points?: number | null;
-  serviceTypeId?: string | null;
-  agentId?: string | null;
   notes?: string | null;
   /** Deliver a shop-only sale to one of the customer's addresses. */
   deliveryAddressId?: string | null;
@@ -292,12 +331,9 @@ export async function priceSale(input: SaleInput, staff: StaffUser, client: Quer
       if (!customer) fail('customer_required');
       const member = await db.one('select id, name, relation, size from family_members where id = $1 and customer_id = $2', [raw.memberId, customer.id], client);
       if (!member) fail('member_not_found');
-      const collar = await db.one('select id, name_en, name_ar, shape from collars where id = $1 and active', [raw.collarId], client);
-      const fabric = await db.one('select id, sku, name_en, name_ar, price::float as price, cost::float as cost, metres_per_thobe::float as metres, tax_rate_id from fabrics where id = $1 and active', [raw.fabricId], client);
-      if (!collar || !fabric) fail('invalid_thobe_options');
-      const colour = raw.colourId ? await db.one('select c.id, c.name_en, c.name_ar, c.hex from colours c join fabric_colours fc on fc.colour_id = c.id and fc.fabric_id = $2 where c.id = $1', [raw.colourId, fabric.id], client) : null;
-      if (raw.colourId && !colour) fail('invalid_thobe_options');
-      const unit = override !== null ? round2(Math.max(0, override)) : fabric.price;
+      const th = await thobeOptions(raw, client, true);
+      const fabric = th.fabric;
+      const unit = override !== null ? round2(Math.max(0, override)) : th.unit;
       const auto = override !== null ? { amount: 0, label: null } : unitDiscount({ kind: 'thobe', fabricId: fabric.id, price: unit }, rules, gp);
       const lineDiscount = round2(Math.min(unit * qty, auto.amount * qty + Math.max(0, manual ?? 0)));
       const measured = await db.one('select 1 from measurements where member_id = $1 limit 1', [member.id], client);
@@ -305,17 +341,17 @@ export async function priceSale(input: SaleInput, staff: StaffUser, client: Quer
         kind: 'thobe',
         qty,
         unitPrice: unit,
-        listPrice: fabric.price,
+        listPrice: th.unit,
         discount: lineDiscount,
         discountLabel: auto.label,
         lineTotal: round2(unit * qty - lineDiscount),
-        unitCost: round2(fabric.cost * fabric.metres),
+        unitCost: th.unitCost,
         taxPercent: fabric.tax_rate_id ? taxes.get(fabric.tax_rate_id) ?? 0 : 0,
         points: tier.points_per_thobe * qty,
-        thobe: { collar, fabric: { id: fabric.id, name_en: fabric.name_en, name_ar: fabric.name_ar, price: fabric.price }, colour },
+        thobe: th.snapshot,
         member: { id: member.id, name: member.name, relation: member.relation, size: member.size },
         measured: Boolean(measured),
-        remarks: raw.remarks ? String(raw.remarks).slice(0, 200) : null,
+        remarks: raw.remarks ? String(raw.remarks).slice(0, 1000) : null,
       });
     } else fail('invalid_kind');
   }
@@ -329,9 +365,6 @@ export async function priceSale(input: SaleInput, staff: StaffUser, client: Quer
   }
   const hasThobes = out.some((l) => l.kind === 'thobe');
   const settings = await getSettings(client);
-  const service = input.serviceTypeId ? await db.one('select id, name_en, name_ar, charge_kind, charge::float as charge, lead_days from service_types where id = $1 and active', [input.serviceTypeId], client) : null;
-  if (input.serviceTypeId && !service) fail('service_type_not_found');
-  const serviceCharge = service ? round2(service.charge_kind === 'percent' ? ((subtotal - orderDiscount) * service.charge) / 100 : service.charge) : 0;
 
   let address: any = { pickup: true, counter: !hasThobes, branchId: branch.id, label: branch.name_en, label_ar: branch.name_ar, line1: branch.address_en, line1_ar: branch.address_ar, area: '', city: 'Doha' };
   let deliveryFee = 0;
@@ -343,7 +376,7 @@ export async function priceSale(input: SaleInput, staff: StaffUser, client: Quer
     address = a;
     deliveryFee = settings.delivery_fee;
   }
-  const due = round2(subtotal - orderDiscount + serviceCharge + deliveryFee);
+  const due = round2(subtotal - orderDiscount + deliveryFee);
   let points = 0;
   let balance = 0;
   if (customer) {
@@ -358,7 +391,7 @@ export async function priceSale(input: SaleInput, staff: StaffUser, client: Quer
   // Prices include tax: the tax part shrinks in step with any discount on the whole sale.
   const lineTax = out.reduce((a, l) => a + taxInside(l.lineTotal, l.taxPercent), 0);
   const tax = subtotal > 0 ? round2((lineTax * (subtotal - orderDiscount)) / subtotal) : 0;
-  const lead = service?.lead_days ?? settings.lead_working_days;
+  const lead = settings.lead_working_days;
   return {
     branch,
     customer,
@@ -366,8 +399,6 @@ export async function priceSale(input: SaleInput, staff: StaffUser, client: Quer
     hasThobes,
     subtotal,
     orderDiscount,
-    service,
-    serviceCharge,
     deliveryFee,
     address,
     pointsUsed: points,

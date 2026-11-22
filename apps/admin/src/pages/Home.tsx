@@ -1,3 +1,4 @@
+import { AlertList, useAlerts } from '../alerts';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
@@ -33,6 +34,7 @@ type Dashboard = {
 };
 
 export default function Home() {
+  const alerts = useAlerts();
   const { staff, can } = useAuth();
   const nav = useNavigate();
   const [branch, setBranch] = useState('');
@@ -52,11 +54,29 @@ export default function Home() {
         .concat(ds.series.rows.some((r) => !r.branch_id) && !branch ? [{ id: 'online', name: t('Online (app)', 'أونلاين (التطبيق)'), values: days.map((dd) => ds.series.rows.filter((r) => !r.branch_id && r.day === dd).reduce((a, r) => a + r.net, 0)) }] : [])
     : [];
 
+  // The owner account starts as "Owner" until its holder adds a real name.
+  const unnamed = !staff?.name || staff.name === 'Owner';
+  const first = staff?.name.split(' ')[0] ?? '';
   return (
     <div className="stack lg">
-      <PageHead title={t(`Hello, ${staff?.name.split(' ')[0]}`, `أهلًا ${staff?.name.split(' ')[0]}`)} sub={t("What's happening across AlRmh today.", 'ما يحدث في الرمح اليوم.')}>
+      <PageHead
+        title={unnamed ? t('Hello', 'أهلًا') : t(`Hello, ${first}`, `أهلًا ${first}`)}
+        sub={unnamed ? (
+          <>
+            {t("What's happening across AlRmh today.", 'ما يحدث في الرمح اليوم.')}{' '}
+            <button className="linklike strong" data-testid="add-your-name" onClick={() => window.dispatchEvent(new Event('alrmh:account'))}>{t('Add your name', 'أضف اسمك')}</button>
+          </>
+        ) : t("What's happening across AlRmh today.", 'ما يحدث في الرمح اليوم.')}
+      >
         <BranchSelect value={branch} onChange={setBranch} testid="home-branch" />
       </PageHead>
+
+      {alerts.data && alerts.data.count ? (
+        <div className="card pad stack" data-testid="home-alerts">
+          <div className="row spread"><h2>{t('Needs attention', 'يحتاج انتباهك')}</h2><span className="badge gold">{alerts.data.count}</span></div>
+          <AlertList a={alerts.data} />
+        </div>
+      ) : null}
 
       <Tiles items={groups().map((g) => ({ to: g.items.length === 1 ? g.items[0].to : `/m/${g.key}`, label: g.label, icon: g.icon, testid: `tile-${g.key}`, hidden: Boolean(g.perms && !can(...g.perms)) }))} />
 

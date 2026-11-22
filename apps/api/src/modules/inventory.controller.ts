@@ -115,6 +115,27 @@ export class InventoryController {
     });
   }
 
+  /**
+   * New stock arriving: metres of cloth or a quantity of a product, added to a branch.
+   * Turns on stock tracking for the item if it was off.
+   */
+  @Post('stock/receive')
+  @UseGuards(ProductsGuard)
+  async receive(@CurrentStaff() me: StaffUser, @Body() b: { branchId?: string; kind?: 'product' | 'fabric'; id?: string; size?: string | null; qty?: number; note?: string }) {
+    const branch = await db.one('select id from branches where id = $1 and active', [uuidOrNull(b?.branchId)]);
+    if (!branch) fail('branch_not_found');
+    const it = await item({ kind: b?.kind as any, id: String(b?.id ?? ''), size: b?.size ?? null, qty: 0 });
+    const q = round2(Number(b?.qty));
+    if (!Number.isFinite(q) || q <= 0 || q > 1_000_000) fail('invalid_qty');
+    if (b.kind === 'product' && !Number.isInteger(q)) fail('invalid_qty');
+    return db.tx(async (c) => {
+      await c.query(`update ${b.kind === 'fabric' ? 'fabrics' : 'products'} set track_stock = true where id = $1 and not track_stock`, [it.id]);
+      await moveStock(c, { branchId: branch.id, kind: b.kind as 'product' | 'fabric', id: it.id, size: it.size, qty: q, reason: 'received', unitCost: it.cost, staffId: me.id, note: b.note ? String(b.note).slice(0, 200) : null });
+      await audit(me, 'receive', 'stock', it.id, { branch: branch.id, kind: b.kind, size: it.size, qty: q }, c);
+      return { level: await stockLevel({ kind: b.kind as 'product' | 'fabric', id: it.id, size: it.size }, branch.id, c) };
+    });
+  }
+
   /* ---------- transfers between branches ---------- */
 
   @Get('stock/transfers')

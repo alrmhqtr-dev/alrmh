@@ -117,6 +117,11 @@ jobs:
         env:
           API: http://localhost:4000
 
+      - name: Counter checks (cloth by the metre, cuffs, home windows, reminders)
+        run: python3 apps/api/scripts/counter.py
+        env:
+          API: http://localhost:4000
+
       - name: API log
         if: failure()
         run: cat /tmp/api.log

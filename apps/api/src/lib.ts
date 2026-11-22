@@ -12,7 +12,10 @@ export type Settings = {
   measurements_valid_months: number;
   voucher_valid_days: number;
   points: { expiry_months: number; warn_days: number };
-  home_visit: { open_minute: number; close_minute: number; slot_minutes: number; capacity: number; closed_weekdays: number[] };
+  /** Home visits are booked into fixed windows (minutes after midnight, Doha time); capacity is visits per window. */
+  home_visit: { windows: { start: number; end: number }[]; capacity: number; closed_weekdays: number[] };
+  /** Reminders about thobe orders: staff alerts the day before they are due, and a customer nudge after they wait this many days. */
+  pickup: { remind_after_days: number };
   support: { whatsapp: string; phone: string };
   /** The business as printed on invoices and receipts. */
   company: { name_en: string; name_ar: string; cr_number: string; tax_number: string; phone: string; email: string; address_en: string; address_ar: string; logo_url: string | null; currency: string };
@@ -34,10 +37,11 @@ export const DEFAULT_SETTINGS: Settings = {
   measurements_valid_months: 12,
   voucher_valid_days: 30,
   points: { expiry_months: 12, warn_days: 30 },
-  home_visit: { open_minute: 960, close_minute: 1320, slot_minutes: 90, capacity: 1, closed_weekdays: [5] },
+  home_visit: { windows: [{ start: 540, end: 780 }, { start: 960, end: 1140 }, { start: 1140, end: 1320 }], capacity: 1, closed_weekdays: [5] },
+  pickup: { remind_after_days: 3 },
   support: { whatsapp: '+97455550000', phone: '+97444440000' },
   company: { name_en: 'AlRmh', name_ar: 'الرمح', cr_number: '', tax_number: '', phone: '', email: '', address_en: 'Doha, Qatar', address_ar: 'الدوحة، قطر', logo_url: null, currency: 'QAR' },
-  invoice: { prefix: 'AR-', footer_en: 'Thank you for choosing AlRmh.', footer_ar: 'شكرًا لاختياركم الرمح.', terms_en: '', terms_ar: '', show_tax: false, show_points: true, show_qr: true },
+  invoice: { prefix: '', footer_en: 'Thank you for choosing AlRmh.', footer_ar: 'شكرًا لاختياركم الرمح.', terms_en: '', terms_ar: '', show_tax: false, show_points: true, show_qr: true },
   barcode: { width_mm: 50, height_mm: 25, per_row: 1, show_name: true, show_price: true, show_business: true, show_size: true },
   printing: { receipt_paper: '80mm', receipt_copies: 1, invoice_paper: 'a4', ticket_paper: '80mm', ticket_copies: 1, auto_print: true },
   whatsapp: {

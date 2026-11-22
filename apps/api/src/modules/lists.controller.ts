@@ -5,7 +5,7 @@ import { AnyStaff, CurrentStaff, audit, hasPerm, type Permission, type StaffUser
 
 /**
  * The simple lists behind the POS: brands, units, warranties, tax rates, variations,
- * customer groups, expense categories, agents, service types, suppliers and discounts.
+ * customer groups, expense categories, suppliers and discounts.
  * Each has the same four actions; who may change it depends on the list.
  */
 type Kind = 'text' | 'textOpt' | 'money' | 'moneySigned' | 'percent' | 'int' | 'intOpt' | 'bool' | 'textArray' | 'uuidOpt' | 'enum' | 'dateTimeOpt';
@@ -65,32 +65,6 @@ export const RESOURCES: Record<string, Resource> = {
     perm: ['expenses', 'manage'],
     fields: { name_en: { kind: 'text', required: true, max: 60 }, name_ar: { kind: 'text', required: true, max: 60 }, active: { kind: 'bool' } },
     list: `select e.*, (select count(*)::int from expenses x where x.category_id = e.id) as expense_count from expense_categories e order by e.active desc, e.name_en`,
-  },
-  agents: {
-    table: 'agents',
-    perm: ['staff'],
-    fields: { name: { kind: 'text', required: true, max: 80 }, phone: { kind: 'textOpt', max: 30 }, email: { kind: 'textOpt', max: 120 }, commission_percent: { kind: 'percent' }, active: { kind: 'bool' } },
-    list: `select a.*, a.commission_percent::float as commission_percent,
-             (select count(*)::int from orders o where o.agent_id = a.id and o.stage <> 'cancelled') as sales_count,
-             (select coalesce(sum(total),0)::float from orders o where o.agent_id = a.id and o.stage <> 'cancelled') as sales_total
-             from agents a order by a.active desc, a.name`,
-  },
-  'service-types': {
-    table: 'service_types',
-    perm: ['manage'],
-    fields: {
-      name_en: { kind: 'text', required: true, max: 60 },
-      name_ar: { kind: 'text', required: true, max: 60 },
-      charge_kind: { kind: 'enum', values: ['fixed', 'percent'] },
-      charge: { kind: 'money' },
-      lead_days: { kind: 'intOpt', min: 0, max: 90 },
-      active: { kind: 'bool' },
-      sort: { kind: 'int', min: 0, max: 1000 },
-    },
-    list: `select s.*, s.charge::float as charge from service_types s order by s.active desc, s.sort, s.name_en`,
-    validate: (r) => {
-      if (r.charge_kind === 'percent' && r.charge > 100) fail('invalid_number', { field: 'charge' });
-    },
   },
   suppliers: {
     table: 'suppliers',

@@ -6,7 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
 import { date } from '../lib/format';
-import { BranchSelect, Field, Input, Loading, Modal, PageHead, Select, useToast } from '../ui';
+import { BranchSelect, Field, Input, Loading, Modal, PageHead, Select, useToast, confirmSave } from '../ui';
 
 type Member = { id: string; email: string; name: string; phone: string | null; role: string; role_en: string; role_ar: string; active: boolean; branch_id: string | null; branch_name: string | null; branch_name_ar: string | null; language: 'ar' | 'en'; created_at: string; last_login_at: string | null };
 type Role = { id: string; name_en: string; name_ar: string; permissions: string[] };
@@ -60,7 +60,7 @@ export default function Staff() {
         <Modal
           title={edit.isNew ? t('Add user', 'إضافة مستخدم') : `${t('Edit', 'تعديل')} ${edit.name}`}
           onClose={() => setEdit(null)}
-          footer={<><button className="btn secondary" onClick={() => setEdit(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" data-testid="staff-save" disabled={save.isPending} onClick={() => save.mutate()}>{t('Save', 'حفظ')}</button></>}
+          footer={<><button className="btn secondary" onClick={() => setEdit(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" data-testid="staff-save" disabled={save.isPending} onClick={async () => (!edit!.id || (await confirmSave())) && save.mutate()}>{t('Save', 'حفظ')}</button></>}
         >
           <div className="grid k2">
             <Field label={t('Name', 'الاسم')}><Input data-testid="staff-name" value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>

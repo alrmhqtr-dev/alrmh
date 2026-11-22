@@ -115,8 +115,9 @@ export class AdminSetupController {
   @Get('catalogue')
   @UseGuards(AnyStaff)
   async catalogue() {
-    const [collars, fabrics, colours, links, products, categories] = await Promise.all([
+    const [collars, cuffs, fabrics, colours, links, products, categories] = await Promise.all([
       db.many('select * from collars order by sort, name_en'),
+      db.many('select * from cuffs order by sort, name_en'),
       db.many('select * from fabrics order by sort, name_en'),
       db.many('select * from colours order by sort, name_en'),
       db.many('select * from fabric_colours'),
@@ -127,6 +128,7 @@ export class AdminSetupController {
       categories,
       collarShapes: COLLAR_SHAPES,
       collars,
+      cuffs,
       colours,
       products,
       fabrics: fabrics.map((f) => ({ ...f, colour_ids: links.filter((l) => l.fabric_id === f.id).map((l) => l.colour_id) })),
@@ -195,12 +197,13 @@ export class AdminSetupController {
   async addCollar(@CurrentStaff() me: StaffUser, @Body() b: any) {
     if (b?.shape !== undefined && !COLLAR_SHAPES.includes(b.shape)) fail('invalid_shape');
     const id = await uniqueId('collars', b?.name_en ?? '');
-    await db.pool.query('insert into collars (id, name_en, name_ar, shape, active, sort) values ($1,$2,$3,$4,$5,(select coalesce(max(sort),0)+1 from collars))', [
+    await db.pool.query('insert into collars (id, name_en, name_ar, shape, active, image_url, sort) values ($1,$2,$3,$4,$5,$6,(select coalesce(max(sort),0)+1 from collars))', [
       id,
       text(b.name_en, 'name_en'),
       text(b.name_ar, 'name_ar'),
       b.shape ?? 'classic-qatari',
       b.active !== false,
+      imageOrNull(b.image_url),
     ]);
     await audit(me, 'create', 'collar', id, b);
     return { id };
@@ -214,9 +217,39 @@ export class AdminSetupController {
       name_en: b.name_en !== undefined ? text(b.name_en, 'name_en') : undefined,
       name_ar: b.name_ar !== undefined ? text(b.name_ar, 'name_ar') : undefined,
       shape: b.shape,
+      image_url: b.image_url !== undefined ? imageOrNull(b.image_url) : undefined,
       active: typeof b.active === 'boolean' ? b.active : undefined,
     });
     await audit(me, 'update', 'collar', id, b);
+    return { ok: true };
+  }
+
+  /** Cuff styles (الكبك), chosen by picture at the counter and in the app. */
+  @Post('cuffs')
+  @UseGuards(Managers)
+  async addCuff(@CurrentStaff() me: StaffUser, @Body() b: any) {
+    const id = await uniqueId('cuffs', b?.name_en ?? '');
+    await db.pool.query('insert into cuffs (id, name_en, name_ar, image_url, active, sort) values ($1,$2,$3,$4,$5,(select coalesce(max(sort),0)+1 from cuffs))', [
+      id,
+      text(b?.name_en, 'name_en'),
+      text(b?.name_ar, 'name_ar'),
+      imageOrNull(b?.image_url),
+      b?.active !== false,
+    ]);
+    await audit(me, 'create', 'cuff', id, b);
+    return { id };
+  }
+
+  @Patch('cuffs/:id')
+  @UseGuards(Managers)
+  async updateCuff(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() b: any) {
+    await patchRow('cuffs', id, {
+      name_en: b.name_en !== undefined ? text(b.name_en, 'name_en') : undefined,
+      name_ar: b.name_ar !== undefined ? text(b.name_ar, 'name_ar') : undefined,
+      image_url: b.image_url !== undefined ? imageOrNull(b.image_url) : undefined,
+      active: typeof b.active === 'boolean' ? b.active : undefined,
+    });
+    await audit(me, 'update', 'cuff', id, b);
     return { ok: true };
   }
 
@@ -346,13 +379,19 @@ export class AdminSetupController {
     }
     if (b.home_visit) {
       const h = b.home_visit;
-      if (h.open_minute !== undefined) next.home_visit.open_minute = int(h.open_minute, 'open_minute', 0, 1440);
-      if (h.close_minute !== undefined) next.home_visit.close_minute = int(h.close_minute, 'close_minute', 0, 1440);
-      if (h.slot_minutes !== undefined) next.home_visit.slot_minutes = int(h.slot_minutes, 'slot_minutes', 15, 240);
+      if (h.windows !== undefined) {
+        if (!Array.isArray(h.windows) || !h.windows.length || h.windows.length > 8) fail('invalid_windows');
+        const ws = h.windows.map((w: any) => ({ start: int(w?.start, 'start', 0, 1440), end: int(w?.end, 'end', 0, 1440) })).sort((a: any, b: any) => a.start - b.start);
+        for (const [i, w] of ws.entries()) {
+          if (w.end <= w.start) fail('close_before_open');
+          if (i > 0 && w.start < ws[i - 1].end) fail('windows_overlap');
+        }
+        next.home_visit.windows = ws;
+      }
       if (h.capacity !== undefined) next.home_visit.capacity = int(h.capacity, 'capacity', 1, 50);
       if (h.closed_weekdays !== undefined) next.home_visit.closed_weekdays = cleanWeekdays(h.closed_weekdays);
-      if (next.home_visit.close_minute <= next.home_visit.open_minute) fail('close_before_open');
     }
+    if (b.pickup?.remind_after_days !== undefined) next.pickup.remind_after_days = int(b.pickup.remind_after_days, 'remind_after_days', 1, 30);
     if (b.support) {
       if (b.support.whatsapp !== undefined) next.support.whatsapp = text(b.support.whatsapp, 'whatsapp', 20);
       if (b.support.phone !== undefined) next.support.phone = text(b.support.phone, 'phone', 20);

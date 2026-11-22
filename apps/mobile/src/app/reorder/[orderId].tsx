@@ -12,12 +12,12 @@ import { BottomBar, Header, Screen } from '@/ui/layout';
 import { ThobeArt } from '@/ui/art';
 import { colors } from '@/theme/tokens';
 
-type Line = { key: string; memberId: string; memberName: string; collarId: string; fabricId: string; colourId: string | null; qty: number; editing: boolean };
+type Line = { key: string; memberId: string; memberName: string; collarId: string; cuffId: string | null; fabricId: string; metres: number | null; qty: number; editing: boolean };
 
 /**
  * Repeat a past order. Each thobe keeps the person's saved measurements; the
- * customer sets how many, and can change the type (collar) and the cloth.
- * There is no colour choice here.
+ * customer sets how many, and can change the type (collar), cuff and cloth. The cloth
+ * length stays the earlier order's (cloth is priced by the metre).
  */
 export default function Reorder() {
   const { orderId } = useLocalSearchParams<{ orderId: string }>();
@@ -42,7 +42,8 @@ export default function Reorder() {
             memberName: i.snapshot.member?.name ?? '',
             collarId: i.snapshot.thobe.collar?.id,
             fabricId: i.snapshot.thobe.fabric?.id,
-            colourId: i.snapshot.thobe.colour?.id ?? null,
+            cuffId: i.snapshot.thobe.cuff?.id ?? null,
+            metres: Number(i.snapshot.thobe.metres) || null,
             qty: i.qty,
             editing: false,
           })),
@@ -57,18 +58,25 @@ export default function Reorder() {
   const collarOf = (l: Line) => cat.data!.collars.find((x) => x.id === l.collarId);
   const chosen = lines.filter((l) => l.qty > 0);
   const count = chosen.reduce((a, l) => a + l.qty, 0);
-  const total = chosen.reduce((a, l) => a + (fabricOf(l)?.price ?? 0) * l.qty, 0);
+  // One thobe: its metres × the cloth's price per metre (the usual length when the order had none).
+  const priceOf = (l: Line) => {
+    const x = fabricOf(l);
+    return x ? Math.round((l.metres ? l.metres * x.price_per_metre : x.price) * 100) / 100 : 0;
+  };
+  const total = chosen.reduce((a, l) => a + priceOf(l) * l.qty, 0);
   const pts = (rates?.points_per_thobe ?? 0) * count;
   const unavailable = chosen.some((l) => !fabricOf(l) || !collarOf(l));
+  const cuffs = cat.data.cuffs ?? [];
+  const cuffOf = (l: Line) => cuffs.find((x) => x.id === l.cuffId);
 
   const place = async () => {
     setBusy(true);
     setError(null);
     try {
       for (const l of chosen) {
-        // The original colour goes with it only when the cloth is unchanged and still offers it.
-        const keepColour = l.colourId && fabricOf(l)?.colour_ids.includes(l.colourId) ? l.colourId : undefined;
-        await api('/basket/items', { body: { kind: 'thobe', collarId: l.collarId, fabricId: l.fabricId, colourId: keepColour, memberId: l.memberId, measureMethod: 'saved', qty: l.qty } });
+        await api('/basket/items', {
+          body: { kind: 'thobe', collarId: l.collarId, cuffId: cuffOf(l)?.id ?? null, fabricId: l.fabricId, metres: l.metres, memberId: l.memberId, measureMethod: 'saved', qty: l.qty },
+        });
       }
       await Promise.all([qc.invalidateQueries({ queryKey: ['basket'] }), qc.invalidateQueries({ queryKey: ['me'] })]);
       router.replace('/checkout');
@@ -100,11 +108,11 @@ export default function Reorder() {
         return (
           <Card key={l.key} testID={`reorder-line-${idx}`}>
             <View style={{ flexDirection: 'row', gap: 16, padding: 16, alignItems: 'center' }}>
-              <ThobeArt fill={cat.data!.colours.find((c) => c.id === l.colourId)?.hex} collar={collar?.shape ?? l.collarId} height={84} />
+              <ThobeArt collar={collar?.shape ?? l.collarId} height={84} />
               <View style={{ flex: 1, gap: 4 }}>
-                <Text variant="title">{collar ? f.name(collar) : t('again.unavailable')}</Text>
+                <Text variant="title">{collar ? `${f.name(collar)}${cuffOf(l) ? ` · ${f.name(cuffOf(l))}` : ''}` : t('again.unavailable')}</Text>
                 <Text variant="small" color={colors.textSecondary}>
-                  {fabric ? `${f.name(fabric)} · ${f.money(fabric.price)}` : t('again.unavailable')}
+                  {fabric ? `${f.name(fabric)}${l.metres ? ` · ${l.metres} ${t('again.metres')}` : ''} · ${f.money(priceOf(l))}` : t('again.unavailable')}
                 </Text>
                 <Text variant="small" color={colors.textSecondary}>
                   {t('again.forLine', { name: member?.name ?? l.memberName, date: member?.measured_at ? f.date(member.measured_at) : '—' })}
@@ -129,12 +137,24 @@ export default function Reorder() {
                       <Chip key={c.id} testID={`retype-${idx}-${c.id}`} label={f.name(c)} selected={l.collarId === c.id} onPress={() => update(l.key, { collarId: c.id })} />
                     ))}
                   </ScrollView>
+                  {cuffs.length ? (
+                    <>
+                      <Text variant="smallStrong" style={{ marginTop: 4 }}>
+                        {t('again.cuff')}
+                      </Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                        {cuffs.map((c) => (
+                          <Chip key={c.id} testID={`recuff-${idx}-${c.id}`} label={f.name(c)} selected={l.cuffId === c.id} onPress={() => update(l.key, { cuffId: c.id })} />
+                        ))}
+                      </ScrollView>
+                    </>
+                  ) : null}
                   <Text variant="smallStrong" style={{ marginTop: 4 }}>
                     {t('again.cloth')}
                   </Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                     {cat.data!.fabrics.map((x) => (
-                      <Chip key={x.id} testID={`refabric-${idx}-${x.id}`} label={`${f.name(x)} · ${f.money(x.price)}`} selected={l.fabricId === x.id} onPress={() => update(l.key, { fabricId: x.id })} />
+                      <Chip key={x.id} testID={`refabric-${idx}-${x.id}`} label={`${f.name(x)} · ${f.money(l.metres ? Math.round(l.metres * x.price_per_metre * 100) / 100 : x.price)}`} selected={l.fabricId === x.id} onPress={() => update(l.key, { fabricId: x.id })} />
                     ))}
                   </ScrollView>
                 </View>

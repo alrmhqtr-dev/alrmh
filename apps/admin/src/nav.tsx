@@ -2,7 +2,6 @@ import {
   BarChart3,
   Barcode,
   Boxes,
-  CalendarDays,
   ClipboardList,
   Contact,
   Download,
@@ -35,12 +34,11 @@ import {
   Users,
   Wallet,
   Gem,
-  Shirt,
   ArrowLeftRight,
   Lightbulb,
   BadgePercent,
   Building2,
-  Handshake,
+  Home,
   KeyRound,
   ArrowDownCircle,
   Layers,
@@ -56,7 +54,7 @@ export const quickNav = (): NavItem[] => [
   { to: '/', label: t('Home', 'الرئيسية'), icon: LayoutDashboard, testid: 'nav-overview' },
   { to: '/pos', label: t('POS screen', 'شاشة البيع'), icon: ShoppingCart, perms: ['pos'], testid: 'nav-pos' },
   { to: '/orders', label: t('Workshop orders', 'طلبات الورشة'), icon: ClipboardList, testid: 'nav-orders' },
-  { to: '/appointments', label: t('Appointments', 'المواعيد'), icon: CalendarDays, testid: 'nav-appointments' },
+  { to: '/appointments', label: t('Home orders', 'الطلبات المنزلية'), icon: Home, testid: 'nav-appointments' },
   { to: '/customers', label: t('Customers', 'العملاء'), icon: Users, testid: 'nav-customers' },
 ];
 
@@ -68,7 +66,6 @@ export const groups = (): NavGroup[] => [
     icon: UserCog,
     items: [
       { to: '/staff', label: t('Users', 'المستخدمين'), icon: Users, perms: ['staff'] },
-      { to: '/agents', label: t('Agents', 'الوكلاء'), icon: Handshake },
       { to: '/roles', label: t('Permissions', 'الصلاحيات'), icon: Shield, perms: ['staff'] },
     ],
   },
@@ -79,7 +76,7 @@ export const groups = (): NavGroup[] => [
     items: [
       { to: '/tailor', label: t('Take measurements', 'أخذ المقاسات'), icon: Ruler },
       { to: '/tailor/measurements', label: t('Customer measurements', 'مقاسات العملاء'), icon: Printer },
-      { to: '/appointments', label: t('Appointments', 'المواعيد'), icon: CalendarDays },
+      { to: '/appointments', label: t('Home orders', 'الطلبات المنزلية'), icon: Home },
     ],
   },
   {
@@ -187,7 +184,6 @@ export const groups = (): NavGroup[] => [
       { to: '/settings/barcode', label: t('Barcode settings', 'إعدادات الباركود'), icon: Barcode },
       { to: '/printing', label: t('Receipt printers', 'طابعات الإيصالات'), icon: Printer },
       { to: '/tax-rates', label: t('Tax rates', 'معدلات الضرائب'), icon: Percent },
-      { to: '/service-types', label: t('Service types', 'أنواع الخدمة'), icon: Shirt },
       { to: '/settings/pos', label: t('Point of sale', 'نقطة البيع'), icon: ShoppingCart },
       { to: '/settings', label: t('Fees & rules (app)', 'الرسوم والقواعد (التطبيق)'), icon: KeyRound },
       { to: '/rewards', label: t('Rewards & coupons', 'المكافآت والقسائم'), icon: Gift },

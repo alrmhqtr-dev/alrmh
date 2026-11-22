@@ -30,11 +30,10 @@ export const COLLAR_SHAPES = ['classic-qatari', 'mandarin-band', 'round-neck', '
 export class CatalogueController {
   @Get('catalogue')
   async catalogue() {
-    const [collars, fabrics, colours, fabricColours, products, branches, settings, categories, tiers] = await Promise.all([
-      db.many('select id, name_en, name_ar, shape from collars where active order by sort'),
-      db.many('select id, name_en, name_ar, note_en, note_ar, price from fabrics where active order by sort'),
-      db.many('select id, name_en, name_ar, hex from colours order by sort'),
-      db.many('select fabric_id, colour_id from fabric_colours'),
+    const [collars, cuffs, fabrics, products, branches, settings, categories, tiers] = await Promise.all([
+      db.many('select id, name_en, name_ar, shape, image_url from collars where active order by sort'),
+      db.many('select id, name_en, name_ar, image_url from cuffs where active order by sort'),
+      db.many('select id, name_en, name_ar, note_en, note_ar, price::float as price_per_metre, metres_per_thobe::float as metres from fabrics where active order by sort'),
       db.many('select id, category, name_en, name_ar, description_en, description_ar, price, sizes, image_url, track_stock, brand_id from products where active and in_app order by sort'),
       db.many(
         `select id, name_en, name_ar, address_en, address_ar, phone, whatsapp, hours_en, hours_ar, closed_weekdays, lat, lng
@@ -46,8 +45,9 @@ export class CatalogueController {
     ]);
     return {
       collars,
-      fabrics: fabrics.map((f) => ({ ...f, colour_ids: fabricColours.filter((x) => x.fabric_id === f.id).map((x) => x.colour_id) })),
-      colours,
+      cuffs,
+      // Cloth is sold by the metre; `price` is one thobe at the cloth's usual length (staff set the exact metres at the visit).
+      fabrics: fabrics.map((f) => ({ ...f, price: round2(f.price_per_metre * (f.metres || 3.5)) })),
       categories,
       products: await shopView(products),
       branches,

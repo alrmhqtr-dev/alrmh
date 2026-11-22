@@ -17,9 +17,7 @@ export default function FabricStep() {
   const fabrics = cat.data?.fabrics ?? [];
 
   const pick = (id: string) => {
-    const next = fabrics.find((x) => x.id === id)!;
-    const colourOk = state.colourId && next.colour_ids.includes(state.colourId);
-    set({ fabricId: id, colourId: colourOk ? state.colourId : next.colour_ids.includes('ivory') ? 'ivory' : next.colour_ids[0] });
+    set({ fabricId: id, colourId: null });
   };
 
   return (
@@ -28,8 +26,8 @@ export default function FabricStep() {
       label={t('design.fabric')}
       priceLabel={f.name(fabric)}
       price={f.money(fabric?.price ?? 0)}
-      nextLabel={t('design.next', { step: t('design.colour') })}
-      onNext={() => router.push('/design/colour')}
+      nextLabel={t('design.next', { step: t('design.forWhom') })}
+      onNext={() => router.push('/design/for-whom')}
       nextDisabled={!state.fabricId}
     >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>

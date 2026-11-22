@@ -153,7 +153,7 @@ check("booking: a fresh hold blocks the slot", r.get("code") == "slot_taken", st
 sql(f"update appointments set created_at = now() - interval '31 minutes' where id = '{hold['id']}'")
 booked = book(tb, {"kind": "home", "addressId": ab, "memberId": mb, "startsAt": slot})
 check("booking: a lapsed hold frees the slot", booked.get("status") == "confirmed", str(booked))
-call("POST", "/basket/items", {"kind": "thobe", "collarId": "classic-qatari", "fabricId": "swiss-voile", "colourId": "ivory", "memberId": ma, "measureMethod": "home", "appointmentId": hold["id"]}, ta)
+call("POST", "/basket/items", {"kind": "thobe", "collarId": "classic-qatari", "fabricId": "swiss-voile", "memberId": ma, "measureMethod": "home", "appointmentId": hold["id"]}, ta)
 s, r, _ = call("POST", "/orders", {}, ta)
 confirmed = int(sql(f"select count(*) from appointments where kind = 'home' and starts_at = '{slot}' and status = 'confirmed'"))
 check("booking: checkout with a lapsed hold on a taken slot is refused", s == 400 and r.get("code") == "appointment_expired" and confirmed == 1, f"{s} {r} confirmed={confirmed}")
@@ -482,12 +482,13 @@ ms, as_ = home_setup(ts)
 tsid = call("GET", "/me", token=ts)[1]["id"]
 appt = book(ts, {"kind": "home", "addressId": as_, "memberId": ms, "startsAt": free_home_slots(ts)[4]})
 call("POST", f"/admin/members/{ms}/measurements", {"length_cm": 150, "shoulder_cm": 47, "chest_cm": 110, "waist_cm": 100, "sleeve_cm": 62, "neck_cm": 41, "cuff_cm": 24, "tailor_name": "Yousef", "method": "home"}, owner)
-lines = [{"collarId": "classic-qatari", "fabricId": "swiss-voile", "qty": 2}, {"collarId": "mandarin-band", "fabricId": "japanese-cotton", "qty": 1}]
+lines = [{"collarId": "classic-qatari", "cuffId": "single", "fabricId": "swiss-voile", "metres": 3.75, "qty": 2}, {"collarId": "mandarin-band", "cuffId": "double", "fabricId": "japanese-cotton", "qty": 1}]
 s, r, _ = call("POST", f"/admin/customers/{tsid}/orders", {"memberId": ms, "lines": lines, "delivery": "pickup", "appointmentId": appt["id"]}, owner)
 check("staff order: refused until the card-machine payment is confirmed", r.get("code") == "payment_not_confirmed", str(r))
 s, placed, _ = call("POST", f"/admin/customers/{tsid}/orders", {"memberId": ms, "lines": lines, "delivery": "pickup", "appointmentId": appt["id"], "paidByCard": True}, owner)
-fab = {f["id"]: f["price"] for f in cat["fabrics"]}
-expect = fab["swiss-voile"] * 2 + fab["japanese-cotton"]
+fab = {f["id"]: f for f in cat["fabrics"]}
+# Cloth by the metre: 3.75 m chosen for the first line, the cloth's usual length for the second.
+expect = round(fab["swiss-voile"]["price_per_metre"] * 3.75, 2) * 2 + round(fab["japanese-cotton"]["price_per_metre"] * fab["japanese-cotton"]["metres"], 2)
 mine = call("GET", "/orders", token=ts)[1]["active"]
 detail = call("GET", f"/orders/{placed.get('orderId')}", token=ts)[1]
 check("staff order: placed at the visit, priced from the cloth, in the customer's app at Measured, paid on the card machine",

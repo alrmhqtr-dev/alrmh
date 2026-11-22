@@ -5,26 +5,25 @@ import { Minus, Plus, Printer, Ruler, Send, Shirt, Trash2, UserPlus, X } from 'l
 import { ApiError, api, errorMessage, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
-import { date, methodLabel, money, money2, num, phone, RELATION } from '../lib/format';
+import { MEASURE_KEYS, date, measureLabel, methodLabel, money, money2, num, phone, RELATION } from '../lib/format';
 import { fill, receiptUrl, waLink, type Templates } from '../lib/whatsapp';
 import { Empty, Field, Input, Loading, Modal, Select, TextArea, openPrint, useToast } from '../ui';
 import { OpenRegisterForm, useRegister } from '../register';
 import { MeasureModal, type Measurement } from '../measure';
+import { ClothSelect, MetresInput, StylePicker, thobePrice, validMetres, type Cloth, type Style } from '../thobe-options';
 
 type Items = {
   branchId: string;
   branches: { id: string; name_en: string; name_ar: string }[];
   categories: { id: string; name_en: string; name_ar: string }[];
-  services: { id: string; name_en: string; name_ar: string; charge_kind: string; charge: number; lead_days: number | null }[];
-  agents: { id: string; name: string }[];
-  collars: { id: string; name_en: string; name_ar: string }[];
-  colours: { id: string; name_en: string; name_ar: string; hex: string }[];
+  collars: Style[];
+  cuffs: Style[];
   products: { id: string; sku: string; category: string; name_en: string; name_ar: string; price: number; sizes: string[]; image_url: string | null; track_stock: boolean; unit: string | null; stock: Record<string, number> | null }[];
-  fabrics: { id: string; sku: string; name_en: string; name_ar: string; price: number; colour_ids: string[]; stock: number | null; metres_per_thobe: number }[];
+  fabrics: (Cloth & { sku: string; stock: number | null })[];
 };
 type Line =
   | { key: string; kind: 'product'; productId: string; size?: string | null; qty: number; price?: number | null; discount?: number | null }
-  | { key: string; kind: 'thobe'; memberId: string; collarId: string; fabricId: string; colourId?: string | null; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
+  | { key: string; kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres: number; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
 type Cust = { id: string; name: string | null; phone: string };
 type CustomerFull = {
   id: string;
@@ -40,7 +39,6 @@ type Quote = {
   lines: any[];
   subtotal: number;
   orderDiscount: number;
-  serviceCharge: number;
   deliveryFee: number;
   pointsUsed: number;
   pointsBalance: number;
@@ -55,21 +53,65 @@ type SaleResult = { orderId: string; number: string; total: number; paid: number
 
 const key = () => Math.random().toString(36).slice(2);
 
-function CustomerPicker({ value, onPick, walkIn, setWalkIn }: { value: Cust | null; onPick: (c: Cust | null) => void; walkIn: { name: string; phone: string }; setWalkIn: (w: { name: string; phone: string }) => void }) {
-  const [q, setQ] = useState('');
-  const [adding, setAdding] = useState<{ name: string; phone: string } | null>(null);
+/** A new customer at the counter: name, mobile and all seven measurements, saved together. */
+function NewCustomerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (c: Cust) => void }) {
   const toast = useToast();
-  const found = useQuery({ queryKey: ['pos-customers', q], queryFn: () => api<Cust[]>(`/customers?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 });
-  const add = useMutation({
-    mutationFn: () => api<Cust & { existing: boolean }>('/customers', { body: adding }),
+  const [v, setV] = useState<Record<string, string>>({ name: '', phone: '', remarks: '', ...Object.fromEntries(MEASURE_KEYS.map((k) => [k, ''])) });
+  const set = (k: string, val: string) => setV((x) => ({ ...x, [k]: val }));
+  const save = useMutation({
+    mutationFn: () =>
+      api<Cust & { existing: boolean }>('/customers', {
+        body: { name: v.name.trim(), phone: v.phone, measurements: { ...Object.fromEntries(MEASURE_KEYS.map((k) => [k, Number(v[k])])), remarks: v.remarks.trim() || null } },
+      }),
     onSuccess: (c) => {
-      toast(c.existing ? t('This mobile already has an account. Selected it.', 'لهذا الرقم حساب مسبق. تم اختياره.') : t('Customer added.', 'تمت إضافة العميل.'));
-      onPick({ id: c.id, name: c.name, phone: c.phone });
-      setAdding(null);
-      setQ('');
+      toast(
+        c.existing
+          ? t('This mobile already has an account, so it was selected. Check their measurements before ordering.', 'لهذا الرقم حساب مسبق فتم اختياره. راجع مقاساته قبل الطلب.')
+          : t('Customer added with their measurements.', 'تمت إضافة العميل مع مقاساته.'),
+        c.existing ? 'error' : 'ok',
+      );
+      onSaved({ id: c.id, name: c.name, phone: c.phone });
     },
     onError: (e) => toast(errorMessage(e), 'error'),
   });
+  const measured = MEASURE_KEYS.every((k) => v[k].trim() !== '' && Number(v[k]) >= 0);
+  const ok = v.name.trim().length > 0 && v.phone.replace(/\D/g, '').length >= 8 && measured;
+  return (
+    <Modal
+      wide
+      title={t('New customer', 'عميل جديد')}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn secondary" onClick={onClose}>{t('Cancel', 'إلغاء')}</button>
+          <button className="btn" data-testid="pos-new-save" disabled={!ok || save.isPending} onClick={() => save.mutate()}>{t('Save customer', 'حفظ العميل')}</button>
+        </>
+      }
+    >
+      <div className="grid k2">
+        <Field label={t('Name', 'الاسم')}><Input data-testid="pos-new-name" value={v.name} onChange={(e) => set('name', e.target.value)} autoFocus /></Field>
+        <Field label={t('Mobile (8 digits)', 'الجوال (8 أرقام)')}><Input data-testid="pos-new-phone" dir="ltr" inputMode="tel" value={v.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
+      </div>
+      <div className="overline">{t('Measurements (cm)', 'المقاسات (سم)')}</div>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}>
+        {MEASURE_KEYS.map((k) => (
+          <Field key={k} label={measureLabel(k)}>
+            <Input data-testid={`pos-new-${k}`} type="number" inputMode="decimal" step="any" min={0} value={v[k]} onChange={(e) => set(k, e.target.value)} />
+          </Field>
+        ))}
+      </div>
+      <Field label={t('Remarks for the workshop', 'ملاحظات للورشة')}>
+        <TextArea className="input notes" value={v.remarks} maxLength={300} onChange={(e) => set('remarks', e.target.value)} />
+      </Field>
+    </Modal>
+  );
+}
+
+/** Existing or new customer: find an existing one by mobile or name, or add a new one with their measurements. */
+function CustomerPicker({ value, onPick, walkIn, setWalkIn }: { value: Cust | null; onPick: (c: Cust | null) => void; walkIn: { name: string; phone: string }; setWalkIn: (w: { name: string; phone: string }) => void }) {
+  const [q, setQ] = useState('');
+  const [adding, setAdding] = useState(false);
+  const found = useQuery({ queryKey: ['pos-customers', q], queryFn: () => api<Cust[]>(`/customers?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 });
   if (value)
     return (
       <div className="row spread" data-testid="pos-customer">
@@ -80,27 +122,13 @@ function CustomerPicker({ value, onPick, walkIn, setWalkIn }: { value: Cust | nu
         <button className="btn sm ghost" onClick={() => onPick(null)} aria-label={t('Remove customer', 'إزالة العميل')}><X size={16} /></button>
       </div>
     );
-  if (adding)
-    return (
-      <div className="stack" style={{ gap: 8 }}>
-        <div className="grid k2" style={{ gap: 8 }}>
-          <Input data-testid="pos-new-name" placeholder={t('Name', 'الاسم')} value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} autoFocus />
-          <Input data-testid="pos-new-phone" placeholder={t('Mobile (8 digits)', 'الجوال (8 أرقام)')} dir="ltr" inputMode="tel" value={adding.phone} onChange={(e) => setAdding({ ...adding, phone: e.target.value })} />
-        </div>
-        <div className="row">
-          <button className="btn sm secondary" onClick={() => setAdding(null)}>{t('Cancel', 'إلغاء')}</button>
-          <button className="btn sm" data-testid="pos-new-save" disabled={!adding.name.trim() || adding.phone.replace(/\D/g, '').length < 8 || add.isPending} onClick={() => add.mutate()}>{t('Add customer', 'إضافة العميل')}</button>
-        </div>
-      </div>
-    );
   return (
     <div className="stack" style={{ gap: 8 }}>
-      <div className="row" style={{ gap: 8 }}>
-        <Input data-testid="pos-customer-search" placeholder={t('Customer mobile or name', 'جوال العميل أو اسمه')} value={q} onChange={(e) => setQ(e.target.value)} />
-        <button className="btn sm secondary" data-testid="pos-add-customer" onClick={() => setAdding({ name: '', phone: /^\d+$/.test(q.replace(/\s/g, '')) ? q.replace(/\s/g, '') : '' })}>
-          <UserPlus size={15} /> {t('New', 'جديد')}
-        </button>
+      <div className="tabs" role="tablist" aria-label={t('Customer', 'العميل')}>
+        <button role="tab" aria-selected={!adding} className={!adding ? 'on' : ''} data-testid="pos-customer-old" onClick={() => setAdding(false)}>{t('Existing customer', 'عميل حالي')}</button>
+        <button role="tab" aria-selected={adding} className={adding ? 'on' : ''} data-testid="pos-add-customer" onClick={() => setAdding(true)}><UserPlus size={14} /> {t('New customer', 'عميل جديد')}</button>
       </div>
+      <Input data-testid="pos-customer-search" placeholder={t('Customer mobile or name', 'جوال العميل أو اسمه')} value={q} onChange={(e) => setQ(e.target.value)} />
       {q.trim().length >= 2 && found.data ? (
         <div className="card" style={{ maxHeight: 180, overflowY: 'auto' }}>
           {found.data.length ? (
@@ -111,7 +139,7 @@ function CustomerPicker({ value, onPick, walkIn, setWalkIn }: { value: Cust | nu
               </button>
             ))
           ) : (
-            <div className="small muted" style={{ padding: 10 }}>{t('No customer found. Add a new one.', 'لا يوجد عميل. أضف عميلًا جديدًا.')}</div>
+            <div className="small muted" style={{ padding: 10 }}>{t('No customer found. Choose New customer.', 'لا يوجد عميل. اختر عميل جديد.')}</div>
           )}
         </div>
       ) : (
@@ -120,6 +148,16 @@ function CustomerPicker({ value, onPick, walkIn, setWalkIn }: { value: Cust | nu
           <Input placeholder={t('Walk-in mobile (optional)', 'جوال الزبون (اختياري)')} dir="ltr" value={walkIn.phone} onChange={(e) => setWalkIn({ ...walkIn, phone: e.target.value })} />
         </div>
       )}
+      {adding ? (
+        <NewCustomerModal
+          onClose={() => setAdding(false)}
+          onSaved={(c) => {
+            setAdding(false);
+            setQ('');
+            onPick(c);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -241,8 +279,6 @@ export default function Pos() {
   const [customer, setCustomer] = useState<Cust | null>(null);
   const [walkIn, setWalkIn] = useState({ name: '', phone: '' });
   const [lines, setLines] = useState<Line[]>([]);
-  const [serviceTypeId, setServiceTypeId] = useState('');
-  const [agentId, setAgentId] = useState('');
   const [orderDiscount, setOrderDiscount] = useState<{ kind: 'percent' | 'fixed'; amount: string }>({ kind: 'fixed', amount: '' });
   const [points, setPoints] = useState('');
   const [notes, setNotes] = useState('');
@@ -251,7 +287,7 @@ export default function Pos() {
   const [done, setDone] = useState<SaleResult | null>(null);
   const [draftId, setDraftId] = useState<string | null>(params.get('draft'));
   const [measure, setMeasure] = useState<{ id: string; name: string; latest: Measurement | null } | null>(null);
-  const [thobe, setThobe] = useState({ memberId: '', collarId: '', fabricId: '', colourId: '', qty: '1', remarks: '' });
+  const [thobe, setThobe] = useState({ memberId: '', collarId: '', cuffId: '', fabricId: '', metres: '', qty: '1', remarks: '' });
   const [addMember, setAddMember] = useState<{ name: string; relation: string; size: string } | null>(null);
   const mode = (params.get('mode') as 'draft' | 'quotation' | null) ?? null;
   const searchRef = useRef<HTMLInputElement>(null);
@@ -286,8 +322,6 @@ export default function Pos() {
     setLines((c.lines ?? []).map((l: any) => ({ ...l, key: key() })));
     if (c.customerId) setCustomer({ id: c.customerId, name: d.customer_name, phone: d.phone });
     setWalkIn({ name: c.walkInName ?? '', phone: c.walkInPhone ?? '' });
-    setServiceTypeId(c.serviceTypeId ?? '');
-    setAgentId(c.agentId ?? '');
     setNotes(c.notes ?? '');
     if (c.branchId) setBranchId(c.branchId);
     if (c.orderDiscount) setOrderDiscount({ kind: c.orderDiscount.kind, amount: String(c.orderDiscount.amount) });
@@ -302,12 +336,10 @@ export default function Pos() {
       lines: lines.map(({ key: _k, ...l }) => l),
       orderDiscount: Number(orderDiscount.amount) > 0 ? { kind: orderDiscount.kind, amount: Number(orderDiscount.amount) } : null,
       points: customer && Number(points) > 0 ? Math.trunc(Number(points)) : 0,
-      serviceTypeId: serviceTypeId || null,
-      agentId: agentId || null,
       notes: notes || null,
       deliveryAddressId: customer && deliver ? deliver : null,
     }),
-    [branchId, customer, walkIn, lines, orderDiscount, points, serviceTypeId, agentId, notes, deliver],
+    [branchId, customer, walkIn, lines, orderDiscount, points, notes, deliver],
   );
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
@@ -332,8 +364,6 @@ export default function Pos() {
     setLines([]);
     setCustomer(null);
     setWalkIn({ name: '', phone: '' });
-    setServiceTypeId('');
-    setAgentId('');
     setOrderDiscount({ kind: 'fixed', amount: '' });
     setPoints('');
     setNotes('');
@@ -426,8 +456,9 @@ export default function Pos() {
     }
     const f = data.fabrics.find((x) => x.id === l.fabricId);
     const c = data.collars.find((x) => x.id === l.collarId);
+    const cuff = data.cuffs.find((x) => x.id === l.cuffId);
     const m = family.find((x) => x.id === l.memberId);
-    return `${t('Thobe', 'ثوب')} · ${L(c)} · ${L(f)}${m ? ` · ${m.name}` : ''}`;
+    return `${t('Thobe', 'ثوب')} · ${L(c)}${cuff ? ` · ${L(cuff)}` : ''} · ${L(f)} · ${num(l.metres)} ${t('m', 'م')}${m ? ` · ${m.name}` : ''}`;
   };
   const q = quote;
 
@@ -517,37 +548,28 @@ export default function Pos() {
                   <button className="btn sm ghost" onClick={() => setAddMember(null)}>{t('Cancel', 'إلغاء')}</button>
                 </div>
               ) : null}
-              <div className="grid k3">
-                <Field label={t('Type (collar)', 'النوع (الياقة)')}>
-                  <Select data-testid="thobe-collar" value={thobe.collarId} onChange={(e) => setThobe({ ...thobe, collarId: e.target.value })}>
-                    <option value="">—</option>
-                    {data.collars.map((c) => <option key={c.id} value={c.id}>{L(c)}</option>)}
-                  </Select>
-                </Field>
-                <Field label={t('Cloth', 'القماش')}>
-                  <Select data-testid="thobe-fabric" value={thobe.fabricId} onChange={(e) => setThobe({ ...thobe, fabricId: e.target.value, colourId: '' })}>
-                    <option value="">—</option>
-                    {data.fabrics.map((f) => (
-                      <option key={f.id} value={f.id}>{L(f)} · {money(f.price)}{f.stock !== null ? ` · ${num(f.stock)} ${t('m', 'م')}` : ''}</option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label={t('Colour (optional)', 'اللون (اختياري)')}>
-                  <Select value={thobe.colourId} onChange={(e) => setThobe({ ...thobe, colourId: e.target.value })} disabled={!fabric}>
-                    <option value="">—</option>
-                    {data.colours.filter((c) => fabric?.colour_ids.includes(c.id)).map((c) => <option key={c.id} value={c.id}>{L(c)}</option>)}
-                  </Select>
-                </Field>
-              </div>
-              <div className="grid" style={{ gridTemplateColumns: '120px 1fr auto', alignItems: 'end' }}>
+              <StylePicker label={t('Type (collar)', 'النوع (الياقة)')} items={data.collars} value={thobe.collarId} onChange={(id) => setThobe({ ...thobe, collarId: id })} testid="thobe-collar" />
+              {data.cuffs.length ? <StylePicker label={t('Cuff', 'الكبك')} items={data.cuffs} value={thobe.cuffId} onChange={(id) => setThobe({ ...thobe, cuffId: id })} testid="thobe-cuff" /> : null}
+              <div className="grid" style={{ gridTemplateColumns: 'minmax(180px, 2fr) auto 110px', alignItems: 'start' }}>
+                <ClothSelect cloths={data.fabrics} value={thobe.fabricId} testid="thobe-fabric" onChange={(f) => setThobe({ ...thobe, fabricId: f?.id ?? '', metres: f ? Number(f.metres_per_thobe || 3.5).toFixed(2) : '' })} />
+                <MetresInput value={thobe.metres} onChange={(v) => setThobe({ ...thobe, metres: v })} testid="thobe-metres" />
                 <Field label={t('Thobes', 'عدد الثياب')}><Input data-testid="thobe-qty" type="number" min={1} max={50} value={thobe.qty} onChange={(e) => setThobe({ ...thobe, qty: e.target.value })} /></Field>
-                <Field label={t('Notes for the tailor', 'ملاحظات للخياط')}><Input value={thobe.remarks} onChange={(e) => setThobe({ ...thobe, remarks: e.target.value })} /></Field>
+              </div>
+              {fabric && validMetres(thobe.metres) ? (
+                <div className="small secondary" data-testid="thobe-price">
+                  {num(Number(thobe.metres))} {t('m', 'م')} × {money(fabric.price)} = <b className="num">{money(thobePrice(fabric, thobe.metres))}</b> {t('a thobe', 'للثوب')}
+                </div>
+              ) : null}
+              <Field label={t('Notes for the tailor', 'ملاحظات للخياط')}>
+                <TextArea className="input notes" data-testid="thobe-remarks" maxLength={1000} value={thobe.remarks} onChange={(e) => setThobe({ ...thobe, remarks: e.target.value })} placeholder={t('e.g. pocket on the left, looser sleeves', 'مثال: جيب على اليسار، أكمام أوسع')} />
+              </Field>
+              <div className="row" style={{ justifyContent: 'flex-end' }}>
                 <button
                   className="btn"
                   data-testid="thobe-add"
-                  disabled={!thobe.collarId || !thobe.fabricId || !(Number(thobe.qty) >= 1) || !member}
+                  disabled={!thobe.collarId || (data.cuffs.length > 0 && !thobe.cuffId) || !thobe.fabricId || !validMetres(thobe.metres) || !(Number(thobe.qty) >= 1) || !member}
                   onClick={() => {
-                    setLines((ls) => [...ls, { key: key(), kind: 'thobe', memberId: member!.id, collarId: thobe.collarId, fabricId: thobe.fabricId, colourId: thobe.colourId || null, qty: Math.trunc(Number(thobe.qty)), remarks: thobe.remarks || null }]);
+                    setLines((ls) => [...ls, { key: key(), kind: 'thobe', memberId: member!.id, collarId: thobe.collarId, cuffId: thobe.cuffId || null, fabricId: thobe.fabricId, metres: Number(thobe.metres), qty: Math.trunc(Number(thobe.qty)), remarks: thobe.remarks.trim() || null }]);
                     setThobe({ ...thobe, qty: '1', remarks: '' });
                   }}
                 >
@@ -602,14 +624,6 @@ export default function Pos() {
               <Empty>{t('Scan or tap items to add them.', 'امسح الأصناف أو اضغط عليها لإضافتها.')}</Empty>
             )}
             <div className="grid k2" style={{ gap: 8 }}>
-              <Select value={serviceTypeId} onChange={(e) => setServiceTypeId(e.target.value)} aria-label={t('Service type', 'نوع الخدمة')}>
-                <option value="">{t('Service: standard', 'الخدمة: عادي')}</option>
-                {data.services.filter((s) => s.charge > 0 || s.lead_days != null).map((s) => <option key={s.id} value={s.id}>{L(s)}{s.charge ? ` +${s.charge_kind === 'percent' ? `${s.charge}%` : money(s.charge)}` : ''}</option>)}
-              </Select>
-              <Select value={agentId} onChange={(e) => setAgentId(e.target.value)} aria-label={t('Agent', 'الوكيل')}>
-                <option value="">{t('No agent', 'بدون وكيل')}</option>
-                {data.agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </Select>
               {canDiscount ? (
                 <div className="row" style={{ gap: 4 }}>
                   <input className="input" type="number" min={0} data-testid="order-discount" placeholder={t('Discount', 'الخصم')} aria-label={t('Discount on sale', 'خصم على الفاتورة')} value={orderDiscount.amount} onChange={(e) => setOrderDiscount({ ...orderDiscount, amount: e.target.value })} />
@@ -629,14 +643,13 @@ export default function Pos() {
                 </Select>
               ) : null}
             </div>
-            <TextArea placeholder={t('Notes on the sale', 'ملاحظات على الفاتورة')} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ minHeight: 44 }} />
+            <TextArea className="input notes" data-testid="sale-notes" maxLength={2000} placeholder={t('Notes on the sale', 'ملاحظات على الفاتورة')} value={notes} onChange={(e) => setNotes(e.target.value)} />
             {quoteError ? <div className="note error">{quoteError}</div> : null}
             {q?.stockError ? <div className="note error">{errorMessage(new ApiError(q.stockError.code, 400, q.stockError))}</div> : null}
             {q ? (
               <div className="stack" style={{ gap: 4 }}>
                 <div className="sum-row"><span className="secondary">{t('Subtotal', 'المجموع')}</span><span>{money(q.subtotal)}</span></div>
                 {q.orderDiscount ? <div className="sum-row"><span className="secondary">{t('Discount', 'الخصم')}</span><span>−{money(q.orderDiscount)}</span></div> : null}
-                {q.serviceCharge ? <div className="sum-row"><span className="secondary">{t('Service', 'الخدمة')}</span><span>{money(q.serviceCharge)}</span></div> : null}
                 {q.deliveryFee ? <div className="sum-row"><span className="secondary">{t('Delivery', 'التوصيل')}</span><span>{money(q.deliveryFee)}</span></div> : null}
                 {q.pointsUsed ? <div className="sum-row"><span className="secondary">{t('Points', 'النقاط')}</span><span>−{money(q.pointsUsed)}</span></div> : null}
                 <div className="sum-row total"><span>{t('Total', 'الإجمالي')}</span><span data-testid="cart-total">{money(q.total)}</span></div>

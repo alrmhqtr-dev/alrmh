@@ -24,10 +24,10 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
     [customerId],
     client,
   );
-  const [collars, fabrics, colours] = await Promise.all([
-    db.many('select id, name_en, name_ar, shape from collars', [], client),
-    db.many('select f.id, f.name_en, f.name_ar, f.price, f.cost, f.metres_per_thobe, coalesce(t.percent,0)::float as tax from fabrics f left join tax_rates t on t.id = f.tax_rate_id and t.active', [], client),
-    db.many('select id, name_en, name_ar, hex from colours', [], client),
+  const [collars, fabrics, cuffs] = await Promise.all([
+    db.many('select id, name_en, name_ar, shape, image_url from collars', [], client),
+    db.many('select f.id, f.name_en, f.name_ar, f.price::float as price, f.cost::float as cost, f.metres_per_thobe::float as metres_per_thobe, coalesce(t.percent,0)::float as tax from fabrics f left join tax_rates t on t.id = f.tax_rate_id and t.active', [], client),
+    db.many('select id, name_en, name_ar, image_url from cuffs', [], client),
   ]);
   const byId = (list: any[], id: string) => list.find((x) => x.id === id);
   // The same automatic discounts as the counter (rules for the app, and the customer's group).
@@ -54,8 +54,10 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
       };
     }
     const fabricRow = byId(fabrics, r.thobe.fabricId);
-    const fabric = fabricRow ? { id: fabricRow.id, name_en: fabricRow.name_en, name_ar: fabricRow.name_ar, price: fabricRow.price } : undefined;
-    const unit = fabric?.price ?? 0;
+    const fabric = fabricRow ? { id: fabricRow.id, name_en: fabricRow.name_en, name_ar: fabricRow.name_ar, price: fabricRow.price, per: 'metre' } : undefined;
+    // Cloth is priced by the metre: the length chosen for this thobe, else the cloth's usual length.
+    const metres = round2(Number(r.thobe.metres) || fabricRow?.metres_per_thobe || 3.5);
+    const unit = round2(metres * (fabric?.price ?? 0));
     const off = unitDiscount({ kind: 'thobe', fabricId: r.thobe.fabricId, price: unit }, rules, gp);
     const discount = round2(off.amount * r.qty);
     const line = round2(unit * r.qty - discount);
@@ -66,14 +68,16 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
       unitPrice: unit,
       discount,
       discountLabel: off.label,
-      unitCost: round2((fabricRow?.cost ?? 0) * (fabricRow?.metres_per_thobe ?? 0)),
+      unitCost: round2((fabricRow?.cost ?? 0) * metres),
       tax: taxInside(line, fabricRow?.tax ?? 0),
       lineTotal: line,
       points: t.points_per_thobe * r.qty,
       thobe: {
         collar: byId(collars, r.thobe.collarId),
+        cuff: r.thobe.cuffId ? byId(cuffs, r.thobe.cuffId) ?? null : null,
         fabric,
-        colour: byId(colours, r.thobe.colourId) ?? null,
+        metres,
+        colour: null,
       },
       member: { id: r.member_id, name: r.member_name, relation: r.member_relation, size: r.member_size },
       measureMethod: r.measure_method,

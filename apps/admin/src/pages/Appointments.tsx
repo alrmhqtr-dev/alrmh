@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Ruler, ShoppingBag } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { addDays, day, money, phone, time, todayQatar } from '../lib/format';
+import { addDays, day, minuteToTime, money, phone, time, todayQatar } from '../lib/format';
 import { t } from '../lib/i18n';
 import { MeasureModal } from '../measure';
 import { PlaceOrderModal } from '../place-order';
@@ -35,12 +35,20 @@ type Appt = {
 
 export default function Appointments() {
   const [from, setFrom] = useState(todayQatar());
-  const [kind, setKind] = useState<'all' | 'branch' | 'home'>('all');
+  const [kind, setKind] = useState<'all' | 'branch' | 'home'>('home');
   const [measure, setMeasure] = useState<{ id: string; name: string } | null>(null);
   const [ordering, setOrdering] = useState<Appt | null>(null);
   const { can } = useAuth();
   const toast = useToast();
   const qc = useQueryClient();
+  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<{ home_visit: { windows: { start: number; end: number }[] } }>('/settings') });
+  /** A home visit shows its window (9:00–13:00); a branch visit its time. */
+  const when = (a: Appt) => {
+    const q = new Date(new Date(a.starts_at).getTime() + 3 * 3600_000);
+    const m = q.getUTCHours() * 60 + q.getUTCMinutes();
+    const w = a.kind === 'home' ? settings.data?.home_visit.windows.find((x) => x.start === m) : null;
+    return w ? `${minuteToTime(w.start)}–${minuteToTime(w.end)}` : time(a.starts_at);
+  };
   const q = useQuery({ queryKey: ['appointments', from, kind], queryFn: () => api<Appt[]>(`/appointments?from=${from}&days=7${kind !== 'all' ? `&kind=${kind}` : ''}`) });
   const status = useMutation({
     mutationFn: ({ id, s }: { id: string; s: string }) => api(`/appointments/${id}/status`, { body: { status: s } }),
@@ -65,8 +73,8 @@ export default function Appointments() {
 
   return (
     <div className="stack lg">
-      <PageHead title={t('Appointments', 'المواعيد')} sub={t('Branch and home measurement visits for the next 7 days.', 'زيارات القياس في الفرع والمنزل للأيام السبعة القادمة.')}>
-        <Tabs value={kind} onChange={setKind} options={[['all', t('All', 'الكل')], ['branch', t('Branch', 'الفرع')], ['home', t('Home visits', 'زيارات منزلية')]]} />
+      <PageHead title={t('Home orders', 'الطلبات المنزلية')} sub={t('Home visits booked from the app for the next 7 days: measure, then place the order.', 'الزيارات المنزلية المحجوزة من التطبيق للأيام السبعة القادمة: خذ المقاسات ثم سجّل الطلب.')}>
+        <Tabs value={kind} onChange={setKind} options={[['home', t('Home visits', 'زيارات منزلية')], ['branch', t('Branch (earlier bookings)', 'الفرع (حجوزات سابقة)')], ['all', t('All', 'الكل')]]} />
         <div className="row" style={{ gap: 4 }}>
           <button className="btn secondary icon-btn" aria-label={t('Previous week', 'الأسبوع السابق')} onClick={() => setFrom(addDays(from, -7))}><ChevronLeft size={16} className="flip-rtl" /></button>
           <button className="btn secondary" onClick={() => setFrom(todayQatar())}>{t('Today', 'اليوم')}</button>
@@ -87,7 +95,7 @@ export default function Appointments() {
                   <tbody>
                     {list.map((a) => (
                       <tr key={a.id} data-testid={`appt-${a.member_name}`}>
-                        <td className="num strong" style={{ width: 92 }}>{time(a.starts_at)}</td>
+                        <td className="num strong" style={{ width: 120 }}><span className="ltr">{when(a)}</span></td>
                         <td>
                           <div className="strong">{a.member_name} <span className="small muted">· <Link to={`/customers/${a.customer_id}`}>{a.customer_name}</Link> · {phone(a.phone)}</span></div>
                           <div className="small secondary">

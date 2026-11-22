@@ -113,6 +113,9 @@ textarea.input { height: auto; min-height: 84px; padding: 10px 12px; resize: ver
 .input:focus { outline: 2px solid var(--inverse); outline-offset: -1px; border-color: var(--inverse); }
 .input[dir='rtl'] { text-align: right; }
 .input[dir='ltr'] { text-align: left; }
+/* Mobiles, emails and codes are typed left to right but line up with the rest of an Arabic form. */
+[dir='rtl'] .input[dir='ltr'] { text-align: right; }
+.ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
 .check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
 .check input { width: 16px; height: 16px; accent-color: var(--inverse); }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -140,12 +143,22 @@ td.center, th.center { text-align: center; }
 .tabs button.on { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 
 /* board */
-.board { display: grid; grid-template-columns: repeat(6, minmax(220px, 1fr)); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(236px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
 .col { background: var(--subtle); border-radius: var(--r-lg); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 240px; }
 .col-head { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px 6px; font-weight: 600; font-size: 13px; }
 .ticket { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .ticket:hover { border-color: var(--inverse); }
 .ticket.late { border-color: var(--error); }
+/* One-row order cards: number, customer, how many, due date, and a small button to the next stage. */
+.ticket.row1 { flex-direction: row; align-items: center; gap: 6px; padding: 7px 8px 7px 10px; }
+.ticket-main { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; overflow: hidden; color: inherit; text-decoration: none; white-space: nowrap; }
+.ticket-main > span:not(.ticket-name) { flex: none; }
+.ticket-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.ticket-next { flex: none; width: 28px; height: 28px; border-radius: 99px; border: 1px solid var(--border); background: var(--canvas); color: var(--text); display: grid; place-items: center; cursor: pointer; }
+.ticket-next:hover:not(:disabled) { background: var(--inverse); color: #fff; border-color: var(--inverse); }
+.ticket-next:disabled { opacity: .5; cursor: default; }
+.ticket.done { background: var(--canvas); }
+.done-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; }
 
 /* timeline */
 .timeline { display: flex; flex-direction: column; }
@@ -158,6 +171,7 @@ td.center, th.center { text-align: center; }
 
 /* modal */
 .scrim { position: fixed; inset: 0; background: rgba(11,11,11,.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+.confirm-scrim { z-index: 70; }
 .modal { background: #fff; border-radius: 20px; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 22px; display: flex; flex-direction: column; gap: 16px; }
 .modal.wide { width: min(760px, 100%); }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--inverse); color: #fff; padding: 10px 16px; border-radius: 12px; z-index: 60; font-size: 13px; }
@@ -272,3 +286,26 @@ td.center, th.center { text-align: center; }
 }
 [dir='rtl'] .flip-rtl { transform: scaleX(-1); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.linklike { background: none; border: 0; padding: 4px 2px; cursor: pointer; color: inherit; font: inherit; }
+.linklike:hover { text-decoration: underline; }
+.steps { margin: 0; padding-inline-start: 22px; display: grid; gap: 10px; line-height: 1.6; }
+@media (display-mode: standalone) { .topbar { padding-top: max(10px, env(safe-area-inset-top)); } }
+.page-head .linklike { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Collar and cuff styles chosen by picture. */
+.style-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.style-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; border: 1.5px solid var(--border); border-radius: 12px; background: var(--canvas); cursor: pointer; font: inherit; color: inherit; text-align: center; }
+.style-tile img, .style-tile .ph { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: var(--subtle); display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.style-tile.on { border-color: var(--inverse); box-shadow: 0 0 0 1.5px var(--inverse) inset; }
+.style-tile:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.metres { display: flex; gap: 6px; align-items: center; }
+.metres .input { width: 96px; text-align: center; }
+[dir='rtl'] .metres .input[dir='ltr'] { text-align: center; }
+textarea.input.notes { min-height: 96px; resize: vertical; }
+
+/* Alerts: the bell in the top bar and its panel. */
+.bell-count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--error); color: #fff; font-size: 11px; font-weight: 600; display: inline-grid; place-items: center; }
+.alerts-panel { position: absolute; top: calc(100% + 8px); inset-inline-start: 0; width: min(420px, 92vw); max-height: 70vh; overflow-y: auto; background: var(--canvas); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: 0 12px 32px rgba(11,11,11,.14); padding: 14px; z-index: 40; }
+.alert-line { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--r-sm); color: inherit; text-decoration: none; font-size: 13px; }
+.alert-line:hover { background: var(--subtle); }
+.ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

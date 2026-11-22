@@ -105,6 +105,7 @@ export async function downloadCsv(path: string, fallbackName: string) {
 const MESSAGES: Record<string, [string, string]> = {
   network: ["Can't reach the AlRmh API. Check the connection.", 'تعذّر الاتصال بالخادم. تحقق من الاتصال.'],
   invalid_login: ['Wrong email or password.', 'البريد الإلكتروني أو كلمة المرور غير صحيحة.'],
+  invalid_name: ['Enter a name of 2 to 60 characters.', 'أدخل اسمًا من 2 إلى 60 حرفًا.'],
   wrong_password: ["That isn't your current password.", 'هذه ليست كلمة المرور الحالية.'],
   same_password: ['Choose a password different from the current one.', 'اختر كلمة مرور مختلفة عن الحالية.'],
   refund_too_large: ['That is more than is left to refund on this order.', 'المبلغ أكبر من المتبقي للاسترداد في هذا الطلب.'],
@@ -120,7 +121,7 @@ const MESSAGES: Record<string, [string, string]> = {
   stage_not_forward: ['Orders can only move forward.', 'لا يمكن نقل الطلب إلا إلى المرحلة التالية.'],
   cannot_cancel: ["This order can't be cancelled at its current stage.", 'لا يمكن إلغاء الطلب في مرحلته الحالية.'],
   not_enough_points: ["The customer doesn't have enough points.", 'رصيد نقاط العميل غير كافٍ.'],
-  invalid_measurement: ['Check the measurement values (cm).', 'تحقق من قيم المقاسات (سم).'],
+  invalid_measurement: ['Each measurement must be a number in cm.', 'يجب أن يكون كل مقاس رقمًا بالسنتيمتر.'],
   code_taken: ['That coupon code already exists.', 'رمز القسيمة موجود مسبقًا.'],
   invalid_code: ['Use 3–20 letters or numbers for the code.', 'استخدم من 3 إلى 20 حرفًا أو رقمًا.'],
   email_taken: ['A staff member with that email already exists.', 'يوجد موظف بهذا البريد الإلكتروني.'],

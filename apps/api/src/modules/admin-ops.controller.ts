@@ -1,16 +1,25 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { db } from '../db.js';
-import { STAGES, addWorkingDays, expirePoints, fail, getSettings, lifetimePoints, need, notify, pointsBalance, qatarDateString, returnPoints, spendPoints, tierStatus, type Stage } from '../lib.js';
+import { STAGES, addDays, addWorkingDays, expirePoints, fail, getSettings, lifetimePoints, need, notify, pointsBalance, qatarDateString, returnPoints, spendPoints, tierStatus, type Stage } from '../lib.js';
 import { setStage, stagesFor } from '../orders.js';
 import { addMonthsSql } from '../sql-helpers.js';
 import { AnyStaff, CurrentStaff, ReportsGuard, ReturnsGuard, Managers, Measurers, Workshop, audit, type StaffUser } from '../staff.js';
-import { assertInStock, openRegister, orderBalance, requireRegister, returnStockForOrder, stockNeeds, takeStockForOrder } from '../pos.js';
+import { assertInStock, openRegister, orderBalance, requireRegister, returnStockForOrder, stockNeeds, takeStockForOrder, thobeOptions } from '../pos.js';
 import { toCsv } from '../csv.js';
 import { assertSlotFree, slotLockKey } from './booking.controller.js';
 import { round2 } from '../lib.js';
 
-const FIELDS = ['length_cm', 'shoulder_cm', 'chest_cm', 'waist_cm', 'sleeve_cm', 'neck_cm', 'cuff_cm'] as const;
+export const FIELDS = ['length_cm', 'shoulder_cm', 'chest_cm', 'waist_cm', 'sleeve_cm', 'neck_cm', 'cuff_cm'] as const;
+/** The seven measurements from a request, in FIELDS order. */
+export function measurementValues(body: Record<string, any>) {
+  return FIELDS.map((f) => {
+    const v = Number(need(body?.[f], f));
+    // No size limits: only reject what isn't a number or won't fit the column (numeric(5,1)).
+    if (!Number.isFinite(v) || v < 0 || v >= 10000) fail('invalid_measurement', { field: f });
+    return v;
+  });
+}
 
 /** Qatar dates in the form 2026-11-01; the default is the current month so far. */
 function dateRange(from?: string, to?: string) {
@@ -35,7 +44,8 @@ export class AdminOpsController {
   @UseGuards(AnyStaff)
   orders(@Query('stage') stage?: string, @Query('q') q?: string, @Query('kind') kind?: string, @Query('board') board?: string) {
     // Phone and order numbers match with spaces ignored; names match as typed.
-    const needle = q?.trim() ? `%${q.trim().replace(/\s+/g, '')}%` : null;
+    // Old receipts say "AR-10528": the number is 10528 now.
+    const needle = q?.trim() ? `%${q.trim().replace(/\s+/g, '').replace(/^#?ar-?(?=\d)/i, '')}%` : null;
     const text = q?.trim() ? `%${q.trim().replace(/\s+/g, ' ')}%` : null;
     return db.many(
       `select o.id, o.number, o.stage, o.total, o.created_at, o.paid_at, o.expected_delivery, o.customer_id, coalesce(c.name, o.walk_in_name) as customer_name, coalesce(c.phone, o.walk_in_phone) as phone,
@@ -43,17 +53,84 @@ export class AdminOpsController {
               greatest(0, o.total - coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0))::float as balance,
               (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobe_count,
               (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id) as item_count,
-              (select min(a.starts_at) from appointments a where a.order_id = o.id and a.status = 'confirmed') as next_appointment
+              (select min(a.starts_at) from appointments a where a.order_id = o.id and a.status = 'confirmed') as next_appointment,
+              (select max(e.at) from order_events e where e.order_id = o.id and e.stage = 'delivered') as done_at
          from orders o left join customers c on c.id = o.customer_id
         where o.stage not in ('pending_payment','payment_failed')
           and ($1::text is null or o.stage = $1)
           and ($2::text is null or o.number ilike $2 or replace(coalesce(c.phone, o.walk_in_phone, ''),' ','') ilike $2 or coalesce(c.name, o.walk_in_name, '') ilike $3)
           and ($4::text is null or ($4 = 'thobe') = exists (select 1 from order_items i where i.order_id = o.id and i.kind = 'thobe'))
           -- Counter sales handed over on the spot are sales, not workshop orders.
-          and not (o.channel = 'pos' and o.stage = 'delivered' and $1::text is null and $2::text is null and $5::boolean)
-        order by o.created_at desc limit 300`,
+          and not (o.channel = 'pos' and o.stage = 'delivered' and $1::text is null and $2::text is null and $5::boolean
+                   and not exists (select 1 from order_items i where i.order_id = o.id and i.kind = 'thobe'))
+          -- The board shows open orders, oldest first, and what was finished in the last 30 days.
+          and not ($5::boolean and (o.stage = 'cancelled' or (o.stage = 'delivered' and coalesce((select max(e.at) from order_events e where e.order_id = o.id and e.stage = 'delivered'), o.created_at) < now() - interval '30 days')))
+        order by case when $5::boolean then o.created_at end asc, o.created_at desc limit 400`,
       [stage || null, needle, text, kind === 'thobe' || kind === 'shop' ? kind : null, board === '1'],
     );
+  }
+
+  /**
+   * What staff should act on today: thobes due tomorrow that are not ready yet, thobes past their date,
+   * thobes waiting to be collected, today's home visits and cloth or products running low.
+   */
+  @Get('alerts')
+  @UseGuards(AnyStaff)
+  async alerts() {
+    const s = await getSettings();
+    const today = qatarDateString(new Date());
+    const tomorrow = addDays(today, 1);
+    const ORDER = `select o.id, o.number, o.stage, o.expected_delivery, coalesce(c.name, o.walk_in_name) as customer_name, coalesce(c.phone, o.walk_in_phone) as phone,
+                          greatest(0, o.total - coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0))::float as balance,
+                          (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobe_count
+                     from orders o left join customers c on c.id = o.customer_id
+                    where exists (select 1 from order_items i where i.order_id = o.id and i.kind = 'thobe')`;
+    const [dueTomorrow, overdue, pickupTomorrow, waiting, visits, lowStock] = await Promise.all([
+      db.many(`${ORDER} and o.expected_delivery = $1::date and o.stage in ('measured','cutting','stitching','quality') order by o.created_at`, [tomorrow]),
+      db.many(`${ORDER} and o.expected_delivery < $1::date and o.stage in ('measured','cutting','stitching','quality') order by o.expected_delivery, o.created_at`, [today]),
+      db.many(`${ORDER} and o.expected_delivery = $1::date and o.stage = 'ready' order by o.created_at`, [tomorrow]),
+      db.many(
+        `${ORDER} and o.stage = 'ready'
+           and coalesce((select max(e.at) from order_events e where e.order_id = o.id and e.stage = 'ready'), o.created_at) < now() - ($1 || ' days')::interval
+         order by o.created_at`,
+        [String(s.pickup.remind_after_days)],
+      ),
+      db.many(
+        `select a.id, a.starts_at, a.kind, c.name as customer_name, c.phone, f.name as member, ad.area
+           from appointments a join customers c on c.id = a.customer_id left join family_members f on f.id = a.member_id left join addresses ad on ad.id = a.address_id
+          where a.status = 'confirmed' and (a.starts_at at time zone 'Asia/Qatar')::date in ($1::date, $2::date)
+          order by a.starts_at`,
+        [today, tomorrow],
+      ),
+      db.many(
+        `with lv as (
+           select item_kind, item_id, sum(qty)::float as qty from stock_moves group by 1,2
+         )
+         select 'fabric' as kind, f.id, f.name_en, f.name_ar, coalesce(lv.qty,0) as qty, f.alert_qty::float as alert_qty
+           from fabrics f left join lv on lv.item_kind = 'fabric' and lv.item_id = f.id
+          where f.active and f.track_stock and coalesce(lv.qty,0) <= f.alert_qty
+         union all
+         select 'product', p.id, p.name_en, p.name_ar, coalesce(lv.qty,0), p.alert_qty::float
+           from products p left join lv on lv.item_kind = 'product' and lv.item_id = p.id
+          where p.active and p.track_stock and coalesce(lv.qty,0) <= p.alert_qty
+         order by 5 limit 30`,
+      ),
+    ]);
+    const visitsToday = visits.filter((v) => qatarDateString(new Date(v.starts_at)) === today);
+    const visitsTomorrow = visits.filter((v) => qatarDateString(new Date(v.starts_at)) === tomorrow);
+    return {
+      today,
+      tomorrow,
+      remindAfterDays: s.pickup.remind_after_days,
+      dueTomorrow,
+      overdue,
+      pickupTomorrow,
+      waiting,
+      visitsToday,
+      visitsTomorrow,
+      lowStock,
+      count: dueTomorrow.length + overdue.length + pickupTomorrow.length + waiting.length + visitsToday.length + lowStock.length,
+    };
   }
 
   @Get('orders/:id')
@@ -61,14 +138,14 @@ export class AdminOpsController {
   async order(@Param('id') id: string) {
     const o = await db.one(
       `select o.*, coalesce(c.name, o.walk_in_name) as customer_name, coalesce(c.phone, o.walk_in_phone) as phone, c.email,
-              b.name_en as branch_en, b.name_ar as branch_ar, ag.name as agent_name, st.name_en as service_en, st.name_ar as service_ar,
+              b.name_en as branch_en, b.name_ar as branch_ar,
               coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0)::float as paid,
               (select status from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_status,
               (select provider_ref from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_ref,
               (select provider from payments p where p.order_id = o.id order by created_at desc limit 1) as payment_provider,
               (select name from staff_users u where u.id = o.placed_by_staff_id) as placed_by
          from orders o left join customers c on c.id = o.customer_id left join branches b on b.id = o.branch_id
-         left join agents ag on ag.id = o.agent_id left join service_types st on st.id = o.service_type_id where o.id = $1`,
+         where o.id = $1`,
       [id],
     );
     if (!o) throw new NotFoundException({ code: 'not_found' });
@@ -298,7 +375,8 @@ export class AdminOpsController {
   @Get('customers')
   @UseGuards(AnyStaff)
   customers(@Query('q') q?: string) {
-    const needle = q?.trim() ? `%${q.trim().replace(/\s+/g, '')}%` : null;
+    // Old receipts say "AR-10528": the number is 10528 now.
+    const needle = q?.trim() ? `%${q.trim().replace(/\s+/g, '').replace(/^#?ar-?(?=\d)/i, '')}%` : null;
     const text = q?.trim() ? `%${q.trim().replace(/\s+/g, ' ')}%` : null;
     return db.many(
       `select c.id, c.name, c.phone, c.email, c.language, c.created_at, c.source, c.group_id, g.name_en as group_en, g.name_ar as group_ar,
@@ -323,7 +401,7 @@ export class AdminOpsController {
     const [family, addresses, orders, ledger, tier, balance] = await Promise.all([
       db.many(
         `select f.id, f.name, f.relation, f.size,
-                (select row_to_json(m) from (select taken_at, tailor_name, method, ${FIELDS.join(', ')}, remarks from measurements where member_id = f.id order by taken_at desc limit 1) m) as latest,
+                (select row_to_json(m) from (select id, taken_at, tailor_name, method, ${FIELDS.join(', ')}, remarks from measurements where member_id = f.id order by taken_at desc limit 1) m) as latest,
                 (select count(*)::int from measurements where member_id = f.id) as measurement_count
            from family_members f where f.customer_id = $1 order by (f.relation = 'self') desc, f.created_at`,
         [id],
@@ -356,7 +434,7 @@ export class AdminOpsController {
   async placeOrder(
     @CurrentStaff() me: StaffUser,
     @Param('id') id: string,
-    @Body() body: { memberId: string; lines: { collarId: string; fabricId: string; qty: number }[]; branchId?: string; appointmentId?: string; paidByCard?: boolean },
+    @Body() body: { memberId: string; lines: { collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; qty: number; remarks?: string | null }[]; branchId?: string; appointmentId?: string; paidByCard?: boolean },
   ) {
     if (body?.paidByCard !== true) fail('payment_not_confirmed');
     const lines = Array.isArray(body?.lines) ? body.lines : [];
@@ -372,15 +450,13 @@ export class AdminOpsController {
       for (const l of lines) {
         const qty = Math.trunc(Number(l?.qty));
         if (!(qty >= 1 && qty <= 20)) fail('invalid_qty');
-        const collar = await db.one('select id, name_en, name_ar, shape from collars where id = $1 and active', [l.collarId], c);
-        const fabric = await db.one('select id, name_en, name_ar, price::float as price, (cost * metres_per_thobe)::float as unit_cost from fabrics where id = $1 and active', [l.fabricId], c);
-        if (!collar || !fabric) fail('invalid_thobe_options');
-        items.push({ qty, unit: fabric.price, collar, fabric });
+        const th = await thobeOptions(l, c, true);
+        items.push({ qty, unit: th.unit, th, remarks: l.remarks ? String(l.remarks).slice(0, 1000) : null });
       }
       // Thobes are always collected from the branch.
       const b = await db.one('select id, name_en, name_ar, address_en, address_ar from branches where active and ($1::uuid is null or id = $1) order by sort limit 1', [body.branchId || null], c);
       if (!b) fail('branch_not_found');
-      await assertInStock(await stockNeeds(items.map((i) => ({ kind: 'thobe', qty: i.qty, fabricId: i.fabric.id })), c), b.id, c);
+      await assertInStock(await stockNeeds(items.map((i) => ({ kind: 'thobe', qty: i.qty, fabricId: i.th.fabric.id, metres: i.th.metres })), c), b.id, c);
       const address = { pickup: true, branchId: b.id, label: b.name_en, label_ar: b.name_ar, line1: b.address_en, line1_ar: b.address_ar, area: '', city: 'Doha' };
       const deliveryFee = 0;
       const subtotal = round2(items.reduce((a, i) => a + i.unit * i.qty, 0));
@@ -388,7 +464,7 @@ export class AdminOpsController {
       const pointsToEarn = items.reduce((a, i) => a + i.qty * tier.points_per_thobe, 0);
       const measured = await db.one('select 1 from measurements where member_id = $1 limit 1', [member.id], c);
       const stage = 'measured';
-      const number = `AR-${(await db.one<{ n: number }>(`select nextval('order_number_seq')::int as n`, [], c))!.n}`;
+      const number = String((await db.one<{ n: number }>(`select nextval('order_number_seq')::int as n`, [], c))!.n);
       const expected = addWorkingDays(qatarDateString(new Date()), s.lead_working_days);
       const order = await db.one(
         `insert into orders (number, customer_id, stage, subtotal, delivery_fee, total, address, points_to_earn, expected_delivery, paid_at, placed_by_staff_id, channel, branch_id)
@@ -401,16 +477,17 @@ export class AdminOpsController {
           order!.id,
           'thobe',
           {
-            thobe: { collar: i.collar, fabric: { id: i.fabric.id, name_en: i.fabric.name_en, name_ar: i.fabric.name_ar, price: i.fabric.price }, colour: null },
+            thobe: i.th.snapshot,
             member: { id: member.id, name: member.name, relation: member.relation, size: member.size },
             measureMethod: 'saved',
+            remarks: i.remarks,
             points: i.qty * tier.points_per_thobe,
             inStore: true,
           },
           i.qty,
           i.unit,
           round2(i.unit * i.qty),
-          round2(i.fabric.unit_cost ?? 0),
+          i.th.unitCost,
         ]);
       const register = await openRegister(me.id, c);
       await c.query(`insert into payments (order_id, provider, amount, status, provider_ref, completed_at, staff_id, register_id) values ($1, 'card_machine', $2, 'paid', $3, now(), $4, $5)`, [
@@ -434,7 +511,7 @@ export class AdminOpsController {
         `/orders/${order!.id}`,
         c,
       );
-      await audit(me, 'place_order', 'order', order!.id, { customer: id, total, lines: items.map((i) => ({ collar: i.collar.id, fabric: i.fabric.id, qty: i.qty })) }, c);
+      await audit(me, 'place_order', 'order', order!.id, { customer: id, total, lines: items.map((i) => ({ collar: i.th.collar.id, cuff: i.th.cuff?.id ?? null, fabric: i.th.fabric.id, metres: i.th.metres, qty: i.qty })) }, c);
       return { orderId: order!.id, number: order!.number, total: order!.total, pointsToEarn };
     });
   }
@@ -482,11 +559,7 @@ export class AdminOpsController {
   async measure(@CurrentStaff() me: StaffUser, @Param('id') memberId: string, @Body() body: Record<string, any>) {
     const member = await db.one('select id, customer_id, name from family_members where id = $1', [memberId]);
     if (!member) throw new NotFoundException({ code: 'member_not_found' });
-    const values = FIELDS.map((f) => {
-      const v = Number(need(body[f], f));
-      if (!(v > 5 && v < 260)) fail('invalid_measurement', { field: f });
-      return v;
-    });
+    const values = measurementValues(body);
     const tailor = String(body.tailorName ?? me.name).trim() || me.name;
     const m = await db.one(
       `insert into measurements (member_id, method, branch_id, tailor_name, ${FIELDS.join(', ')}, remarks, staff_id)
@@ -507,6 +580,24 @@ export class AdminOpsController {
       `/account/member/${memberId}`,
     );
     await audit(me, 'create', 'measurement', m!.id, { member: memberId });
+    return m;
+  }
+
+  /** Corrects a measurement that was saved wrongly (the date it was taken stays). */
+  @Patch('measurements/:id')
+  @UseGuards(Measurers)
+  async editMeasurement(@CurrentStaff() me: StaffUser, @Param('id') id: string, @Body() body: Record<string, any>) {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new NotFoundException({ code: 'not_found' });
+    const cur = await db.one(`select m.*, f.customer_id from measurements m join family_members f on f.id = m.member_id where m.id = $1`, [id]);
+    if (!cur) throw new NotFoundException({ code: 'not_found' });
+    const values = measurementValues(body);
+    const tailor = body.tailorName !== undefined ? String(body.tailorName).trim().slice(0, 80) || cur.tailor_name : cur.tailor_name;
+    const remarks = body.remarks !== undefined ? (body.remarks ? String(body.remarks).slice(0, 300) : null) : cur.remarks;
+    const m = await db.one(
+      `update measurements set ${FIELDS.map((f, i) => `${f} = $${i + 2}`).join(', ')}, tailor_name = $9, remarks = $10 where id = $1 returning id, taken_at`,
+      [id, ...values, tailor, remarks],
+    );
+    await audit(me, 'update', 'measurement', id, { member: cur.member_id, before: Object.fromEntries(FIELDS.map((f) => [f, Number(cur[f])])), after: Object.fromEntries(FIELDS.map((f, i) => [f, values[i]])) });
     return m;
   }
 }

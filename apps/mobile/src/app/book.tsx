@@ -22,7 +22,8 @@ export default function Book() {
   const cat = useCatalogue();
   const family = useFamily();
   const addresses = useAddresses();
-  const [kind, setKind] = useState<'branch' | 'home'>(params.kind === 'home' ? 'home' : 'branch');
+  // Visits are at home. A visit booked at a branch before that can still be moved to another time there.
+  const [kind] = useState<'branch' | 'home'>(mode === 'reschedule' && params.kind === 'branch' ? 'branch' : 'home');
   const [memberId, setMemberId] = useState<string | undefined>(params.memberId || undefined);
   const branches = cat.data?.branches ?? [];
   const [branchId, setBranchId] = useState<string | undefined>(params.branchId || undefined);
@@ -52,6 +53,9 @@ export default function Book() {
 
   const day = useMemo(() => slots.data?.days.find((d) => d.date === date), [slots.data, date]);
   const address = addresses.data?.find((a) => a.id === addressId);
+  // A home visit is a window: "Mon 24 Nov · 9:00 AM – 1:00 PM".
+  const picked = day?.times.find((x) => x.startsAt === time);
+  const whenLabel = (at: string) => (picked?.endsAt && picked.startsAt === at ? `${f.when(at)} – ${f.time(picked.endsAt)}` : f.when(at));
   const fee = cat.data?.settings.home_visit_fee ?? 50;
   // A visit booked on its own is a new order: the booking fee is paid now, online.
   const bookingFee = mode === 'standalone' ? (cat.data?.settings.appointment_fee ?? 0) : 0;
@@ -111,7 +115,7 @@ export default function Book() {
           <Button
             testID="book-confirm"
             icon={bookingFee && time ? Lock : undefined}
-            label={!time ? t('book.pickTime') : bookingFee ? t('book.payAndBook', { amount: f.money(bookingFee) }) : t('book.confirm', { when: f.when(time) })}
+            label={!time ? t('book.pickTime') : bookingFee ? t('book.payAndBook', { amount: f.money(bookingFee) }) : t('book.confirm', { when: whenLabel(time) })}
             disabled={!time || (kind === 'home' && !addressId)}
             loading={busy}
             onPress={confirm}
@@ -124,10 +128,6 @@ export default function Book() {
       {mode === 'standalone' ? (
         <View style={{ gap: 10 }}>
           {bookingFee ? <Note icon={Info} tone="gold">{t('book.newOrderNote', { fee: f.money(bookingFee) })}</Note> : null}
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Chip testID="kind-branch" icon={Store} label={t('design.visitBranch')} selected={kind === 'branch'} onPress={() => setKind('branch')} />
-            <Chip testID="kind-home" icon={MapPin} label={t('design.homeVisit')} selected={kind === 'home'} onPress={() => setKind('home')} />
-          </View>
           <Text variant="bodyStrong" style={{ marginTop: 6 }}>
             {t('book.who')}
           </Text>
@@ -237,7 +237,7 @@ export default function Book() {
         <View style={{ gap: 10 }}>
           <Text variant="bodyStrong">{t('book.times')}</Text>
           {day.times.some((x) => x.available) ? (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <View style={{ gap: 8 }}>
               {day.times.map((slot) => {
                 const on = slot.startsAt === time;
                 return (
@@ -247,8 +247,8 @@ export default function Book() {
                     disabled={!slot.available}
                     onPress={() => setTime(slot.startsAt)}
                     style={{
-                      width: '31.5%',
-                      height: 46,
+                      width: '100%',
+                      height: 50,
                       borderRadius: radius.md,
                       borderWidth: 1,
                       borderColor: on ? colors.inverse : colors.border,
@@ -263,7 +263,7 @@ export default function Book() {
                       style={slot.available ? undefined : { textDecorationLine: 'line-through' }}
                       center
                     >
-                      {f.time(slot.startsAt)}
+                      {slot.endsAt ? `${f.time(slot.startsAt)} – ${f.time(slot.endsAt)}` : f.time(slot.startsAt)}
                     </Text>
                   </Touch>
                 );
@@ -272,6 +272,11 @@ export default function Book() {
           ) : (
             <Note>{t('book.noTimes')}</Note>
           )}
+          {kind === 'home' ? (
+            <Text variant="caption" color={colors.textMuted}>
+              {t('book.windowNote')}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -280,7 +285,7 @@ export default function Book() {
         <Card testID="book-summary" style={{ padding: 16, gap: 8 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text variant="body" color={colors.textSecondary}>
-              {f.when(time)}
+              {whenLabel(time)}
             </Text>
             <Text variant="bodyStrong">{kind === 'home' ? t('design.homeVisit') : f.name(branch)}</Text>
           </View>

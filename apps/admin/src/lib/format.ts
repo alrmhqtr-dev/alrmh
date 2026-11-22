@@ -12,7 +12,8 @@ export const date = (d?: string | null) => (d ? asDate(d).toLocaleDateString(loc
 export const day = (d?: string | null) => (d ? asDate(d).toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', timeZone: TZ }) : '—');
 export const time = (d?: string | null) => (d ? new Date(d).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit', timeZone: TZ }) : '—');
 export const dateTime = (d?: string | null) => (d ? `${day(d)} · ${time(d)}` : '—');
-export const phone = (p?: string | null) => (p ? p.replace(/^\+974(\d{4})(\d{4})$/, '+974 $1 $2') : '—');
+/** A mobile as +974 5555 1234, kept left to right inside Arabic text (otherwise the groups swap places). */
+export const phone = (p?: string | null) => (p ? `\u2066${p.replace(/^\+974(\d{4})(\d{4})$/, '+974 $1 $2')}\u2069` : '—');
 export const todayQatar = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
 export const addDays = (d: string, n: number) => new Date(new Date(d + 'T00:00:00Z').getTime() + n * 864e5).toISOString().slice(0, 10);
 export const minuteToTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -36,16 +37,16 @@ const STAGE_TEXT: Record<string, [string, string]> = {
   quality: ['Quality inspection', 'التدقيق ومراجعة الجودة'],
   ready: ['Ready', 'جاهز'],
   out_for_delivery: ['Out for delivery', 'في الطريق'],
-  delivered: ['Collected / delivered', 'تم الاستلام / التوصيل'],
+  delivered: ['Done', 'تم الاستلام'],
   cancelled: ['Cancelled', 'ملغي'],
 };
 export const STAGE_LABEL: Record<string, string> = new Proxy({} as Record<string, string>, {
   get: (_, k: string) => (STAGE_TEXT[k] ? t(STAGE_TEXT[k][0], STAGE_TEXT[k][1]) : k),
 });
-/** The stage name worded for the kind of order: "Ready for pickup" and "Collected" for thobes, "Packed" and "Delivered" for shop orders. */
+/** The stage name worded for the kind of order: "Ready for pickup" and "Done" (collected) for thobes, "Packed" and "Delivered" for shop orders. */
 export function stageLabel(stage: string, thobes?: boolean) {
   if (thobes === true && stage === 'ready') return t('Ready for pickup', 'الملابس جاهزة');
-  if (thobes === true && stage === 'delivered') return t('Collected', 'تم الاستلام');
+  if (thobes === true && stage === 'delivered') return t('Done', 'تم الاستلام');
   if (thobes === false && stage === 'ready') return t('Packed', 'تم التجهيز');
   if (thobes === false && stage === 'delivered') return t('Delivered', 'تم التوصيل');
   return STAGE_LABEL[stage] ?? stage;

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { ArrowRight, Printer, Receipt, RotateCcw, Ruler, Send, Wallet } from 'lucide-react';
 import { api, errorMessage, mediaUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { L, isAr, t } from '../lib/i18n';
-import { RELATION, channelLabel, date, dateTime, methodLabel, money, money2, phone, stageLabel } from '../lib/format';
+import { RELATION, channelLabel, date, dateTime, methodLabel, money, money2, num, phone, stageLabel } from '../lib/format';
 import { fill, receiptUrl, waLink, type Templates } from '../lib/whatsapp';
 import { MeasureModal, MeasurementGrid, type Measurement } from '../measure';
 import { Field, Input, Loading, Modal, PageHead, Select, StageBadge, TextArea, openPrint, useToast } from '../ui';
@@ -33,9 +33,6 @@ type Detail = {
   phone: string | null;
   branch_en: string | null;
   branch_ar: string | null;
-  agent_name: string | null;
-  service_en: string | null;
-  service_ar: string | null;
   notes: string | null;
   shipping: { courier?: string; tracking?: string } | null;
   receipt_token: string;
@@ -62,6 +59,8 @@ type Detail = {
 
 export default function OrderDetail() {
   const { id = '' } = useParams();
+  // Opened from the invoices: the sale and its payments only, without measurements and workshop details.
+  const invoice = new URLSearchParams(useLocation().search).get('view') === 'invoice';
   const qc = useQueryClient();
   const toast = useToast();
   const { can } = useAuth();
@@ -141,7 +140,7 @@ export default function OrderDetail() {
   return (
     <div className="stack lg">
       <PageHead
-        title={`${t('Order', 'الطلب')} #${o.number}`}
+        title={`${invoice ? t('Invoice', 'الفاتورة') : t('Order', 'الطلب')} #${o.number}`}
         sub={
           <span className="row wrap" style={{ gap: 8 }}>
             <StageBadge stage={o.stage} thobes={isThobe} /> <span className="badge outline">{channelLabel(o.channel)}</span> {t('Placed', 'التاريخ')} {dateTime(o.created_at)}{o.expected_delivery ? ` · ${t('Due', 'التسليم')} ${date(o.expected_delivery)}` : ''}
@@ -150,8 +149,9 @@ export default function OrderDetail() {
       >
         <button className="btn secondary" onClick={() => openPrint(`receipt/${o.id}`)}><Receipt size={16} /> {t('Receipt', 'إيصال')}</button>
         <button className="btn secondary" onClick={() => openPrint(`invoice/${o.id}`)}><Printer size={16} /> {t('Invoice', 'فاتورة')}</button>
-        {isThobe ? <button className="btn secondary" onClick={() => openPrint(`ticket/${o.id}`)}><Ruler size={16} /> {t('Tailor ticket', 'ورقة الخياط')}</button> : null}
-        {next && can('workshop') ? (
+        {isThobe && !invoice ? <button className="btn secondary" onClick={() => openPrint(`ticket/${o.id}`)}><Ruler size={16} /> {t('Tailor ticket', 'ورقة الخياط')}</button> : null}
+        {invoice ? <Link className="btn ghost" to={`/orders/${o.id}`}>{t('Open the order', 'فتح الطلب')}</Link> : null}
+        {next && can('workshop') && !invoice ? (
           <button className="btn" data-testid="detail-advance" disabled={move.isPending || (next === 'delivered' && o.balance > 0)} title={next === 'delivered' && o.balance > 0 ? t('Take the balance first', 'استلم المتبقي أولًا') : undefined} onClick={() => move.mutate(next)}>
             {t('Move to', 'نقل إلى')} {stageLabel(next, isThobe)} <ArrowRight size={16} className="flip-rtl" />
           </button>
@@ -183,20 +183,15 @@ export default function OrderDetail() {
                   </div>
                   <span className="num strong">{money(it.line_total)}</span>
                 </div>
-                <div className="grid k3">
+                <div className="grid k4">
                   <div><div className="overline">{t('Type', 'النوع')}</div><div className="strong">{L(s.thobe?.collar)}</div></div>
-                  <div><div className="overline">{t('Cloth', 'القماش')}</div><div className="strong">{L(s.thobe?.fabric)}</div></div>
-                  <div>
-                    <div className="overline">{t('Colour', 'اللون')}</div>
-                    {s.thobe?.colour ? (
-                      <div className="strong row" style={{ gap: 6 }}><span className="swatch" style={{ background: s.thobe.colour.hex }} />{L(s.thobe.colour)}</div>
-                    ) : (
-                      <div className="secondary">{s.inStore ? t('Chosen in store', 'اختير في المحل') : t('As the cloth', 'لون القماش')}</div>
-                    )}
-                  </div>
+                  <div><div className="overline">{t('Cuff', 'الكبك')}</div><div className="strong">{s.thobe?.cuff ? L(s.thobe.cuff) : '—'}</div></div>
+                  <div><div className="overline">{t('Cloth', 'القماش')}</div><div className="strong">{L(s.thobe?.fabric)}{s.thobe?.colour ? <span className="small secondary"> · {L(s.thobe.colour)}</span> : null}</div></div>
+                  <div><div className="overline">{t('Length', 'الطول')}</div><div className="strong num">{s.thobe?.metres ? `${num(s.thobe.metres)} ${t('m', 'م')}` : '—'}</div></div>
                 </div>
                 {it.discount > 0 ? <div className="small tone-ok">{t('Discount', 'خصم')} −{money(it.discount)}</div> : null}
-                {s.remarks ? <div className="note gold">{t('Remarks', 'ملاحظات')}: “{s.remarks}”</div> : null}
+                {s.remarks && !invoice ? <div className="note gold" style={{ whiteSpace: 'pre-line' }}>{t('Remarks', 'ملاحظات')}: “{s.remarks}”</div> : null}
+                {invoice ? null : <>
                 <div className="divider" />
                 <div className="row spread">
                   <div className="overline">{t('Measurements', 'المقاسات')} · {s.measureMethod === 'saved' ? t('saved', 'محفوظة') : s.measureMethod === 'home' ? t('home visit', 'زيارة منزلية') : t('branch visit', 'زيارة الفرع')}</div>
@@ -207,6 +202,7 @@ export default function OrderDetail() {
                   ) : null}
                 </div>
                 {m ? <MeasurementGrid m={m} /> : <div className="note">{t('Not measured yet', 'لم تؤخذ المقاسات بعد')}{appt ? ` · ${t('visit booked', 'زيارة محجوزة')} ${dateTime(appt.starts_at)}` : ''}.</div>}
+                </>}
               </div>
             );
           })}
@@ -229,7 +225,7 @@ export default function OrderDetail() {
               </table>
             </div>
           ) : null}
-          {isThobe || o.photos.length ? (
+          {!invoice && (isThobe || o.photos.length) ? (
             <div className="card pad stack">
               <div className="overline">{t('Thobe photos', 'صور الأثواب')}</div>
               {o.photos.length ? (
@@ -240,7 +236,7 @@ export default function OrderDetail() {
               {can('workshop') ? <PhotoUploader orderId={o.id} onDone={refresh} /> : null}
             </div>
           ) : null}
-          {o.notes ? <div className="note">{t('Notes', 'ملاحظات')}: {o.notes}</div> : null}
+          {o.notes ? <div className="note" style={{ whiteSpace: 'pre-line' }}>{t('Notes', 'ملاحظات')}: {o.notes}</div> : null}
         </div>
 
         <div className="stack lg">
@@ -260,9 +256,8 @@ export default function OrderDetail() {
             <div data-testid="order-address">{o.address.pickup ? (isAr() ? `فرع ${L({ name_en: o.address.label ?? o.branch_en, name_ar: o.address.label_ar ?? o.branch_ar })}` : `${L({ name_en: o.address.label ?? o.branch_en, name_ar: o.address.label_ar ?? o.branch_ar })} branch`) : `${o.address.label} · ${o.address.line1}, ${o.address.area}, ${o.address.city}`}</div>
             {o.address.notes ? <div className="small muted">{o.address.notes}</div> : null}
             {o.shipping?.courier ? <div className="small secondary">{o.shipping.courier}{o.shipping.tracking ? ` · ${o.shipping.tracking}` : ''}</div> : null}
-            {o.agent_name || o.service_en ? <div className="small secondary">{[o.service_en ? L({ name_en: o.service_en, name_ar: o.service_ar }) : null, o.agent_name ? `${t('Agent', 'الوكيل')}: ${o.agent_name}` : null].filter(Boolean).join(' · ')}</div> : null}
           </div>
-          {o.appointments.length ? (
+          {!invoice && o.appointments.length ? (
             <div className="card pad stack">
               <div className="overline">{t('Measurement visits', 'زيارات القياس')}</div>
               {o.appointments.map((a) => (
@@ -319,7 +314,7 @@ export default function OrderDetail() {
             </div>
             {o.returns.length ? <div className="small secondary">{t('Returns', 'المرتجعات')}: {o.returns.map((r) => `${r.number} (${money(r.amount)})`).join(' · ')}</div> : null}
           </div>
-          <div className="card pad">
+          {invoice ? null : <div className="card pad">
             <div className="overline" style={{ marginBottom: 10 }}>{t('History', 'السجل')}</div>
             <div className="timeline">
               {o.events.map((e, i) => (
@@ -332,7 +327,7 @@ export default function OrderDetail() {
                 </div>
               ))}
             </div>
-          </div>
+          </div>}
         </div>
       </div>
 

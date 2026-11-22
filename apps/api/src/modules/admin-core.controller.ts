@@ -63,6 +63,18 @@ export class AdminCoreController {
     return { ok: true };
   }
 
+  /** Each staff member sets the name shown in the admin, on receipts and in the audit log. */
+  @Post('me/profile')
+  @HttpCode(200)
+  @UseGuards(AnyStaff)
+  async setProfile(@CurrentStaff() me: StaffUser, @Body() body: { name?: string }) {
+    const name = String(body?.name ?? '').trim().replace(/\s+/g, ' ');
+    if (name.length < 2 || name.length > 60) fail('invalid_name');
+    await db.pool.query('update staff_users set name = $2 where id = $1', [me.id, name]);
+    await audit(me, 'rename', 'staff', me.id, { from: me.name, to: name });
+    return { ok: true, name };
+  }
+
   @Post('me/password')
   @HttpCode(200)
   @UseGuards(AnyStaff)

@@ -109,8 +109,8 @@ export function ThobePhotos() {
       </PageHead>
       {can('workshop') ? (
         <div className="card pad stack">
-          <Field label={t('Add a photo to order', 'إضافة صورة لطلب')} hint={t('Type the order number, e.g. AR-10530.', 'اكتب رقم الطلب، مثل AR-10530.')}>
-            <Input value={addFor} onChange={(e) => setAddFor(e.target.value.trim())} placeholder="AR-…" dir="ltr" style={{ maxWidth: 220 }} />
+          <Field label={t('Add a photo to order', 'إضافة صورة لطلب')} hint={t('Type the order number, e.g. 10530.', 'اكتب رقم الطلب، مثل 10530.')}>
+            <Input value={addFor} onChange={(e) => setAddFor(e.target.value.trim().replace(/^#?ar-?/i, ''))} placeholder="10530" dir="ltr" style={{ maxWidth: 220 }} />
           </Field>
           {target ? (
             <div className="stack" style={{ gap: 6 }}>

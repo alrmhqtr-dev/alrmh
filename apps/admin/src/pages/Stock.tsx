@@ -6,7 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
 import { dateTime, money, num } from '../lib/format';
-import { BranchSelect, DateRange, Empty, Field, Input, Loading, Modal, PageHead, SearchBox, Select, Stat, lastDays, useToast, type Range } from '../ui';
+import { BranchSelect, DateRange, Empty, Field, Input, Loading, Modal, PageHead, SearchBox, Select, Stat, Tabs, lastDays, useToast, type Range } from '../ui';
 import { ItemPicker, type Pickable } from '../items';
 
 const REASON: Record<string, [string, string]> = {
@@ -19,6 +19,7 @@ const REASON: Record<string, [string, string]> = {
   adjust: ['Adjustment', 'تسوية'],
   transfer_in: ['Transfer in', 'نقل وارد'],
   transfer_out: ['Transfer out', 'نقل صادر'],
+  received: ['New stock received', 'استلام مخزون جديد'],
 };
 const reason = (r: string) => (REASON[r] ? t(...REASON[r]) : r);
 
@@ -47,47 +48,116 @@ export function StockHistory({ kind, id }: { kind: string; id: string }) {
   );
 }
 
+/** Adds new stock that has arrived: metres of cloth or a number of a product, at one branch. */
+function ReceiveModal({ item, onClose }: { item: (Pickable & { branch_id?: string }) | null; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { staff } = useAuth();
+  const [picked, setPicked] = useState<Pickable | null>(item);
+  const [branch, setBranch] = useState(item?.branch_id ?? staff?.branch_id ?? '');
+  const [qty, setQty] = useState('');
+  const [note, setNote] = useState('');
+  const branches = useQuery({ queryKey: ['branches'], queryFn: () => api<{ id: string; name_en: string; name_ar: string; active: boolean }[]>('/branches') });
+  const branchId = branch || branches.data?.find((b) => b.active)?.id || '';
+  const cloth = picked?.kind === 'fabric';
+  const valid = Number(qty) > 0 && (cloth ? Math.round(Number(qty) * 100) === Number(qty) * 100 : Number.isInteger(Number(qty)));
+  const save = useMutation({
+    mutationFn: () => api<{ level: number }>('/stock/receive', { body: { branchId, kind: picked!.kind, id: picked!.id, size: picked!.size || null, qty: Number(qty), note: note.trim() || null } }),
+    onSuccess: (r) => {
+      toast(t(`Received. Now ${num(r.level)} ${cloth ? 'm' : ''} in stock.`, `تم الاستلام. المخزون الآن ${num(r.level)} ${cloth ? 'م' : ''}.`));
+      qc.invalidateQueries({ queryKey: ['stock'] });
+      qc.invalidateQueries({ queryKey: ['pos-items'] });
+      onClose();
+    },
+    onError: (e) => toast(errorMessage(e), 'error'),
+  });
+  return (
+    <Modal
+      title={t('Receive new stock', 'استلام مخزون جديد')}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn secondary" onClick={onClose}>{t('Cancel', 'إلغاء')}</button>
+          <button className="btn" data-testid="receive-save" disabled={!picked || !branchId || !valid || save.isPending} onClick={() => save.mutate()}>{t('Add to stock', 'إضافة للمخزون')}</button>
+        </>
+      }
+    >
+      {picked ? (
+        <div className="row spread">
+          <div><div className="strong">{picked.name}</div><div className="small muted num">{picked.sku}</div></div>
+          {!item ? <button className="btn sm ghost" onClick={() => setPicked(null)}>{t('Change', 'تغيير')}</button> : null}
+        </div>
+      ) : (
+        <Field label={t('Item', 'الصنف')}><ItemPicker testid="receive-picker" onPick={setPicked} /></Field>
+      )}
+      <div className="grid k2">
+        <Field label={t('Branch', 'الفرع')}>
+          <Select value={branchId} onChange={(e) => setBranch(e.target.value)}>
+            {(branches.data ?? []).filter((b) => b.active).map((b) => <option key={b.id} value={b.id}>{L(b)}</option>)}
+          </Select>
+        </Field>
+        <Field label={cloth ? t('Metres received', 'الأمتار المستلمة') : t('Quantity received', 'الكمية المستلمة')}>
+          <Input data-testid="receive-qty" type="number" inputMode="decimal" min={0} step={cloth ? '0.01' : '1'} value={qty} onChange={(e) => setQty(e.target.value)} autoFocus={Boolean(item)} />
+        </Field>
+      </div>
+      <Field label={t('Note (optional)', 'ملاحظة (اختياري)')}><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('e.g. supplier delivery', 'مثال: توريد من المورد')} /></Field>
+    </Modal>
+  );
+}
+
 export function StockLevels() {
   const [params] = useSearchParams();
+  const { can } = useAuth();
+  const [tab, setTab] = useState<'fabric' | 'product'>(params.get('tab') === 'products' ? 'product' : 'fabric');
   const [branch, setBranch] = useState('');
   const [q, setQ] = useState(params.get('q') ?? '');
   const [low, setLow] = useState(params.get('low') === '1');
   const [hist, setHist] = useState<any>(null);
+  const [receive, setReceive] = useState<{ item: (Pickable & { branch_id?: string }) | null } | null>(null);
   const list = useQuery({ queryKey: ['stock', branch, q, low], queryFn: () => api<any[]>(`/stock?${new URLSearchParams({ ...(branch ? { branch } : {}), ...(q ? { q } : {}), ...(low ? { low: '1' } : {}) })}`) });
-  const value = (list.data ?? []).reduce((a, r) => a + Math.max(0, r.value), 0);
+  const rows = (list.data ?? []).filter((r) => r.kind === tab);
+  const cloth = tab === 'fabric';
   return (
     <div className="stack lg">
-      <PageHead title={t('Stock', 'المخزون')} sub={t('What is on the shelves in each branch, for items whose stock is tracked.', 'الموجود على الرفوف في كل فرع، للأصناف التي يُتتبع مخزونها.')}>
-        <Link className="btn secondary" to="/stock/adjustments">{t('Adjust', 'تسوية')}</Link>
-        <Link className="btn secondary" to="/stock/transfers">{t('Transfer', 'نقل')}</Link>
+      <PageHead title={t('Stock', 'المخزون')} sub={t('Cloth in metres and products by quantity, per branch. Add new stock when it arrives; sales take it off.', 'القماش بالمتر والمنتجات بالكمية في كل فرع. أضف المخزون الجديد عند وصوله، والمبيعات تخصم منه.')}>
+        <Tabs value={tab} onChange={setTab} options={[['fabric', t('Cloth (metres)', 'الأقمشة (بالمتر)')], ['product', t('Products', 'المنتجات')]]} />
+        {can('products') ? <button className="btn" data-testid="receive-new" onClick={() => setReceive({ item: null })}><Plus size={16} /> {t('Receive stock', 'استلام مخزون')}</button> : null}
       </PageHead>
       <div className="filters">
         <BranchSelect value={branch} onChange={setBranch} />
         <SearchBox value={q} onChange={setQ} placeholder={t('Name or code', 'الاسم أو الرمز')} width={220} />
         <label className="check"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> {t('Low stock only', 'المنخفض فقط')}</label>
         <div className="grow" />
-        <span className="small secondary">{t('Value at cost', 'القيمة بالتكلفة')}: <b className="num">{money(value)}</b></span>
+        <Link className="small" to="/stock/adjustments">{t('Corrections', 'التسويات')}</Link>
+        <Link className="small" to="/stock/transfers">{t('Transfers', 'النقل')}</Link>
       </div>
       <div className="card table-wrap">
-        {!list.data ? <Loading /> : list.data.length ? (
+        {!list.data ? <Loading /> : rows.length ? (
           <table data-testid="stock-table">
-            <thead><tr><th>{t('Code', 'الرمز')}</th><th>{t('Item', 'الصنف')}</th><th>{t('Branch', 'الفرع')}</th><th className="right">{t('In stock', 'المخزون')}</th><th className="right">{t('Alert at', 'حد التنبيه')}</th><th className="right">{t('Value', 'القيمة')}</th></tr></thead>
+            <thead><tr><th>{cloth ? t('Cloth', 'القماش') : t('Product', 'المنتج')}</th><th>{t('Branch', 'الفرع')}</th><th className="right">{cloth ? t('Metres', 'الأمتار') : t('Quantity', 'الكمية')}</th><th><span className="sr-only">{t('Actions', 'إجراءات')}</span></th></tr></thead>
             <tbody>
-              {list.data.map((r) => (
-                <tr key={`${r.kind}${r.id}${r.size}${r.branch_id}`} className="click" onClick={() => setHist(r)}>
-                  <td className="small num">{r.sku}</td>
-                  <td className="strong">{L(r)}{r.size ? <span className="muted"> · {r.size}</span> : null}{r.kind === 'fabric' ? <span className="small muted"> · {t('cloth', 'قماش')}</span> : null}</td>
+              {rows.map((r) => (
+                <tr key={`${r.kind}${r.id}${r.size}${r.branch_id}`} data-testid={`stock-${r.sku}${r.size ? `-${r.size}` : ''}`}>
+                  <td className="click" onClick={() => setHist(r)}><span className="strong">{L(r)}</span>{r.size ? <span className="muted"> · {r.size}</span> : null}<div className="small muted num">{r.sku}</div></td>
                   <td className="small">{L({ name_en: r.branch_en, name_ar: r.branch_ar })}</td>
-                  <td className={`right num strong ${r.low ? 'tone-error' : ''}`}>{num(r.qty)} {r.unit ?? ''}</td>
-                  <td className="right num muted">{num(r.alert_qty)}</td>
-                  <td className="right num">{money(r.value)}</td>
+                  <td className={`right num strong ${r.low ? 'tone-error' : ''}`} title={r.low ? t(`At or below the alert (${num(r.alert_qty)})`, `عند حد التنبيه أو أقل (${num(r.alert_qty)})`) : undefined}>
+                    {num(r.qty)} {cloth ? t('m', 'م') : r.unit ?? ''}
+                  </td>
+                  <td className="right">
+                    {can('products') ? (
+                      <button className="btn sm secondary" data-testid={`receive-${r.sku}${r.size ? `-${r.size}` : ''}`} onClick={() => setReceive({ item: { kind: r.kind, id: r.id, sku: r.sku, name: `${L(r)}${r.size ? ` · ${r.size}` : ''}`, size: r.size, cost: r.cost, price: r.price, unit: r.unit, branch_id: r.branch_id } })}>
+                        <Plus size={14} /> {t('Receive', 'استلام')}
+                      </button>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        ) : <Empty>{t('No tracked items. Turn on “Track stock” on a product or cloth, or receive a purchase.', 'لا أصناف متتبعة. فعّل "تتبع المخزون" في منتج أو قماش، أو استلم مشتريات.')}</Empty>}
+        ) : <Empty>{cloth ? t('No cloth tracked yet. Use Receive stock to add metres of a cloth.', 'لا أقمشة متتبعة بعد. استخدم "استلام مخزون" لإضافة أمتار قماش.') : t('No products tracked yet. Use Receive stock when products arrive.', 'لا منتجات متتبعة بعد. استخدم "استلام مخزون" عند وصول المنتجات.')}</Empty>}
       </div>
       {hist ? <Modal title={`${L(hist)}${hist.size ? ` · ${hist.size}` : ''}`} onClose={() => setHist(null)} wide><StockHistory kind={hist.kind} id={hist.id} /></Modal> : null}
+      {receive ? <ReceiveModal item={receive.item} onClose={() => setReceive(null)} /> : null}
     </div>
   );
 }

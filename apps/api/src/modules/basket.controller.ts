@@ -4,7 +4,7 @@ import { CustomerGuard, Me, type Customer } from '../auth.js';
 import { fail, need } from '../lib.js';
 import { quote } from '../pricing.js';
 import { latestMeasurement, memberFor } from './family.controller.js';
-import { onlineBranchId, stockLevel } from '../pos.js';
+import { onlineBranchId, stockLevel, thobeOptions } from '../pos.js';
 import { getSettings } from '../lib.js';
 
 type AddBody =
@@ -12,8 +12,10 @@ type AddBody =
   | {
       kind: 'thobe';
       collarId: string;
+      cuffId?: string | null;
       fabricId: string;
-      colourId?: string | null;
+      /** Metres of cloth per thobe; a re-order sends the earlier order's length. */
+      metres?: number | string | null;
       memberId: string;
       measureMethod: 'saved' | 'branch' | 'home';
       appointmentId?: string;
@@ -52,11 +54,9 @@ export class BasketController {
       return this.get(me);
     }
     if (body?.kind !== 'thobe') fail('invalid_kind');
-    const collar = await db.one('select id from collars where id = $1 and active', [need(body.collarId, 'collarId')]);
-    const fabric = await db.one('select id from fabrics where id = $1 and active', [need(body.fabricId, 'fabricId')]);
-    // Colour is optional: a re-order picks only the type and the cloth.
-    const colour = body.colourId ? await db.one('select 1 from fabric_colours where fabric_id = $1 and colour_id = $2', [body.fabricId, body.colourId]) : true;
-    if (!collar || !fabric || !colour) fail('invalid_thobe_options');
+    // Type (collar), cuff and cloth. The length is the earlier order's on a re-order, otherwise the cloth's usual length;
+    // staff set the exact metres at the visit.
+    const th = await thobeOptions({ collarId: need(body.collarId, 'collarId'), cuffId: body.cuffId || null, fabricId: need(body.fabricId, 'fabricId'), metres: body.metres }, db.pool);
     await memberFor(me.id, need(body.memberId, 'memberId'));
     const method = body.measureMethod;
     if (method === 'saved') {
@@ -68,11 +68,11 @@ export class BasketController {
       );
       if (!appt) fail('appointment_not_found');
     } else fail('invalid_measure_method');
-    const remarks = body.remarks ? String(body.remarks).slice(0, 200) : null;
+    const remarks = body.remarks ? String(body.remarks).slice(0, 1000) : null;
     await db.pool.query(
       `insert into basket_items (customer_id, kind, qty, thobe, member_id, measure_method, appointment_id, remarks)
        values ($1,'thobe',$2,$3,$4,$5,$6,$7)`,
-      [me.id, qty, { collarId: body.collarId, fabricId: body.fabricId, colourId: body.colourId || null }, body.memberId, method, method === 'saved' ? null : body.appointmentId, remarks],
+      [me.id, qty, { collarId: th.collar.id, cuffId: th.cuff?.id ?? null, fabricId: th.fabric.id, metres: body.metres == null || body.metres === '' ? null : th.metres }, body.memberId, method, method === 'saved' ? null : body.appointmentId, remarks],
     );
     return this.get(me);
   }

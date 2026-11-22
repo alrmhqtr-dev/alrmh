@@ -23,7 +23,6 @@ const REPORTS: [string, string, string, string, string][] = [
   ['payments', 'Payments by method', 'الدفعات حسب الطريقة', 'Money in and out by cash, card, transfer and SADAD.', 'الداخل والخارج نقدًا وبطاقة وتحويلًا وسداد.'],
   ['customers', 'Top customers', 'أفضل العملاء', '', ''],
   ['groups', 'Customer groups', 'مجموعات العملاء', '', ''],
-  ['agents', 'Agents and commission', 'الوكلاء والعمولات', '', ''],
   ['staff', 'Sales by staff', 'المبيعات حسب الموظف', '', ''],
   ['tax', 'Tax', 'الضرائب', 'Tax included in sales, purchases and expenses, by month.', 'الضريبة في المبيعات والمشتريات والمصاريف شهريًا.'],
   ['registers', 'Cash registers', 'صناديق النقد', '', ''],

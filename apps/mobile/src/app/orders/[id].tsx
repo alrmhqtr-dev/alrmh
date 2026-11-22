@@ -99,7 +99,7 @@ export default function Tracking() {
             it.kind === 'thobe' ? t('track.thobeFor', { name: s.member?.name ?? '' }) : it.kind === 'reward' ? t('track.reward', { name: f.name(s.product) }) : f.name(s.product);
           const sub =
             it.kind === 'thobe'
-              ? [f.name(s.thobe.collar), f.name(s.thobe.fabric), s.thobe.colour ? f.name(s.thobe.colour) : ''].filter(Boolean).join(' · ') + (it.qty > 1 ? ` · ×${it.qty}` : '')
+              ? [f.name(s.thobe.collar), s.thobe.cuff ? f.name(s.thobe.cuff) : '', f.name(s.thobe.fabric), s.thobe.metres ? `${s.thobe.metres} ${t('again.metres')}` : ''].filter(Boolean).join(' · ') + (it.qty > 1 ? ` · ×${it.qty}` : '')
               : `${s.size ? t('basket.sizeN', { size: s.size }) + ' · ' : ''}×${it.qty}`;
           return (
             <View key={it.id}>

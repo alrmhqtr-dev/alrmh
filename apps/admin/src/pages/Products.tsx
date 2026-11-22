@@ -6,7 +6,7 @@ import { api, errorMessage, mediaUrl, shrinkImage, uploadImage } from '../lib/ap
 import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
 import { money, num } from '../lib/format';
-import { Empty, Field, Input, Loading, Modal, PageHead, SearchBox, Select, TextArea, useToast } from '../ui';
+import { Empty, Field, Input, Loading, Modal, PageHead, SearchBox, Select, TextArea, useToast, confirmSave } from '../ui';
 import { StockHistory } from './Stock';
 
 export type Product = {
@@ -187,7 +187,7 @@ function ProductModal({ item, categories, onClose }: { item: Partial<Product>; c
       footer={
         <>
           <button className="btn secondary" onClick={onClose}>{t('Cancel', 'إلغاء')}</button>
-          <button className="btn" data-testid="product-save" disabled={save.isPending || uploading || !v.name_en || !v.name_ar || v.price === ''} onClick={() => save.mutate()}>{t('Save', 'حفظ')}</button>
+          <button className="btn" data-testid="product-save" disabled={save.isPending || uploading || !v.name_en || !v.name_ar || v.price === ''} onClick={async () => (isNew || (await confirmSave())) && save.mutate()}>{t('Save', 'حفظ')}</button>
         </>
       }
     >

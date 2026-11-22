@@ -28,7 +28,7 @@ export default function ForWhomStep() {
 
   return (
     <DesignStep
-      step={4}
+      step={3}
       label={t('design.forWhom')}
       preview={false}
       priceLabel={chosen ? t('design.forName', { name: chosen.name }) : f.name(fabric)}

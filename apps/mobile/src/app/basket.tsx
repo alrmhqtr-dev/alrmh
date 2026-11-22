@@ -19,7 +19,7 @@ export function lineDetails(line: BasketLine, t: any, f: any): string[] {
       : line.appointment
         ? t(line.appointment.kind === 'home' ? 'review.homeVisitWhen' : 'review.branchVisit', { when: f.when(line.appointment.startsAt) })
         : '';
-  return [`${line.member?.name} · ${f.name(line.thobe?.collar)}`, [f.name(line.thobe?.fabric), line.thobe?.colour ? f.name(line.thobe.colour) : ''].filter(Boolean).join(' · '), method];
+  return [`${line.member?.name} · ${f.name(line.thobe?.collar)}`, [line.thobe?.cuff ? f.name(line.thobe.cuff) : '', f.name(line.thobe?.fabric), line.thobe?.metres ? `${line.thobe.metres} ${t('again.metres')}` : ''].filter(Boolean).join(' · '), method];
 }
 
 export default function BasketScreen() {

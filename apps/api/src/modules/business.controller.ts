@@ -97,7 +97,7 @@ export class BusinessController {
       .map((i: any) => {
         const label =
           i.kind === 'thobe'
-            ? `${t('Thobe', 'ثوب')} · ${esc(name(i.snapshot.thobe?.collar))} · ${esc(name(i.snapshot.thobe?.fabric))}<br><small>${esc(i.snapshot.member?.name ?? '')}</small>`
+            ? `${t('Thobe', 'ثوب')} · ${esc(name(i.snapshot.thobe?.collar))}${i.snapshot.thobe?.cuff ? ` · ${esc(name(i.snapshot.thobe.cuff))}` : ''} · ${esc(name(i.snapshot.thobe?.fabric))}${i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}<br><small>${esc(i.snapshot.member?.name ?? '')}</small>`
             : i.kind === 'product'
               ? `${esc(name(i.snapshot.product))}${i.snapshot.size ? ` · ${esc(i.snapshot.size)}` : ''}`
               : t('Sale', 'مبيعات');
@@ -127,7 +127,7 @@ ${r.customer_name ? `<div class="meta"><span>${esc(r.customer_name)}</span><span
 ${r.stage === 'cancelled' ? `<p class="c"><span class="badge">${t('Cancelled', 'ملغاة')}</span></p>` : ''}
 <table><tr><td><small>${t('Item', 'الصنف')}</small></td><td class="n"><small>${t('Qty', 'الكمية')}</small></td><td class="n"><small>${t('QAR', 'ر.ق')}</small></td></tr>${lines}
 ${r.discount > 0 ? row(t('Discount', 'الخصم'), -r.discount) : ''}
-${r.service_charge > 0 ? row(`${t('Service', 'الخدمة')}${r.service_en ? ` · ${esc(ar ? r.service_ar : r.service_en)}` : ''}`, r.service_charge) : ''}
+${r.service_charge > 0 ? row(t('Service', 'الخدمة'), r.service_charge) : ''}
 ${r.delivery_fee > 0 ? row(t('Delivery', 'التوصيل'), r.delivery_fee) : ''}
 ${r.points_used > 0 ? row(t('Points used', 'النقاط المستخدمة'), -r.points_used) : ''}
 ${row(t('Total', 'الإجمالي'), r.total, true)}

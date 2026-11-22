@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../lib/api';
 import { L, t } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
-import { Field, Input, Loading, PageHead, useToast } from '../ui';
+import { Field, Input, Loading, PageHead, useToast, confirmSave } from '../ui';
 
 type S = {
   delivery_fee: number;
@@ -52,7 +52,7 @@ export default function Settings() {
   return (
     <div className="stack lg">
       <PageHead title={t('Fees & rules', 'الرسوم والقواعد')} sub={t('Prices and rules the app applies at checkout and in rewards.', 'الأسعار والقواعد التي يطبقها التطبيق عند الدفع وفي المكافآت.')}>
-        {editable ? <button className="btn" data-testid="settings-save" disabled={save.isPending} onClick={() => save.mutate()}>{t('Save changes', 'حفظ التغييرات')}</button> : null}
+        {editable ? <button className="btn" data-testid="settings-save" disabled={save.isPending} onClick={async () => (await confirmSave()) && save.mutate()}>{t('Save changes', 'حفظ التغييرات')}</button> : null}
       </PageHead>
       <div className="grid k2" style={{ alignItems: 'start' }}>
         <div className="card pad stack lg">

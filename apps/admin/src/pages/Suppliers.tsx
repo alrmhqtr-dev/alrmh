@@ -6,7 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
 import { date, methodLabel, money, todayQatar } from '../lib/format';
-import { Empty, Field, Input, Loading, Modal, PageHead, Select, Stat, TextArea, useToast } from '../ui';
+import { Empty, Field, Input, Loading, Modal, PageHead, Select, Stat, TextArea, useToast, confirmSave } from '../ui';
 
 export function PayModal({ supplierId, purchaseId, due, onClose }: { supplierId: string; purchaseId?: string; due?: number; onClose: () => void }) {
   const qc = useQueryClient();
@@ -110,7 +110,7 @@ export function SupplierDetail() {
       </div>
       {paying ? <PayModal supplierId={d.id} due={d.totals.balance > 0 ? d.totals.balance : undefined} onClose={() => setPaying(false)} /> : null}
       {edit ? (
-        <Modal title={t('Edit supplier', 'تعديل المورد')} onClose={() => setEdit(null)} wide footer={<><button className="btn secondary" onClick={() => setEdit(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" onClick={() => save.mutate()}>{t('Save', 'حفظ')}</button></>}>
+        <Modal title={t('Edit supplier', 'تعديل المورد')} onClose={() => setEdit(null)} wide footer={<><button className="btn secondary" onClick={() => setEdit(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" onClick={async () => (await confirmSave()) && save.mutate()}>{t('Save', 'حفظ')}</button></>}>
           <div className="grid k2">
             {[
               ['name', t('Name', 'الاسم')],

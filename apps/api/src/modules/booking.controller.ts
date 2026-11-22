@@ -6,16 +6,19 @@ import { memberFor } from './family.controller.js';
 import { config } from '../config.js';
 import { allowedReturn } from '../returns.js';
 
-type Window = { open: number; close: number; step: number; capacity: number; closed: number[] };
+/** The start minutes a visit can be booked at, each with its end (a fixed window for home visits, the slot length at a branch). */
+type Window = { starts: { start: number; end: number }[]; capacity: number; closed: number[] };
 
 async function windowFor(kind: string, branchId: string | undefined, client: Queryable = db.pool): Promise<Window> {
   if (kind === 'home') {
     const s = (await getSettings(client)).home_visit;
-    return { open: s.open_minute, close: s.close_minute, step: s.slot_minutes, capacity: s.capacity, closed: s.closed_weekdays };
+    return { starts: s.windows, capacity: s.capacity, closed: s.closed_weekdays };
   }
   const b = await db.one('select * from branches where id = $1 and active', [need(branchId, 'branchId')], client);
   if (!b) throw new NotFoundException({ code: 'branch_not_found' });
-  return { open: b.open_minute, close: b.close_minute, step: b.slot_minutes, capacity: b.slot_capacity, closed: b.closed_weekdays };
+  const starts = [];
+  for (let m = b.open_minute; m + b.slot_minutes <= b.close_minute; m += b.slot_minutes) starts.push({ start: m, end: m + b.slot_minutes });
+  return { starts, capacity: b.slot_capacity, closed: b.closed_weekdays };
 }
 
 async function takenCounts(kind: string, branchId: string | null, from: Date, to: Date, client: Queryable = db.pool, excludeId?: string) {
@@ -41,7 +44,7 @@ export async function assertSlotFree(kind: string, branchId: string | null, star
   const date = qatarDateString(startsAt);
   const minute = Math.round((startsAt.getTime() - qatarInstant(date, 0).getTime()) / 60000);
   const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
-  const onGrid = minute >= w.open && minute + w.step <= w.close && (minute - w.open) % w.step === 0;
+  const onGrid = w.starts.some((s) => s.start === minute);
   if (!onGrid || w.closed.includes(weekday)) fail('slot_invalid');
   if (startsAt.getTime() < Date.now() + 60 * 60_000) fail('slot_in_past');
   const taken = await takenCounts(kind, branchId, startsAt, new Date(startsAt.getTime() + 1), client, excludeId);
@@ -73,10 +76,10 @@ export class BookingController {
       closedWeekdays: w.closed,
       days: days.map((d) => {
         const times = [];
-        for (let m = w.open; m + w.step <= w.close; m += w.step) {
-          const at = qatarInstant(d.date, m);
+        for (const s of w.starts) {
+          const at = qatarInstant(d.date, s.start);
           const free = at.getTime() >= earliest && (taken.get(at.toISOString()) ?? 0) < w.capacity;
-          times.push({ startsAt: at.toISOString(), minute: m, available: free });
+          times.push({ startsAt: at.toISOString(), endsAt: qatarInstant(d.date, s.end).toISOString(), minute: s.start, endMinute: s.end, available: free });
         }
         return { ...d, times, available: times.some((t) => t.available) };
       }),

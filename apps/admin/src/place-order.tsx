@@ -5,11 +5,13 @@ import { Plus, Trash2 } from 'lucide-react';
 import { api, errorMessage } from './lib/api';
 import { RELATION, money, num } from './lib/format';
 import { L, t } from './lib/i18n';
-import { Field, Input, Modal, Select, useToast } from './ui';
+import { Field, Input, Modal, Select, TextArea, useToast } from './ui';
+import { ClothSelect, MetresInput, StylePicker, thobePrice, validMetres, type Cloth, type Style } from './thobe-options';
 
 type Catalogue = {
-  collars: { id: string; name_en: string; name_ar: string; active: boolean }[];
-  fabrics: { id: string; name_en: string; name_ar: string; price: number; active: boolean }[];
+  collars: (Style & { active: boolean })[];
+  cuffs: (Style & { active: boolean })[];
+  fabrics: (Cloth & { active: boolean })[];
 };
 type Customer = {
   id: string;
@@ -18,7 +20,8 @@ type Customer = {
   addresses: { id: string; label: string; line1: string; area: string; is_default: boolean }[];
   tier: { tier: { name_en: string; name_ar: string; points_per_thobe: number } };
 };
-type Line = { collarId: string; fabricId: string; qty: number };
+type Line = { collarId: string; cuffId: string; fabricId: string; metres: string; qty: number; remarks: string };
+const blank = (): Line => ({ collarId: '', cuffId: '', fabricId: '', metres: '', qty: 1, remarks: '' });
 
 /**
  * The order a customer places at their visit. They chose the type (collar) and
@@ -45,19 +48,20 @@ export function PlaceOrderModal({
   const cust = useQuery({ queryKey: ['customer', customerId], queryFn: () => api<Customer>(`/customers/${customerId}`) });
   const branches = useQuery({ queryKey: ['branches'], queryFn: () => api<{ id: string; name_en: string; name_ar: string; active: boolean }[]>('/branches') });
   const [member, setMember] = useState(memberId ?? '');
-  const [lines, setLines] = useState<Line[]>([{ collarId: '', fabricId: '', qty: 1 }]);
+  const [lines, setLines] = useState<Line[]>([blank()]);
   const [branch, setBranch] = useState(branchId ?? '');
   const [paid, setPaid] = useState(false);
 
   const collars = (cat.data?.collars ?? []).filter((c) => c.active);
+  const cuffs = (cat.data?.cuffs ?? []).filter((c) => c.active);
   const fabrics = (cat.data?.fabrics ?? []).filter((f) => f.active);
   const memberId_ = member || cust.data?.family[0]?.id || '';
   const branchId_ = branch || branches.data?.find((b) => b.active)?.id || '';
-  const subtotal = lines.reduce((a, l) => a + (fabrics.find((f) => f.id === l.fabricId)?.price ?? 0) * (Number(l.qty) || 0), 0);
+  const subtotal = Math.round(lines.reduce((a, l) => a + thobePrice(fabrics.find((f) => f.id === l.fabricId), l.metres) * (Number(l.qty) || 0), 0) * 100) / 100;
   const total = subtotal;
   const thobes = lines.reduce((a, l) => a + (Number(l.qty) || 0), 0);
   const pts = thobes * (cust.data?.tier.tier.points_per_thobe ?? 0);
-  const complete = lines.every((l) => l.collarId && l.fabricId && Number(l.qty) >= 1) && memberId_ && branchId_;
+  const complete = lines.every((l) => l.collarId && (l.cuffId || !cuffs.length) && l.fabricId && validMetres(l.metres) && Number(l.qty) >= 1) && memberId_ && branchId_;
   const member_ = useMemo(() => cust.data?.family.find((f) => f.id === memberId_), [cust.data, memberId_]);
 
   const set = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, k) => (k === i ? { ...l, ...patch } : l)));
@@ -67,7 +71,7 @@ export function PlaceOrderModal({
       api<{ orderId: string; number: string; total: number; pointsToEarn: number }>(`/customers/${customerId}/orders`, {
         body: {
           memberId: memberId_,
-          lines: lines.map((l) => ({ collarId: l.collarId, fabricId: l.fabricId, qty: Number(l.qty) })),
+          lines: lines.map((l) => ({ collarId: l.collarId, cuffId: l.cuffId || null, fabricId: l.fabricId, metres: Number(l.metres), qty: Number(l.qty), remarks: l.remarks.trim() || null })),
           branchId: branchId_,
           appointmentId,
           paidByCard: paid,
@@ -113,38 +117,36 @@ export function PlaceOrderModal({
       {member_ && !member_.latest ? <div className="note">{t(`No measurements saved for ${member_.name} yet. Record them first so the workshop has them.`, `لا توجد مقاسات محفوظة لـ ${member_.name}. سجّلها أولًا لتصل للورشة.`)}</div> : null}
 
       <div className="stack" style={{ gap: 8 }}>
-        {lines.map((l, i) => (
-          <div key={i} className="row" style={{ gap: 8, alignItems: 'flex-end' }}>
-            <div style={{ flex: 2 }}>
-              <Field label={i ? '' : t('Type', 'النوع')}>
-                <Select data-testid={`po-type-${i}`} value={l.collarId} onChange={(e) => set(i, { collarId: e.target.value })}>
-                  <option value="">{t('Choose…', 'اختر…')}</option>
-                  {collars.map((c) => <option key={c.id} value={c.id}>{L(c)}</option>)}
-                </Select>
+        {lines.map((l, i) => {
+          const cloth = fabrics.find((f) => f.id === l.fabricId);
+          return (
+            <div key={i} className="card pad stack" style={{ gap: 10 }}>
+              <div className="row spread">
+                <span className="overline">{t('Thobe', 'ثوب')} {lines.length > 1 ? i + 1 : ''}</span>
+                {lines.length > 1 ? (
+                  <button className="btn ghost icon-btn" aria-label={t('Remove line', 'حذف السطر')} onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))}>
+                    <Trash2 size={16} />
+                  </button>
+                ) : null}
+              </div>
+              <StylePicker label={t('Type (collar)', 'النوع (الياقة)')} items={collars} value={l.collarId} onChange={(id) => set(i, { collarId: id })} testid={`po-type-${i}`} />
+              {cuffs.length ? <StylePicker label={t('Cuff', 'الكبك')} items={cuffs} value={l.cuffId} onChange={(id) => set(i, { cuffId: id })} testid={`po-cuff-${i}`} /> : null}
+              <div className="grid" style={{ gridTemplateColumns: 'minmax(180px, 2fr) auto 90px', alignItems: 'start' }}>
+                <ClothSelect cloths={fabrics} value={l.fabricId} testid={`po-cloth-${i}`} onChange={(f) => set(i, { fabricId: f?.id ?? '', metres: f ? Number(f.metres_per_thobe || 3.5).toFixed(2) : '' })} />
+                <MetresInput value={l.metres} onChange={(v) => set(i, { metres: v })} testid={`po-metres-${i}`} />
+                <Field label={t('Thobes', 'الثياب')}>
+                  <Input data-testid={`po-qty-${i}`} type="number" min={1} max={20} value={l.qty} onChange={(e) => set(i, { qty: e.target.value as any })} />
+                </Field>
+              </div>
+              {cloth && validMetres(l.metres) ? <div className="small secondary">{num(Number(l.metres))} {t('m', 'م')} × {money(cloth.price)} = <b className="num">{money(thobePrice(cloth, l.metres))}</b> {t('a thobe', 'للثوب')}</div> : null}
+              <Field label={t('Notes for the tailor', 'ملاحظات للخياط')}>
+                <TextArea className="input notes" maxLength={1000} value={l.remarks} onChange={(e) => set(i, { remarks: e.target.value })} />
               </Field>
             </div>
-            <div style={{ flex: 2 }}>
-              <Field label={i ? '' : t('Cloth', 'القماش')}>
-                <Select data-testid={`po-cloth-${i}`} value={l.fabricId} onChange={(e) => set(i, { fabricId: e.target.value })}>
-                  <option value="">{t('Choose…', 'اختر…')}</option>
-                  {fabrics.map((f) => <option key={f.id} value={f.id}>{L(f)} · {money(f.price)}</option>)}
-                </Select>
-              </Field>
-            </div>
-            <div style={{ width: 90 }}>
-              <Field label={i ? '' : t('Thobes', 'الثياب')}>
-                <Input data-testid={`po-qty-${i}`} type="number" min={1} max={20} value={l.qty} onChange={(e) => set(i, { qty: e.target.value as any })} />
-              </Field>
-            </div>
-            {lines.length > 1 ? (
-              <button className="btn ghost icon-btn" aria-label={t('Remove line', 'حذف السطر')} onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))}>
-                <Trash2 size={16} />
-              </button>
-            ) : null}
-          </div>
-        ))}
+          );
+        })}
         {lines.length < 10 ? (
-          <button className="btn sm secondary" style={{ alignSelf: 'flex-start' }} data-testid="po-add-line" onClick={() => setLines((ls) => [...ls, { collarId: '', fabricId: '', qty: 1 }])}>
+          <button className="btn sm secondary" style={{ alignSelf: 'flex-start' }} data-testid="po-add-line" onClick={() => setLines((ls) => [...ls, blank()])}>
             <Plus size={14} /> {t('Another type or cloth', 'نوع أو قماش آخر')}
           </button>
         ) : null}

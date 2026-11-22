@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { L, t } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { weekdays, minuteToTime, timeToMinute } from '../lib/format';
-import { Field, Input, Loading, PageHead, useToast } from '../ui';
+import { Field, Input, Loading, PageHead, useToast, confirmSave } from '../ui';
 
 type Branch = {
   id: string;
@@ -27,7 +27,8 @@ type Branch = {
   lng: number | string | null;
 };
 const NEW_BRANCH: Branch = { id: '', name_en: '', name_ar: '', address_en: '', address_ar: '', phone: '', whatsapp: '', hours_en: '', hours_ar: '', open_minute: 960, close_minute: 1260, slot_minutes: 60, slot_capacity: 2, closed_weekdays: [5], active: true, lat: null, lng: null };
-type HomeVisit = { open_minute: number; close_minute: number; slot_minutes: number; capacity: number; closed_weekdays: number[] };
+type HomeVisit = { windows: { start: number; end: number }[]; capacity: number; closed_weekdays: number[] };
+const windowLabel = (w: { start: number; end: number }) => `${minuteToTime(w.start)}–${minuteToTime(w.end)}`;
 
 function slotsPreview(open: number, close: number, step: number) {
   const out: string[] = [];
@@ -123,7 +124,7 @@ export default function Branches() {
       <div className="card pad stack lg">
         <div className="row spread">
           <h2>{b.id ? `${t('Branch', 'فرع')} ${L(b)}` : t('New branch', 'فرع جديد')}</h2>
-          {editable ? <button className="btn" data-testid="branch-save" disabled={saveBranch.isPending} onClick={() => saveBranch.mutate()}>{t('Save branch', 'حفظ الفرع')}</button> : null}
+          {editable ? <button className="btn" data-testid="branch-save" disabled={saveBranch.isPending} onClick={async () => (!b!.id || (await confirmSave())) && saveBranch.mutate()}>{t('Save branch', 'حفظ الفرع')}</button> : null}
         </div>
         <div className="grid k2">
           <Field label={t('Name (English)', 'الاسم (إنجليزي)')}><Input data-testid="branch-name-en" disabled={!editable} value={b.name_en} onChange={(e) => set({ name_en: e.target.value })} /></Field>
@@ -156,19 +157,32 @@ export default function Branches() {
       <div className="card pad stack lg">
         <div className="row spread">
           <div>
-            <h2>{t('Home visits', 'الزيارات المنزلية')}</h2>
+            <h2>{t('Home orders: visit times', 'الطلبات المنزلية: أوقات الزيارة')}</h2>
             <div className="small secondary">{t(`Fee is set under Fees & rules (currently QAR ${settings.data?.home_visit_fee}).`, `الرسوم تُحدد في الرسوم والقواعد (حاليًا ${settings.data?.home_visit_fee} ر.ق).`)}</div>
           </div>
-          {editable ? <button className="btn" data-testid="home-save" disabled={saveHome.isPending} onClick={() => saveHome.mutate()}>{t('Save home visits', 'حفظ الزيارات المنزلية')}</button> : null}
+          {editable ? <button className="btn" data-testid="home-save" disabled={saveHome.isPending} onClick={async () => (await confirmSave()) && saveHome.mutate()}>{t('Save home visits', 'حفظ الزيارات المنزلية')}</button> : null}
         </div>
-        <SlotFields
-          disabled={!editable}
-          open={h.open_minute}
-          close={h.close_minute}
-          step={h.slot_minutes}
-          capacity={h.capacity}
-          onChange={(p) => setH({ ...h, open_minute: p.open ?? h.open_minute, close_minute: p.close ?? h.close_minute, slot_minutes: p.step ?? h.slot_minutes, capacity: p.capacity ?? h.capacity })}
-        />
+        <div className="stack" style={{ gap: 8 }} data-testid="home-windows">
+          <div className="small secondary">{t('Customers book one of these time windows; the tailor arrives within it.', 'يحجز العملاء إحدى هذه الفترات، ويصل الخياط خلالها.')}</div>
+          {h.windows.map((w, i) => (
+            <div key={i} className="row wrap" style={{ gap: 8, alignItems: 'flex-end' }}>
+              <Field label={i ? '' : t('From', 'من')}><Input type="time" disabled={!editable} data-testid={`window-start-${i}`} value={minuteToTime(w.start)} onChange={(e) => setH({ ...h, windows: h.windows.map((x, k) => (k === i ? { ...x, start: timeToMinute(e.target.value) } : x)) })} /></Field>
+              <Field label={i ? '' : t('To', 'إلى')}><Input type="time" disabled={!editable} data-testid={`window-end-${i}`} value={minuteToTime(w.end)} onChange={(e) => setH({ ...h, windows: h.windows.map((x, k) => (k === i ? { ...x, end: timeToMinute(e.target.value) } : x)) })} /></Field>
+              {editable && h.windows.length > 1 ? (
+                <button className="btn ghost icon-btn" aria-label={t('Remove window', 'حذف الفترة')} onClick={() => setH({ ...h, windows: h.windows.filter((_, k) => k !== i) })}><Trash2 size={16} /></button>
+              ) : null}
+            </div>
+          ))}
+          {editable && h.windows.length < 8 ? (
+            <button className="btn sm secondary" style={{ alignSelf: 'flex-start' }} onClick={() => setH({ ...h, windows: [...h.windows, { start: h.windows.at(-1)?.end ?? 540, end: Math.min(1440, (h.windows.at(-1)?.end ?? 540) + 180) }] })}>
+              <Plus size={14} /> {t('Add a window', 'إضافة فترة')}
+            </button>
+          ) : null}
+          <Field label={t('Visits per window', 'زيارات لكل فترة')} hint={t('How many homes the tailors can visit in one window', 'عدد المنازل التي يمكن زيارتها في الفترة الواحدة')}>
+            <Input type="number" min={1} max={50} disabled={!editable} style={{ maxWidth: 120 }} value={h.capacity} onChange={(e) => setH({ ...h, capacity: Number(e.target.value) })} />
+          </Field>
+          <div className="small secondary">{t('Customers see:', 'يرى العملاء:')} {[...h.windows].sort((a, b) => a.start - b.start).map(windowLabel).join(' · ')}</div>
+        </div>
         <Field label={t('No home visits on', 'لا زيارات منزلية يوم')}><Days disabled={!editable} value={h.closed_weekdays} onChange={(v) => setH({ ...h, closed_weekdays: v })} /></Field>
       </div>
     </div>

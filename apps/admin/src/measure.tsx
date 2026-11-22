@@ -4,9 +4,9 @@ import { api, errorMessage } from './lib/api';
 import { useAuth } from './lib/auth';
 import { MEASURE_FIELDS, date, measureLabel } from './lib/format';
 import { L, t } from './lib/i18n';
-import { Field, Input, Modal, Select, TextArea, useToast } from './ui';
+import { Field, Input, Modal, Select, TextArea, confirmSave, useToast } from './ui';
 
-export type Measurement = Record<(typeof MEASURE_FIELDS)[number][0], number> & { taken_at: string; tailor_name: string; remarks: string | null; method?: string };
+export type Measurement = Record<(typeof MEASURE_FIELDS)[number][0], number> & { id?: string; taken_at: string; tailor_name: string; remarks: string | null; method?: string };
 
 export function MeasurementGrid({ m }: { m: Measurement }) {
   return (
@@ -27,49 +27,56 @@ export function MeasurementGrid({ m }: { m: Measurement }) {
   );
 }
 
-export function MeasureModal({ memberId, memberName, previous, onClose, onSaved }: { memberId: string; memberName: string; previous?: Measurement | null; onClose: () => void; onSaved?: () => void }) {
+/**
+ * Records new measurements, pre-filled from the last ones. With `edit`, corrects that saved
+ * measurement instead (asks before saving; the date it was taken stays).
+ */
+export function MeasureModal({ memberId, memberName, previous, edit, onClose, onSaved }: { memberId: string; memberName: string; previous?: Measurement | null; edit?: Measurement & { id: string }; onClose: () => void; onSaved?: () => void }) {
+  previous = edit ?? previous;
   const { staff } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const branches = useQuery({ queryKey: ['branches'], queryFn: () => api<{ id: string; name_en: string; name_ar: string }[]>('/branches') });
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(MEASURE_FIELDS.map(([k]) => [k, previous ? String(Number(previous[k])) : ''])));
-  const [tailor, setTailor] = useState(staff?.name ?? '');
+  const [tailor, setTailor] = useState(edit?.tailor_name ?? staff?.name ?? '');
   const [method, setMethod] = useState<'branch' | 'home'>('branch');
   const [branchId, setBranchId] = useState<string>(staff?.branch_id ?? '');
   const [remarks, setRemarks] = useState(previous?.remarks ?? '');
   const save = useMutation({
     mutationFn: () =>
-      api(`/members/${memberId}/measurements`, {
+      edit
+        ? api(`/measurements/${edit.id}`, { method: 'PATCH', body: { ...Object.fromEntries(MEASURE_FIELDS.map(([k]) => [k, Number(values[k])])), tailorName: tailor, remarks: remarks.trim() || null } })
+        : api(`/members/${memberId}/measurements`, {
         body: { ...Object.fromEntries(MEASURE_FIELDS.map(([k]) => [k, Number(values[k])])), tailorName: tailor, method, branchId: method === 'branch' ? branchId || branches.data?.[0]?.id : null, remarks: remarks.trim() || null },
       }),
     onSuccess: () => {
-      toast(t(`Measurements saved for ${memberName}. The customer can see them in the app.`, `حُفظت مقاسات ${memberName} ويمكن للعميل رؤيتها في التطبيق.`));
+      toast(edit ? t(`${memberName}'s measurements were corrected.`, `تم تصحيح مقاسات ${memberName}.`) : t(`Measurements saved for ${memberName}. The customer can see them in the app.`, `حُفظت مقاسات ${memberName} ويمكن للعميل رؤيتها في التطبيق.`));
       qc.invalidateQueries();
       onSaved?.();
       onClose();
     },
     onError: (e) => toast(errorMessage(e), 'error'),
   });
-  const complete = MEASURE_FIELDS.every(([k]) => Number(values[k]) > 0);
+  const complete = MEASURE_FIELDS.every(([k]) => String(values[k] ?? '').trim() !== '');
   return (
     <Modal
-      title={`${t('Record measurements', 'تسجيل المقاسات')} · ${memberName}`}
+      title={`${edit ? t('Edit measurements', 'تعديل المقاسات') : t('Record measurements', 'تسجيل المقاسات')} · ${memberName}`}
       onClose={onClose}
       wide
       footer={
         <>
           <button className="btn secondary" onClick={onClose}>{t('Cancel', 'إلغاء')}</button>
-          <button className="btn" data-testid="measure-save" disabled={!complete || save.isPending} onClick={() => save.mutate()}>
-            {t('Save measurements', 'حفظ المقاسات')}
+          <button className="btn" data-testid="measure-save" disabled={!complete || save.isPending} onClick={async () => (!edit || (await confirmSave({ message: t(`Replace ${memberName}'s saved measurements with these?`, `استبدال مقاسات ${memberName} المحفوظة بهذه؟`) }))) && save.mutate()}>
+            {edit ? t('Save changes', 'حفظ التعديلات') : t('Save measurements', 'حفظ المقاسات')}
           </button>
         </>
       }
     >
-      {previous ? <div className="note">{t('Pre-filled from', 'معبأة من')} {date(previous.taken_at)}. {t('Change only what has changed.', 'غيّر ما تغيّر فقط.')}</div> : null}
+      {edit ? <div className="note">{t('Correcting the measurements taken on', 'تصحيح المقاسات المأخوذة في')} {date(edit.taken_at)}.</div> : previous ? <div className="note">{t('Pre-filled from', 'معبأة من')} {date(previous.taken_at)}. {t('Change only what has changed.', 'غيّر ما تغيّر فقط.')}</div> : null}
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}>
         {MEASURE_FIELDS.map(([k]) => (
           <Field key={k} label={`${measureLabel(k)} (${t('cm', 'سم')})`}>
-            <Input data-testid={`m-${k}`} type="number" inputMode="decimal" step="0.5" min={5} max={260} value={values[k]} onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))} />
+            <Input data-testid={`m-${k}`} type="number" inputMode="decimal" step="any" min={0} value={values[k]} onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))} />
           </Field>
         ))}
       </div>
@@ -77,6 +84,7 @@ export function MeasureModal({ memberId, memberName, previous, onClose, onSaved 
         <Field label={t('Tailor', 'الخياط')}>
           <Input value={tailor} onChange={(e) => setTailor(e.target.value)} />
         </Field>
+        {edit ? null : <>
         <Field label={t('Where', 'المكان')}>
           <Select value={method} onChange={(e) => setMethod(e.target.value as 'branch' | 'home')}>
             <option value="branch">{t('At the branch', 'في الفرع')}</option>
@@ -92,6 +100,7 @@ export function MeasureModal({ memberId, memberName, previous, onClose, onSaved 
             </Select>
           </Field>
         ) : <div />}
+        </>}
       </div>
       <Field label={t('Remarks for the workshop', 'ملاحظات للورشة')} hint={t('Shown to the customer and on the tailor sheet.', 'تظهر للعميل وفي ورقة الخياط.')}>
         <TextArea value={remarks} maxLength={300} onChange={(e) => setRemarks(e.target.value)} placeholder={t('e.g. Prefers a looser fit around the chest', 'مثال: يفضّل قصة أوسع عند الصدر')} />

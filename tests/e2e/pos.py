@@ -58,7 +58,7 @@ level = lambda: float(sql(f"select coalesce(sum(qty),0) from stock_moves where i
 PAGES = ["/", "/pos", "/sales", "/sales?payment=due", "/drafts", "/quotations", "/returns", "/shipments", "/registers", "/discounts", "/products", "/labels", "/stock", "/stock/adjustments",
          "/stock/transfers", "/suggestions", "/catalogue", "/brands", "/units", "/variations", "/warranties", "/purchases", "/purchases/new", "/suppliers", "/customers", "/customer-groups",
          "/expenses", "/expense-categories", "/tailor", "/tailor/measurements", "/factory", "/factory/photos", "/orders", "/appointments", "/import", "/m/products", "/m/sales",
-         "/settings/company", "/settings/invoice", "/settings/barcode", "/settings/pos", "/printing", "/whatsapp", "/tax-rates", "/service-types", "/agents"]
+         "/settings/company", "/settings/invoice", "/settings/barcode", "/settings/pos", "/printing", "/whatsapp", "/tax-rates"]
 OWNER_ONLY = ["/reports", "/reports?r=products", "/roles", "/staff", "/audit"]
 
 
@@ -108,21 +108,30 @@ def counter(browser, lang, email, password):
     page.screenshot(path=f"{SHOTS}/pos-done-{lang}.png")
     page.click('[data-testid="new-sale"]')
 
-    # ---- a customer added at the counter: measure, thobes, deposit ----
+    # ---- a new customer at the counter: name, mobile and measurements together; thobes; deposit ----
     phone = f"6{run[-4:]}{'1' if lang == 'ar' else '2'}00"[:8]
+    check(f"{tag} the counter asks: existing customer or new customer", page.locator('[data-testid="pos-customer-old"]').count() == 1 and page.locator('[data-testid="pos-add-customer"]').count() == 1)
     page.click('[data-testid="pos-add-customer"]')
     page.fill('[data-testid="pos-new-name"]', "سالم المري" if lang == "ar" else "Salem Al-Marri")
     page.fill('[data-testid="pos-new-phone"]', phone)
+    save_off = page.locator('[data-testid="pos-new-save"]').is_disabled()
+    for k, v in {"length_cm": 148, "shoulder_cm": 46, "chest_cm": 108, "waist_cm": 98, "sleeve_cm": 60, "neck_cm": 40, "cuff_cm": 24}.items():
+        page.fill(f'[data-testid="pos-new-{k}"]', str(v))
+    page.screenshot(path=f"{SHOTS}/pos-new-customer-{lang}.png")
+    check(f"{tag} a new customer can't be saved without their measurements", save_off and not page.locator('[data-testid="pos-new-save"]').is_disabled())
     page.click('[data-testid="pos-new-save"]')
     page.wait_for_selector('[data-testid="pos-customer"]', timeout=15000)
     page.click('[data-testid="pos-tab-thobes"]')
-    page.click('[data-testid="thobe-measure"]')
-    for k, v in {"length_cm": 148, "shoulder_cm": 46, "chest_cm": 108, "waist_cm": 98, "sleeve_cm": 60, "neck_cm": 40, "cuff_cm": 24}.items():
-        page.fill(f'[data-testid="m-{k}"]', str(v))
-    page.click('[data-testid="measure-save"]'); page.wait_for_timeout(1500)
-    page.select_option('[data-testid="thobe-collar"]', index=1)
+    page.locator('[data-testid^="thobe-collar-"]').first.click()
+    page.locator('[data-testid^="thobe-cuff-"]').first.click()
     page.select_option('[data-testid="thobe-fabric"]', index=1)
+    metres = page.input_value('[data-testid="thobe-metres"]')
+    page.click('[data-testid="thobe-metres-more"]')
     page.fill('[data-testid="thobe-qty"]', "2")
+    page.fill('[data-testid="thobe-remarks"]', "Pocket on the left\nLooser sleeves")
+    page.screenshot(path=f"{SHOTS}/pos-thobe-{lang}.png", full_page=True)
+    check(f"{tag} collar and cuff are picked by picture; the cloth length starts at the usual metres and + adds 0.5 m",
+          page.locator('.style-tile.on').count() == 2 and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)
     page.click('[data-testid="thobe-add"]')
     page.wait_for_timeout(1200)
     total = float("".join(ch for ch in page.locator('[data-testid="cart-total"]').inner_text() if ch.isdigit() or ch == "."))
@@ -140,6 +149,9 @@ def counter(browser, lang, email, password):
           sql(f"select stage from orders where id = '{order}'") == "measured" and sql(f"select phone from customers where id = '{cust}'") == f"+974{phone}"
           and sql(f"select count(*) from measurements m join family_members f on f.id = m.member_id where f.customer_id = '{cust}'") == "1"
           and sql(f"select sum(amount)::int from payments where order_id = '{order}'") == "100", sql(f"select stage, total from orders where id = '{order}'"))
+    line = sql(f"select (snapshot->'thobe'->>'metres') || ':' || (snapshot->'thobe'->'cuff' is not null) || ':' || (snapshot->>'remarks') from order_items where order_id = '{order}'")
+    m_, cuff_, notes_ = line.split(":", 2)
+    check(f"{tag} the thobes keep their metres, cuff and the long notes", float(m_) == float(metres) + 0.5 and cuff_ == "true" and notes_ == "Pocket on the left\nLooser sleeves", line)
 
     # ---- the balance, taken later on the order ----
     page.goto(f"{ADMIN}/orders/{order}")
@@ -170,6 +182,35 @@ def counter(browser, lang, email, password):
     if AXE:
         check(f"{tag} axe finds no accessibility issues on those pages", not axe_found, json.dumps({k: v[:3] for k, v in axe_found.items()}, ensure_ascii=False)[:1500])
 
+    # ---- the owner names the account; the admin can be installed ----
+    if email == ADMIN_EMAIL:
+        page.goto(ADMIN + "/")
+        page.wait_for_selector('[data-testid="add-your-name"]', timeout=15000)
+        shown = page.locator('[data-testid="top-account"]').inner_text().strip()
+        page.click('[data-testid="add-your-name"]')
+        page.fill('[data-testid="account-name"]', "Hamad Al-Thani")
+        page.click('[data-testid="account-name-save"]')
+        page.wait_for_function("document.querySelector('[data-testid=top-account]')?.textContent === 'Hamad Al-Thani'", timeout=15000)
+        page.keyboard.press("Escape")
+        page.goto(ADMIN + "/")
+        page.wait_for_selector("h1")
+        check(f"{tag} the owner shows as the account's email until named; once named, the name is used everywhere", shown == ADMIN_EMAIL and "Hamad" in page.locator("h1").inner_text() and page.locator('[data-testid="add-your-name"]').count() == 0)
+        man = page.request.get(ADMIN + "/manifest.webmanifest").json()
+        icon = page.request.get(ADMIN + "/icons/apple-touch-icon.png")
+        check(f"{tag} the admin can be added to an iPad home screen: manifest, home-screen icon, full-screen mode",
+              man["display"] == "standalone" and icon.ok and icon.headers.get("content-type") == "image/png"
+              and page.locator('link[rel="manifest"]').count() == 1 and page.locator('meta[name="apple-mobile-web-app-capable"]').get_attribute("content") == "yes")
+        sql(f"update staff_users set name = 'Owner' where email = '{ADMIN_EMAIL}'")
+        ipad = browser.new_context(viewport={"width": 1180, "height": 820}, has_touch=True, user_agent="Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")
+        ip = ipad.new_page()
+        ip.on("pageerror", lambda e: errors.append(f"{tag} ipad {e}"))
+        login(ip, email, password)
+        ip.click('[data-testid="install-app"]')
+        ip.wait_for_selector(".steps")
+        ip.screenshot(path=f"{SHOTS}/install-ipad-{lang}.png")
+        check(f"{tag} on an iPad, Install app shows how to add the admin to the home screen", "Add to Home Screen" in ip.locator(".steps").inner_text())
+        ipad.close()
+
     # ---- close the register ----
     page.goto(ADMIN + "/")
     page.click('[data-testid="register-pill"]')
@@ -183,10 +224,119 @@ def counter(browser, lang, email, password):
     ctx.close()
 
 
+def workshop(browser, lang):
+    """The workshop board, done orders, alerts, asking before edits, measurements, stock and invoices."""
+    tag = f"[{lang} workshop]"
+    sql(f"update staff_users set language = '{lang}' where email = '{ADMIN_EMAIL}'")
+    ctx = browser.new_context(viewport={"width": 1366, "height": 900})
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: errors.append(f"{tag} {e}"))
+    login(page, ADMIN_EMAIL, ADMIN_PASSWORD)
+
+    # Two thobe orders made at the counter, the older one first; the newer one is due tomorrow.
+    cust = call("POST", "/admin/customers", {"name": f"Board {lang}", "phone": f"7{run}{'1' if lang == 'ar' else '2'}0"[:8],
+                                             "measurements": {"length_cm": 150, "shoulder_cm": 46, "chest_cm": 110, "waist_cm": 100, "sleeve_cm": 61, "neck_cm": 40, "cuff_cm": 24}}, owner)
+    member = call("GET", f"/admin/customers/{cust['id']}", token=owner)["family"][0]["id"]
+    call("POST", "/admin/pos/register/open", {"branchId": branch, "openingCash": 0}, owner)
+    sale2 = lambda total: call("POST", "/admin/pos/sales", {"sale": {"branchId": branch, "customerId": cust["id"], "lines": [{"kind": "thobe", "memberId": member, "collarId": "classic-qatari", "cuffId": "single", "fabricId": "japanese-cotton", "qty": 1}]},
+                                                           "payments": [{"method": "card", "amount": total}]}, owner)
+    q = call("POST", "/admin/pos/quote", {"branchId": branch, "customerId": cust["id"], "lines": [{"kind": "thobe", "memberId": member, "collarId": "classic-qatari", "cuffId": "single", "fabricId": "japanese-cotton", "qty": 1}]}, owner)
+    a, b = sale2(q["total"]), sale2(q["total"])
+    sql(f"update orders set created_at = now() - interval '3 days' where id = '{a['orderId']}'")
+    tomorrow = sql("select ((now() at time zone 'Asia/Qatar')::date + 1)::text")
+    sql(f"update orders set expected_delivery = '{tomorrow}' where id = '{b['orderId']}'")
+
+    page.goto(ADMIN + "/orders"); page.wait_for_selector('[data-testid="col-measured"]', timeout=15000); page.wait_for_timeout(800)
+    col = page.locator('[data-testid="col-measured"] .ticket')
+    numbers = [x.get_attribute("data-testid").replace("ticket-", "") for x in col.all()]
+    tk = page.locator(f'[data-testid="ticket-{a["number"]}"]')
+    box = tk.bounding_box()
+    check(f"{tag} order cards are one row, oldest at the top, with no price",
+          numbers.index(a["number"]) < numbers.index(b["number"]) and box["height"] < 52 and "QAR" not in tk.inner_text() and "ر.ق" not in tk.inner_text(), f"{numbers} {box}")
+    page.screenshot(path=f"{SHOTS}/board-{lang}.png", full_page=True)
+    page.click(f'[data-testid="advance-{a["number"]}"]'); page.wait_for_timeout(1200)
+    check(f"{tag} the small arrow on a card moves it to the next stage", sql(f"select stage from orders where id = '{a['orderId']}'") == "cutting")
+    for st in ["stitching", "quality", "ready"]:
+        call("POST", f"/admin/orders/{a['orderId']}/stage", {"stage": st}, owner)
+    page.reload(); page.wait_for_selector(f'[data-testid="advance-{a["number"]}"]', timeout=15000)
+    label = page.locator(f'[data-testid="advance-{a["number"]}"]').get_attribute("aria-label")
+    page.click(f'[data-testid="advance-{a["number"]}"]'); page.wait_for_timeout(1200)
+    page.click('[data-testid="done-section"] button[aria-expanded]'); page.wait_for_timeout(400)
+    check(f"{tag} the last stage is Done (تم الاستلام); done orders move to the Completed section",
+          ("Done" in label or "تم الاستلام" in label) and sql(f"select stage from orders where id = '{a['orderId']}'") == "delivered"
+          and page.locator(f'[data-testid="ticket-{a["number"]}"]').count() == 0 and page.locator(f'[data-testid="done-{a["number"]}"]').count() == 1, label)
+    page.screenshot(path=f"{SHOTS}/board-done-{lang}.png", full_page=True)
+
+    # Alerts
+    page.goto(ADMIN + "/"); page.wait_for_selector('[data-testid="alerts-bell"]', timeout=15000); page.wait_for_timeout(800)
+    count = page.locator('[data-testid="alerts-count"]').inner_text()
+    page.click('[data-testid="alerts-bell"]')
+    panel = page.locator(".alerts-panel").inner_text()
+    page.screenshot(path=f"{SHOTS}/alerts-{lang}.png")
+    check(f"{tag} the bell shows alerts, including thobes due tomorrow that are not ready", int(count) >= 1 and f"#{b['number']}" in panel, panel[:300])
+    page.keyboard.press("Escape"); page.mouse.click(5, 880)
+
+    # Asking before saving an edit
+    page.goto(ADMIN + "/products"); page.wait_for_selector('table tbody tr', timeout=15000)
+    page.locator('table tbody tr.click').first.click()
+    page.wait_for_selector('[data-testid="product-save"]')
+    page.click('[data-testid="product-save"]')
+    asked = page.locator('[data-testid="confirm-dialog"]').count() == 1
+    page.screenshot(path=f"{SHOTS}/confirm-{lang}.png")
+    page.click('[data-testid="confirm-cancel"]')
+    still_open = page.locator('[data-testid="product-save"]').count() == 1
+    check(f"{tag} editing asks before saving; Cancel keeps the form open", asked and still_open)
+    page.keyboard.press("Escape")
+
+    # Editing measurements from the customer measurements page
+    page.goto(ADMIN + f"/tailor/measurements"); page.wait_for_selector(f'[data-testid="edit-measure-Board {lang}"]', timeout=15000)
+    page.click(f'[data-testid="edit-measure-Board {lang}"]')
+    page.fill('[data-testid="m-sleeve_cm"]', "63.5")
+    page.click('[data-testid="measure-save"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
+    check(f"{tag} measurements are edited from the customer measurements page (after asking)",
+          sql(f"select sleeve_cm::float || ':' || count(*) over () from measurements where member_id = '{member}'") == "63.5:1")
+
+    # Stock: cloth in metres, products by quantity, and new stock received
+    page.goto(ADMIN + "/stock"); page.wait_for_selector('[data-testid="receive-new"]', timeout=15000)
+    page.click('[data-testid="receive-new"]')
+    page.fill('[data-testid="receive-picker"]', "F-JAPANESE-COTTON"); page.wait_for_timeout(400)
+    page.press('[data-testid="receive-picker"]', "Enter")
+    page.wait_for_selector('[data-testid="receive-qty"]', timeout=5000)
+    page.fill('[data-testid="receive-qty"]', "25.5"); page.click('[data-testid="receive-save"]'); page.wait_for_timeout(1200)
+    got = sql(f"select coalesce(sum(qty),0)::float from stock_moves where item_kind = 'fabric' and item_id = 'japanese-cotton' and reason = 'received'")
+    page.screenshot(path=f"{SHOTS}/stock-cloth-{lang}.png", full_page=True)
+    check(f"{tag} cloth stock is received in metres on the stock page", float(got) >= 25.5, got)
+
+    # The invoice page: payments, no measurements
+    page.goto(ADMIN + "/sales"); page.wait_for_selector(f'[data-testid="sale-{b["number"]}"]', timeout=15000)
+    page.click(f'[data-testid="sale-{b["number"]}"]'); page.wait_for_selector('[data-testid="payment-row"]', timeout=15000)
+    body = page.locator("main").inner_text()
+    check(f"{tag} an invoice shows the payments, not the measurements",
+          page.locator(".mgrid").count() == 0 and page.locator('[data-testid^="measure-"]').count() == 0 and page.locator('[data-testid="payment-row"]').count() >= 1, body[:200])
+    page.goto(ADMIN + f"/orders/{b['orderId']}"); page.wait_for_selector(".mgrid", timeout=15000)
+    check(f"{tag} the same order from the workshop still shows the measurements", page.locator(".mgrid").count() == 1)
+    page.screenshot(path=f"{SHOTS}/invoice-{lang}.png", full_page=True)
+
+    # Mobiles read left to right in Arabic
+    page.goto(ADMIN + "/tailor/measurements"); page.wait_for_timeout(1500)
+    if lang == "ar":
+        el = page.locator(".num", has_text="+974").first
+        # The digits must be laid out left to right: "+974" ends up left of the last four digits.
+        order = el.evaluate("""e => {
+          const t = e.firstChild; const s = t.textContent; const r = document.createRange();
+          const at = (i) => { r.setStart(t, i); r.setEnd(t, i + 1); return r.getBoundingClientRect().left; };
+          return at(s.indexOf('+')) < at(s.length - 2);
+        }""")
+        check(f"{tag} a mobile in Arabic reads +974 then the number, left to right", order, el.inner_text())
+    ctx.close()
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=CHROME, args=["--no-sandbox"])
     counter(browser, "ar", CASHIER, "cashier-pass-2026")
     counter(browser, "en", ADMIN_EMAIL, ADMIN_PASSWORD)
+    workshop(browser, "en")
+    workshop(browser, "ar")
     browser.close()
 
 print("page errors:", errors or "none")

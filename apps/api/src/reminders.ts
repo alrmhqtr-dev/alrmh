@@ -1,6 +1,6 @@
 import { db } from './db.js';
 import { config } from './config.js';
-import { getSettings, notify, qatarDateString, qatarParts } from './lib.js';
+import { addDays, getSettings, notify, qatarDateString, qatarParts } from './lib.js';
 
 /*
  * Reminders, checked with the housekeeping every 10 minutes. They become
@@ -97,7 +97,64 @@ async function pointsReminders() {
   return due.length;
 }
 
+/** The day before a thobe order's pickup date, once it has reached quality inspection or is ready. */
+async function pickupTomorrowReminders() {
+  const tomorrow = addDays(qatarDateString(new Date()), 1);
+  const due = await db.many<{ id: string; number: string; customer_id: string; branch_en: string | null; branch_ar: string | null }>(
+    `update orders o set due_reminded_at = now()
+       from orders o2 left join branches b on b.id = coalesce(o2.branch_id, nullif(o2.address->>'branchId','')::uuid)
+      where o.id = o2.id and o.customer_id is not null and o.due_reminded_at is null
+        and o.stage in ('quality','ready') and o.expected_delivery = $1::date
+        and exists (select 1 from order_items i where i.order_id = o.id and i.kind = 'thobe')
+      returning o.id, o.number, o.customer_id, b.name_en as branch_en, b.name_ar as branch_ar`,
+    [tomorrow],
+  );
+  for (const o of due)
+    await notify(
+      o.customer_id,
+      'order',
+      {
+        en: { title: 'Pickup tomorrow', body: `Your thobes (order #${o.number}) will be ready to collect tomorrow${o.branch_en ? ` from our ${o.branch_en} branch` : ''}.` },
+        ar: { title: 'الاستلام غداً', body: `ثيابك (طلب رقم #${o.number}) ستكون جاهزة للاستلام غداً${o.branch_ar ? ` من فرع ${o.branch_ar}` : ''}.` },
+      },
+      `/orders/${o.id}`,
+    );
+  return due.length;
+}
+
+/** Thobes ready but not collected after the set number of days: one nudge, with any balance due. */
+async function waitingPickupReminders() {
+  const s = await getSettings();
+  const due = await db.many<{ id: string; number: string; customer_id: string; branch_en: string | null; branch_ar: string | null; balance: number }>(
+    `update orders o set pickup_reminded_at = now()
+       from orders o2 left join branches b on b.id = coalesce(o2.branch_id, nullif(o2.address->>'branchId','')::uuid)
+      where o.id = o2.id and o.customer_id is not null and o.pickup_reminded_at is null and o.stage = 'ready'
+        and exists (select 1 from order_items i where i.order_id = o.id and i.kind = 'thobe')
+        and coalesce((select max(e.at) from order_events e where e.order_id = o.id and e.stage = 'ready'), o.created_at) < now() - ($1 || ' days')::interval
+      returning o.id, o.number, o.customer_id, b.name_en as branch_en, b.name_ar as branch_ar,
+                greatest(0, o.total - coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0))::float as balance`,
+    [String(s.pickup.remind_after_days)],
+  );
+  for (const o of due)
+    await notify(
+      o.customer_id,
+      'reminder',
+      {
+        en: {
+          title: 'Your thobes are waiting for you',
+          body: `Order #${o.number} is ready to collect${o.branch_en ? ` at our ${o.branch_en} branch` : ''}.${o.balance > 0 ? ` Balance due: QAR ${o.balance}.` : ''}`,
+        },
+        ar: {
+          title: 'ثيابك بانتظارك',
+          body: `الطلب رقم #${o.number} جاهز للاستلام${o.branch_ar ? ` من فرع ${o.branch_ar}` : ''}.${o.balance > 0 ? ` المبلغ المتبقي: ${o.balance} ر.ق.` : ''}`,
+        },
+      },
+      `/orders/${o.id}`,
+    );
+  return due.length;
+}
+
 export async function sendReminders(now = new Date()) {
-  if (quietHours(now)) return { visits: 0, points: 0 };
-  return { visits: await visitReminders(), points: await pointsReminders() };
+  if (quietHours(now)) return { visits: 0, points: 0, pickupTomorrow: 0, waiting: 0 };
+  return { visits: await visitReminders(), points: await pointsReminders(), pickupTomorrow: await pickupTomorrowReminders(), waiting: await waitingPickupReminders() };
 }

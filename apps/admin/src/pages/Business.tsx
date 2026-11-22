@@ -6,7 +6,7 @@ import { api, errorMessage, mediaUrl, shrinkImage, uploadImage } from '../lib/ap
 import { useAuth } from '../lib/auth';
 import { t } from '../lib/i18n';
 import { fill, waLink } from '../lib/whatsapp';
-import { BranchSelect, Field, Input, Loading, PageHead, Select, TextArea, openPrint, useToast } from '../ui';
+import { BranchSelect, Field, Input, Loading, PageHead, Select, TextArea, openPrint, useToast, confirmSave } from '../ui';
 
 type Section = 'company' | 'invoice' | 'barcode' | 'pos' | 'printing' | 'whatsapp';
 const TITLES: Record<Section, [string, string, string, string]> = {
@@ -52,7 +52,7 @@ export function BusinessPage({ section: fixed }: { section?: Section }) {
   return (
     <div className="stack lg">
       <PageHead title={t(en, ar)} sub={t(subEn, subAr)}>
-        {editable ? <button className="btn" data-testid="business-save" disabled={save.isPending} onClick={() => save.mutate()}>{t('Save', 'حفظ')}</button> : null}
+        {editable ? <button className="btn" data-testid="business-save" disabled={save.isPending} onClick={async () => (await confirmSave()) && save.mutate()}>{t('Save', 'حفظ')}</button> : null}
       </PageHead>
       <div className="card pad stack" style={{ maxWidth: 880 }}>
         {section === 'company' ? (

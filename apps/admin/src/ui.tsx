@@ -117,6 +117,66 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 export const useToast = () => useContext(ToastContext);
 
+type ConfirmFn = (o?: { title?: string; message?: string; ok?: string }) => Promise<boolean>;
+const ConfirmContext = createContext<ConfirmFn>(async () => true);
+/**
+ * Asks before an edit is saved: "Save changes?" with Save and Cancel. Use it for changes to
+ * something that already exists, not for creating something new.
+ */
+export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const [ask, setAsk] = useState<{ title: string; message: string; ok: string; done: (v: boolean) => void } | null>(null);
+  const confirm = useCallback<ConfirmFn>(
+    (o) =>
+      new Promise<boolean>((done) =>
+        setAsk({
+          title: o?.title ?? t('Save changes?', 'حفظ التعديلات؟'),
+          message: o?.message ?? t('The changes replace what was saved before.', 'ستحل التعديلات محل ما حُفظ سابقًا.'),
+          ok: o?.ok ?? t('Save', 'حفظ'),
+          done,
+        }),
+      ),
+    [],
+  );
+  current = confirm;
+  const close = (v: boolean) => {
+    ask?.done(v);
+    setAsk(null);
+  };
+  useEffect(() => {
+    if (!ask) return;
+    // Captured first, so Escape or Enter answer this question and don't also close the form behind it.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' && e.key !== 'Enter') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      close(e.key === 'Enter');
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  });
+  return (
+    <ConfirmContext.Provider value={confirm}>
+      {children}
+      {ask ? (
+        <div className="scrim confirm-scrim" onMouseDown={(e) => e.target === e.currentTarget && close(false)}>
+          <div className="modal" role="alertdialog" aria-label={ask.title} data-testid="confirm-dialog" style={{ maxWidth: 400 }}>
+            <h2>{ask.title}</h2>
+            <div className="secondary">{ask.message}</div>
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn secondary" data-testid="confirm-cancel" onClick={() => close(false)}>{t('Cancel', 'إلغاء')}</button>
+              <button className="btn" data-testid="confirm-ok" onClick={() => close(true)} autoFocus>{ask.ok}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </ConfirmContext.Provider>
+  );
+}
+export const useConfirm = () => useContext(ConfirmContext);
+let current: ConfirmFn = async () => true;
+/** The same question from anywhere, without the hook: `onClick={async () => (await confirmSave()) && save.mutate()}`. */
+export const confirmSave: ConfirmFn = (o) => current(o);
+
 export function Tabs<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: [T, string][] }) {
   return (
     <div className="tabs" role="tablist">

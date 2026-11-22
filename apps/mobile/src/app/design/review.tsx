@@ -41,7 +41,6 @@ export default function Review() {
   const rows: [string, string, string][] = [
     [t('design.collar'), f.name(collar), '/design/collar'],
     [t('design.fabric'), f.name(fabric), '/design/fabric'],
-    [t('design.colour'), f.name(colour), '/design/colour'],
     [t('review.for'), member ? memberTitle(member, t) : '—', '/design/for-whom'],
     [t('design.measurements'), measureText, '/design/measure'],
     [t('review.remarks'), state.remarks.trim() || t('review.none'), '/design/measure'],
@@ -56,7 +55,6 @@ export default function Review() {
           kind: 'thobe',
           collarId: state.collarId,
           fabricId: state.fabricId,
-          colourId: state.colourId,
           memberId: state.memberId,
           measureMethod: state.method,
           appointmentId: state.appointment?.id,

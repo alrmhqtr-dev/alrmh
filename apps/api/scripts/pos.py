@@ -31,6 +31,9 @@ cashier = staff(f"cashier{run}@alrmh.qa", pw)
 keeper = staff(f"keeper{run}@alrmh.qa", pw)
 me = call("GET", "/admin/me", token=cashier)[1]
 check("roles: sign-in returns permissions and language", me["permissions"] == ["pos", "contacts", "expenses"] and me["language"] == "ar", me)
+s1, bad, _ = call("POST", "/admin/me/profile", {"name": " "}, cashier)
+s2, ok, _ = call("POST", "/admin/me/profile", {"name": "  Amin   Al-Kashir "}, cashier)
+check("account: staff set their own name (tidied); a blank name is refused", s1 == 400 and bad.get("code") == "invalid_name" and s2 == 200 and call("GET", "/admin/me", token=cashier)[1]["name"] == "Amin Al-Kashir", (bad, ok))
 s, _, _ = call("PATCH", "/admin/products/white-ghutra", {"price": 1}, cashier)
 check("roles: a cashier can't change product prices", s == 403)
 s, r, _ = call("POST", "/admin/roles/cashier/delete", {}, owner)
@@ -87,12 +90,12 @@ detail = call("GET", f"/admin/customers/{cust['id']}", token=owner)[1]
 member = detail["family"][0]["id"]
 call("POST", f"/admin/members/{member}/measurements", {"tailorName": "Yousef", "length_cm": 150, "shoulder_cm": 46, "chest_cm": 110, "waist_cm": 100, "sleeve_cm": 61, "neck_cm": 40, "cuff_cm": 24}, owner)
 collar = call("GET", "/admin/catalogue", token=owner)[1]["collars"][0]["id"]
-thobe = {"branchId": b1, "customerId": cust["id"], "lines": [{"kind": "thobe", "memberId": member, "collarId": collar, "fabricId": fab["id"], "qty": 2}]}
+thobe = {"branchId": b1, "customerId": cust["id"], "lines": [{"kind": "thobe", "memberId": member, "collarId": collar, "cuffId": "single", "fabricId": fab["id"], "metres": 3.25, "qty": 2}]}
 q = call("POST", "/admin/pos/quote", thobe, cashier)[1]
 cloth0 = level(k="fabric", i=fab["id"])
 s, t, _ = call("POST", "/admin/pos/sales", {"sale": thobe, "payments": [{"method": "cash", "amount": 100}]}, cashier)
 check("deposit: a customer can pay part now", s == 201 and t["paid"] == 100 and t["balance"] == round(q["total"] - 100, 2), t)
-check("deposit: cloth taken from stock (3.5 m a thobe)", level(k="fabric", i=fab["id"]) == cloth0 - 7)
+check("deposit: cloth taken from stock by the metres chosen (3.25 m a thobe)", level(k="fabric", i=fab["id"]) == cloth0 - 6.5)
 check("deposit: thobes start at Taking measurements", sql(f"select stage from orders where id = '{t['orderId']}'") == "measured")
 for st in ["cutting", "stitching", "quality", "ready"]:
     call("POST", f"/admin/orders/{t['orderId']}/stage", {"stage": st}, owner)
@@ -174,7 +177,7 @@ check("returns: can't return more than was bought", s == 400 and r.get("code") =
 s, t2, _ = call("POST", "/admin/pos/sales", {"sale": thobe, "payments": [{"method": "cash", "amount": 50}]}, cashier)
 cloth = level(k="fabric", i=fab["id"])
 call("POST", f"/admin/orders/{t2['orderId']}/cancel", {"reason": "changed mind"}, mgr)
-check("cancel: cloth goes back to stock", level(k="fabric", i=fab["id"]) == cloth + 7)
+check("cancel: cloth goes back to stock", level(k="fabric", i=fab["id"]) == cloth + 6.5)
 s, r, _ = call("POST", f"/admin/orders/{t2['orderId']}/refunds", {"amount": 50, "method": "cash"}, mgr)
 check("cancel: deposit refunded in cash from the register", s == 201 and r["left"] == 0, r)
 

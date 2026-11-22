@@ -2,7 +2,8 @@ import { Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post,
 import { db } from '../db.js';
 import { fail, need, normaliseQatarPhone } from '../lib.js';
 import { parseCsv } from '../csv.js';
-import { AnyStaff, ContactsGuard, CurrentStaff, PurchasesGuard, audit, staffGuard, type StaffUser } from '../staff.js';
+import { AnyStaff, ContactsGuard, CurrentStaff, PurchasesGuard, audit, hasPerm, staffGuard, type StaffUser } from '../staff.js';
+import { FIELDS, measurementValues } from './admin-ops.controller.js';
 import { uuidOrNull } from './pos.controller.js';
 
 const RELATIONS = ['self', 'father', 'son', 'brother', 'friend', 'other'];
@@ -24,19 +25,28 @@ async function groupOrNull(v: unknown) {
 export class ContactsController {
   @Post('customers')
   @UseGuards(staffGuard('contacts', 'pos', 'workshop'))
-  async create(@CurrentStaff() me: StaffUser, @Body() b: { name?: string; phone?: string; email?: string; groupId?: string; notes?: string }) {
+  async create(@CurrentStaff() me: StaffUser, @Body() b: { name?: string; phone?: string; email?: string; groupId?: string; notes?: string; measurements?: Record<string, any> | null }) {
     const phone = normaliseQatarPhone(String(need(b?.phone, 'phone')));
     const name = String(need(b?.name, 'name')).trim().slice(0, 80);
     const existing = await db.one('select id, name, phone, deleted_at from customers where phone = $1', [phone]);
     if (existing && !existing.deleted_at) return { id: existing.id, name: existing.name, phone, existing: true };
+    // A new customer at the counter comes with their measurements.
+    const measured = b.measurements ? measurementValues(b.measurements) : null;
+    if (measured && !hasPerm(me, 'workshop', 'pos')) fail('forbidden');
     const group = await groupOrNull(b.groupId);
     return db.tx(async (c) => {
       const row = existing
         ? await db.one(`update customers set deleted_at = null, name = $2, email = $3, group_id = $4, notes = $5, source = 'pos' where id = $1 returning id`, [existing.id, name, optText(b.email, 120), group, optText(b.notes, 500)], c)
         : await db.one(`insert into customers (phone, name, email, group_id, notes, source, language) values ($1,$2,$3,$4,$5,'pos','ar') returning id`, [phone, name, optText(b.email, 120), group, optText(b.notes, 500)], c);
       // The account holder, so thobes and measurements can be recorded straight away.
-      if (!(await db.one(`select 1 from family_members where customer_id = $1 and relation = 'self'`, [row!.id], c)))
-        await c.query(`insert into family_members (customer_id, name, relation, size) values ($1,$2,'self','adult')`, [row!.id, name]);
+      let self = await db.one(`select id from family_members where customer_id = $1 and relation = 'self'`, [row!.id], c);
+      if (!self) self = await db.one(`insert into family_members (customer_id, name, relation, size) values ($1,$2,'self','adult') returning id`, [row!.id, name], c);
+      if (measured)
+        await c.query(
+          `insert into measurements (member_id, method, branch_id, tailor_name, ${FIELDS.join(', ')}, remarks, staff_id)
+           values ($1,'branch',$2,$3,${FIELDS.map((_, i) => `$${i + 4}`).join(',')},$11,$12)`,
+          [self!.id, me.branch_id ?? null, me.name, ...measured, b.measurements?.remarks ? String(b.measurements.remarks).slice(0, 300) : null, me.id],
+          );
       await audit(me, 'create', 'customer', row!.id, { phone, name }, c);
       return { id: row!.id, name, phone, existing: false };
     });
@@ -83,7 +93,7 @@ export class ContactsController {
     const needle = q?.trim() ? `%${q.trim().replace(/\s+/g, '')}%` : null;
     const words = q?.trim() ? `%${q.trim()}%` : null;
     return db.many(
-      `select distinct on (m.member_id) m.member_id, m.taken_at, m.tailor_name, m.method, m.length_cm, m.shoulder_cm, m.chest_cm, m.waist_cm, m.sleeve_cm, m.neck_cm, m.cuff_cm, m.remarks,
+      `select distinct on (m.member_id) m.id, m.member_id, m.taken_at, m.tailor_name, m.method, m.length_cm, m.shoulder_cm, m.chest_cm, m.waist_cm, m.sleeve_cm, m.neck_cm, m.cuff_cm, m.remarks,
               f.name as member_name, f.relation, f.size, c.id as customer_id, c.name as customer_name, c.phone,
               (select count(*)::int from measurements x where x.member_id = m.member_id) as records
          from measurements m join family_members f on f.id = m.member_id join customers c on c.id = f.customer_id

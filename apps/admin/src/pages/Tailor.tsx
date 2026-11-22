@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus, Printer, Ruler, ShoppingCart } from 'lucide-react';
+import { Pencil, Plus, Printer, Ruler, ShoppingCart } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { t } from '../lib/i18n';
@@ -129,6 +129,8 @@ export function TakeMeasurements() {
 /** مقاسات العملاء: everyone's latest measurements, ready to print. */
 export function MeasurementsList() {
   const [q, setQ] = useState('');
+  const { can } = useAuth();
+  const [editing, setEditing] = useState<any>(null);
   const list = useQuery({ queryKey: ['measurements', q], queryFn: () => api<any[]>(`/measurements${q ? `?q=${encodeURIComponent(q)}` : ''}`) });
   return (
     <div className="stack lg">
@@ -154,13 +156,17 @@ export function MeasurementsList() {
                   <td><Link to={`/customers/${m.customer_id}`}>{m.customer_name}</Link><div className="small muted num">{phone(m.phone)}</div></td>
                   {MEASURE_KEYS.map((k) => <td key={k} className="right num">{Number(m[k])}</td>)}
                   <td className="small">{date(m.taken_at)}<div className="muted">{m.tailor_name}</div></td>
-                  <td className="right"><button className="btn sm ghost" aria-label={t('Print', 'طباعة')} onClick={() => openPrint(`measure/${m.member_id}`)}><Printer size={15} /></button></td>
+                  <td className="right" style={{ whiteSpace: 'nowrap' }}>
+                    {can('workshop', 'pos') ? <button className="btn sm ghost" data-testid={`edit-measure-${m.member_name}`} aria-label={t('Edit', 'تعديل')} title={t('Edit', 'تعديل')} onClick={() => setEditing(m)}><Pencil size={15} /></button> : null}
+                    <button className="btn sm ghost" aria-label={t('Print', 'طباعة')} onClick={() => openPrint(`measure/${m.member_id}`)}><Printer size={15} /></button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         ) : <Empty>{t('No measurements yet.', 'لا مقاسات بعد.')}</Empty>}
       </div>
+      {editing ? <MeasureModal memberId={editing.member_id} memberName={editing.member_name} edit={editing} onClose={() => setEditing(null)} /> : null}
     </div>
   );
 }

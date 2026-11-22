@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useState, type FormEvent, type ReactNode } from 
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Calculator, ChevronRight, KeyRound, Languages, LogOut, ShoppingCart } from 'lucide-react';
+import { Calculator, ChevronRight, Download, Languages, LogOut, Share, ShoppingCart, UserRound } from 'lucide-react';
 import '@fontsource/readex-pro/400.css';
 import '@fontsource/readex-pro/500.css';
 import '@fontsource/readex-pro/600.css';
@@ -12,7 +12,8 @@ import { AuthProvider, useAuth, type Perm } from './lib/auth';
 import { api, errorMessage } from './lib/api';
 import { L, t, useLang } from './lib/i18n';
 import { date, todayQatar } from './lib/format';
-import { Field, Input, Loading, Modal, PageErrorBoundary, PageHead, Tiles, ToastProvider, useToast } from './ui';
+import { AlertsBell } from './alerts';
+import { ConfirmProvider, Field, Input, Loading, Modal, PageErrorBoundary, PageHead, Tiles, ToastProvider, useToast } from './ui';
 import { groups, quickNav, type NavGroup } from './nav';
 import { RegisterPill } from './register';
 import Home from './pages/Home';
@@ -95,41 +96,125 @@ function Login() {
   );
 }
 
-function PasswordModal({ onClose }: { onClose: () => void }) {
+function AccountModal({ onClose }: { onClose: () => void }) {
+  const { staff, rename } = useAuth();
   const toast = useToast();
+  const [name, setName] = useState(staff?.name === 'Owner' ? '' : (staff?.name ?? ''));
+  const [nameError, setNameError] = useState<string | null>(null);
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [again, setAgain] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const save = async () => {
+  const saveName = async () => {
+    setBusy(true);
+    setNameError(null);
+    try {
+      await rename(name);
+      toast(t('Name saved.', 'تم حفظ الاسم.'));
+    } catch (e) {
+      setNameError(errorMessage(e));
+    }
+    setBusy(false);
+  };
+  const savePassword = async () => {
     if (next !== again) return setError(t("The new passwords don't match.", 'كلمتا المرور الجديدتان غير متطابقتين.'));
     setBusy(true);
     setError(null);
     try {
       await api('/me/password', { body: { current, next } });
       toast(t('Password changed. Other devices were signed out.', 'تم تغيير كلمة المرور وتسجيل الخروج من الأجهزة الأخرى.'));
-      onClose();
+      setCurrent('');
+      setNext('');
+      setAgain('');
     } catch (e) {
       setError(errorMessage(e));
-      setBusy(false);
     }
+    setBusy(false);
   };
   return (
-    <Modal
-      title={t('Change your password', 'تغيير كلمة المرور')}
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn secondary" onClick={onClose}>{t('Cancel', 'إلغاء')}</button>
-          <button className="btn" data-testid="password-save" disabled={busy || !current || next.length < 10} onClick={save}>{t('Change password', 'تغيير كلمة المرور')}</button>
-        </>
-      }
-    >
-      <Field label={t('Current password', 'كلمة المرور الحالية')}><Input data-testid="password-current" type="password" dir="ltr" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} autoFocus /></Field>
+    <Modal title={t('My account', 'حسابي')} onClose={onClose} footer={<button className="btn secondary" onClick={onClose}>{t('Close', 'إغلاق')}</button>}>
+      <div className="small muted">{staff?.email}</div>
+      <Field label={t('Your name', 'اسمك')} hint={t('Shown in the admin, on receipts and in the audit log.', 'يظهر في لوحة الإدارة وعلى الإيصالات وفي سجل التدقيق.')} error={nameError}>
+        <Input data-testid="account-name" value={name} maxLength={60} autoComplete="name" onChange={(e) => setName(e.target.value)} autoFocus={staff?.name === 'Owner'} />
+      </Field>
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <button className="btn sm" data-testid="account-name-save" disabled={busy || name.trim().length < 2 || name.trim() === staff?.name} onClick={saveName}>{t('Save name', 'حفظ الاسم')}</button>
+      </div>
+      <div className="divider" />
+      <h2 className="h3">{t('Change your password', 'تغيير كلمة المرور')}</h2>
+      <Field label={t('Current password', 'كلمة المرور الحالية')}><Input data-testid="password-current" type="password" dir="ltr" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
       <Field label={t('New password', 'كلمة المرور الجديدة')} hint={t('At least 10 characters.', '10 أحرف على الأقل.')}><Input data-testid="password-next" type="password" dir="ltr" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /></Field>
       <Field label={t('New password again', 'أعد كتابة كلمة المرور الجديدة')} error={error}><Input data-testid="password-again" type="password" dir="ltr" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} /></Field>
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <button className="btn sm" data-testid="password-save" disabled={busy || !current || next.length < 10} onClick={savePassword}>{t('Change password', 'تغيير كلمة المرور')}</button>
+      </div>
     </Modal>
+  );
+}
+
+type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
+let deferredInstall: InstallEvent | null = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstall = e as InstallEvent;
+  window.dispatchEvent(new Event('alrmh:installable'));
+});
+const standalone = () => window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+/** iPhone, and iPad (which reports itself as a Mac with a touch screen). */
+const isIos = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isMacSafari = () => /Macintosh/.test(navigator.userAgent) && /Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Firefox/.test(navigator.userAgent) && navigator.maxTouchPoints <= 1;
+
+/** "Install app": the browser's own prompt where there is one, otherwise how to add it to the home screen or Dock. */
+function InstallButton() {
+  const [installable, setInstallable] = useState(Boolean(deferredInstall));
+  const [installed, setInstalled] = useState(standalone());
+  const [help, setHelp] = useState(false);
+  useEffect(() => {
+    const on = () => setInstallable(true);
+    const done = () => {
+      deferredInstall = null;
+      setInstalled(true);
+    };
+    window.addEventListener('alrmh:installable', on);
+    window.addEventListener('appinstalled', done);
+    return () => {
+      window.removeEventListener('alrmh:installable', on);
+      window.removeEventListener('appinstalled', done);
+    };
+  }, []);
+  if (installed || !(installable || isIos() || isMacSafari())) return null;
+  const click = async () => {
+    if (deferredInstall) {
+      await deferredInstall.prompt();
+      const { outcome } = await deferredInstall.userChoice;
+      deferredInstall = null;
+      setInstallable(false);
+      if (outcome === 'accepted') setInstalled(true);
+    } else setHelp(true);
+  };
+  return (
+    <>
+      <button className="pill" data-testid="install-app" onClick={click}><Download size={15} /> {t('Install app', 'تثبيت التطبيق')}</button>
+      {help ? (
+        <Modal title={t('Add AlRmh Admin to your home screen', 'أضف إدارة الرمح إلى الشاشة الرئيسية')} onClose={() => setHelp(false)} footer={<button className="btn" onClick={() => setHelp(false)}>{t('Done', 'تم')}</button>}>
+          {isIos() ? (
+            <ol className="steps">
+              <li>{t('Open this page in Safari.', 'افتح هذه الصفحة في سفاري.')}</li>
+              <li>{t('Tap the Share button', 'اضغط زر المشاركة')} <Share size={16} style={{ verticalAlign: '-3px' }} /> {t('(at the top on iPad, at the bottom on iPhone).', '(في الأعلى على الآيباد، وفي الأسفل على الآيفون).')}</li>
+              <li>{t('Scroll down and tap "Add to Home Screen".', 'مرّر للأسفل واضغط "إضافة إلى الشاشة الرئيسية".')}</li>
+              <li>{t('Tap "Add". The admin opens full screen from its icon.', 'اضغط "إضافة". تفتح لوحة الإدارة بملء الشاشة من أيقونتها.')}</li>
+            </ol>
+          ) : (
+            <ol className="steps">
+              <li>{t('In Safari, open the File menu.', 'في سفاري، افتح قائمة "ملف".')}</li>
+              <li>{t('Choose "Add to Dock…", then "Add".', 'اختر "إضافة إلى Dock…" ثم "إضافة".')}</li>
+            </ol>
+          )}
+          <div className="note">{t('Sign in once more inside the installed app: it keeps its own sign-in, separate from the browser.', 'سجّل الدخول مرة أخرى داخل التطبيق المثبّت: له تسجيل دخول خاص منفصل عن المتصفح.')}</div>
+        </Modal>
+      ) : null}
+    </>
   );
 }
 
@@ -217,6 +302,13 @@ function Shell() {
   const { staff, ready, logout, can } = useAuth();
   const lang = useLang();
   const [changePassword, setChangePassword] = useState(false);
+  // Until the owner adds a name, show the account's email instead of the placeholder "Owner".
+  const shownName = staff && staff.name !== 'Owner' ? staff.name : (staff?.email ?? '');
+  useEffect(() => {
+    const open = () => setChangePassword(true);
+    window.addEventListener('alrmh:account', open);
+    return () => window.removeEventListener('alrmh:account', open);
+  }, []);
   const location = useLocation();
   const allGroups = groups();
   const current = allGroups.find((g) => g.items.some((i) => i.to.split('?')[0] === location.pathname && location.pathname !== '/'))?.key ?? null;
@@ -247,11 +339,11 @@ function Shell() {
           <SideGroup key={g.key} g={g} open={openKey === g.key} onToggle={() => setOpenKey(openKey === g.key ? null : g.key)} />
         ))}
         <div className="who">
-          <div style={{ color: '#fff', fontWeight: 500 }}>{staff.name}</div>
+          <div style={{ color: '#fff', fontWeight: 500, overflowWrap: 'anywhere' }}>{shownName}</div>
           <div style={{ marginBottom: 8 }}>{L({ name_en: staff.role_en ?? staff.role, name_ar: staff.role_ar ?? staff.role })}</div>
           <div className="row wrap" style={{ gap: 6 }}>
-            <button className="btn sm secondary" onClick={() => setChangePassword(true)} data-testid="change-password">
-              <KeyRound size={14} /> {t('Password', 'كلمة المرور')}
+            <button className="btn sm secondary" onClick={() => setChangePassword(true)} data-testid="my-account">
+              <UserRound size={14} /> {t('My account', 'حسابي')}
             </button>
             <button className="btn sm secondary" onClick={logout} data-testid="logout">
               <LogOut size={14} /> {t('Sign out', 'خروج')}
@@ -259,7 +351,7 @@ function Shell() {
           </div>
         </div>
       </aside>
-      {changePassword ? <PasswordModal onClose={() => setChangePassword(false)} /> : null}
+      {changePassword ? <AccountModal onClose={() => setChangePassword(false)} /> : null}
       <div className="content">
         <header className="topbar no-print">
           {can('pos') ? (
@@ -267,10 +359,12 @@ function Shell() {
           ) : null}
           {can('pos') ? <RegisterPill /> : null}
           <Calc />
+          <AlertsBell />
           <div className="spacer" />
           <span className="date">{date(todayQatar())}</span>
+          <InstallButton />
           <LangSwitch />
-          <span className="strong small">{staff.name}</span>
+          <button className="linklike strong small" data-testid="top-account" onClick={() => setChangePassword(true)}>{shownName}</button>
         </header>
         <main className="main">
           <PageErrorBoundary key={location.pathname}>
@@ -334,11 +428,13 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={client}>
       <ToastProvider>
+        <ConfirmProvider>
         <AuthProvider>
           <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
             <Shell />
           </BrowserRouter>
         </AuthProvider>
+        </ConfirmProvider>
       </ToastProvider>
     </QueryClientProvider>
   </StrictMode>,

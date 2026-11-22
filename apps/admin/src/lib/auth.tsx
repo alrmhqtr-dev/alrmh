@@ -16,6 +16,7 @@ type Ctx = {
   /** True when the staff member has at least one of the permissions (or no permission is named). */
   can: (...perms: Perm[]) => boolean;
   switchLanguage: (l: Lang) => Promise<void>;
+  rename: (name: string) => Promise<void>;
 };
 const AuthContext = createContext<Ctx | null>(null);
 
@@ -73,7 +74,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [staff],
   );
 
-  return <AuthContext.Provider value={{ staff, ready, login, logout, can, switchLanguage }}>{children}</AuthContext.Provider>;
+  const rename = useCallback(
+    async (name: string) => {
+      const r = await api<{ name: string }>('/me/profile', { body: { name } });
+      setStaff((s) => (s ? { ...s, name: r.name } : s));
+    },
+    [],
+  );
+
+  return <AuthContext.Provider value={{ staff, ready, login, logout, can, switchLanguage, rename }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

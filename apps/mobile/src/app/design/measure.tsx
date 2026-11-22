@@ -70,7 +70,7 @@ export default function MeasureStep() {
 
   return (
     <DesignStep
-      step={5}
+      step={4}
       label={t('design.measurements')}
       preview={false}
       priceLabel={state.method === 'saved' ? t('basket.savedMeasurements') : f.name(fabric)}

@@ -6,7 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
 import { date, money, num } from '../lib/format';
-import { BranchSelect, Empty, Field, Input, Loading, Modal, PageHead, Select, TextArea, useToast } from '../ui';
+import { BranchSelect, Empty, Field, Input, Loading, Modal, PageHead, Select, TextArea, useToast, confirmSave } from '../ui';
 import { LISTS, type ListDef, type ListField } from '../lists';
 
 const toLocal = (iso: string | null | undefined) => (iso ? new Date(new Date(iso).getTime() + 3 * 3600_000).toISOString().slice(0, 16) : '');
@@ -146,7 +146,7 @@ export function ListPage({ name }: { name: string }) {
               {edit.id ? <button className="btn danger" onClick={() => confirm(t('Delete this?', 'حذف؟')) && del.mutate()}>{t('Delete', 'حذف')}</button> : null}
               <div className="grow" />
               <button className="btn secondary" onClick={() => setEdit(null)}>{t('Cancel', 'إلغاء')}</button>
-              <button className="btn" data-testid="list-save" disabled={save.isPending} onClick={() => save.mutate()}>{t('Save', 'حفظ')}</button>
+              <button className="btn" data-testid="list-save" disabled={save.isPending} onClick={async () => (!edit.id || (await confirmSave())) && save.mutate()}>{t('Save', 'حفظ')}</button>
             </>
           }
         >

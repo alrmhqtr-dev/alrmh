@@ -39,7 +39,7 @@ function Head({ biz, compact }: { biz: Biz; compact?: boolean }) {
       {c.logo_url ? <img src={mediaUrl(c.logo_url)} alt="" style={{ maxHeight: compact ? 40 : 60, maxWidth: '70%' }} /> : null}
       <h1>{L(c)}</h1>
       <div>{L(c, 'address')}</div>
-      {c.phone ? <div>{c.phone}</div> : null}
+      {c.phone ? <div><span className="ltr">{c.phone}</span></div> : null}
       {c.cr_number ? <div>{t('C.R.', 'س.ت')} {c.cr_number}</div> : null}
       {c.tax_number ? <div>{t('Tax no.', 'الرقم الضريبي')} {c.tax_number}</div> : null}
     </div>
@@ -48,7 +48,7 @@ function Head({ biz, compact }: { biz: Biz; compact?: boolean }) {
 
 const itemName = (i: any) =>
   i.kind === 'thobe'
-    ? `${t('Thobe', 'ثوب')} · ${L(i.snapshot.thobe?.collar)} · ${L(i.snapshot.thobe?.fabric)}${i.snapshot.thobe?.colour ? ` · ${L(i.snapshot.thobe.colour)}` : ''}`
+    ? `${t('Thobe', 'ثوب')} · ${L(i.snapshot.thobe?.collar)}${i.snapshot.thobe?.cuff ? ` · ${L(i.snapshot.thobe.cuff)}` : ''} · ${L(i.snapshot.thobe?.fabric)}${i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}`
     : i.kind === 'product'
       ? `${L(i.snapshot.product)}${i.snapshot.size ? ` · ${i.snapshot.size}` : ''}`
       : t('Sale', 'مبيعات');
@@ -192,7 +192,7 @@ function Ticket({ r, biz }: { r: any; biz: Biz }) {
             <div className="strong" style={{ fontSize: '1.15em' }}>{m?.name} · {RELATION[m?.relation] ?? ''}</div>
             {thobes.filter((i: any) => i.snapshot.member?.id === m?.id).map((i: any) => (
               <div key={i.id}>
-                <b>{i.qty} ×</b> {L(i.snapshot.thobe?.collar)} · {L(i.snapshot.thobe?.fabric)}{i.snapshot.thobe?.colour ? ` · ${L(i.snapshot.thobe.colour)}` : ''}
+                <b>{i.qty} ×</b> {L(i.snapshot.thobe?.collar)}{i.snapshot.thobe?.cuff ? ` · ${t('cuff', 'كبك')} ${L(i.snapshot.thobe.cuff)}` : ''} · {L(i.snapshot.thobe?.fabric)}{i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}
                 {i.snapshot.remarks ? <div>{t('Note', 'ملاحظة')}: {i.snapshot.remarks}</div> : null}
               </div>
             ))}

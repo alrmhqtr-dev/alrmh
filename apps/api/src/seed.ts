@@ -12,12 +12,13 @@ const collars = [
   ['wide-collar', 'Wide collar', 'ياقة عريضة'],
 ];
 
+/** Prices are per metre of cloth; a thobe takes about 3.5 m. */
 const fabrics = [
-  ['japanese-cotton', 'Japanese cotton', 'قطن ياباني', 'Soft, breathable · all seasons', 'ناعم وجيد التهوية · كل المواسم', 320],
-  ['swiss-voile', 'Swiss voile', 'فوال سويسري', 'Very light · summer', 'خفيف جداً · صيفي', 380],
-  ['linen-blend', 'Linen blend', 'مزيج كتان', 'Textured, cool · summer', 'ملمس بارز وبارد · صيفي', 350],
-  ['korean-poly-cotton', 'Korean poly-cotton', 'بولي قطن كوري', 'Easy care · everyday', 'سهل العناية · يومي', 260],
-  ['winter-wool', 'Winter wool blend', 'مزيج صوف شتوي', 'Warm, heavier · winter', 'دافئ وأثقل · شتوي', 420],
+  ['japanese-cotton', 'Japanese cotton', 'قطن ياباني', 'Soft, breathable · all seasons', 'ناعم وجيد التهوية · كل المواسم', 90],
+  ['swiss-voile', 'Swiss voile', 'فوال سويسري', 'Very light · summer', 'خفيف جداً · صيفي', 110],
+  ['linen-blend', 'Linen blend', 'مزيج كتان', 'Textured, cool · summer', 'ملمس بارز وبارد · صيفي', 100],
+  ['korean-poly-cotton', 'Korean poly-cotton', 'بولي قطن كوري', 'Easy care · everyday', 'سهل العناية · يومي', 75],
+  ['winter-wool', 'Winter wool blend', 'مزيج صوف شتوي', 'Warm, heavier · winter', 'دافئ وأثقل · شتوي', 120],
 ];
 
 const colours = [
@@ -178,8 +179,9 @@ async function seedDemoCustomer() {
           {
             thobe: {
               collar: collars.map(([id, name_en, name_ar]) => ({ id, name_en, name_ar })).find((x) => x.id === t.collar),
-              fabric: fabrics.map(([id, name_en, name_ar, , , price]) => ({ id, name_en, name_ar, price })).find((x) => x.id === t.fabric),
-              colour: { id: 'ivory', name_en: 'Ivory', name_ar: 'عاجي', hex: '#F3EBDC' },
+              fabric: fabrics.map(([id, name_en, name_ar, , , price]) => ({ id, name_en, name_ar, price, per: 'metre' })).find((x) => x.id === t.fabric),
+              metres: 3.5,
+              colour: null,
             },
             member: { id: t.member, name: t.name },
             measureMethod: 'saved',
@@ -192,10 +194,10 @@ async function seedDemoCustomer() {
       for (const [s, ago] of stages) await c.query(`insert into order_events (order_id, stage, at, note) values ($1,$2, now() - ($3 || ' hours')::interval, $4)`, [o, s, String(ago), s === 'measured' ? 'saved' : null]);
       return o;
     };
-    const o1 = await order('AR-09918', 367 - 18 + 18, 'delivered', [{ member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 320 }], [['measured', 8800], ['cutting', 8760], ['stitching', 8700], ['quality', 8660], ['ready', 8650], ['delivered', 8630]], 15);
-    const o2 = await order('AR-10311', 92, 'delivered', [{ member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 320 }], [['measured', 2200], ['cutting', 2150], ['stitching', 2100], ['quality', 2030], ['ready', 2010], ['delivered', 1980]], 15);
-    const o3 = await order('AR-10482', 6, 'stitching', [
-      { member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 320 },
+    const o1 = await order('9918', 367 - 18 + 18, 'delivered', [{ member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 315 }], [['measured', 8800], ['cutting', 8760], ['stitching', 8700], ['quality', 8660], ['ready', 8650], ['delivered', 8630]], 15);
+    const o2 = await order('10311', 92, 'delivered', [{ member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 315 }], [['measured', 2200], ['cutting', 2150], ['stitching', 2100], ['quality', 2030], ['ready', 2010], ['delivered', 1980]], 15);
+    const o3 = await order('10482', 6, 'stitching', [
+      { member: hamad, name: 'Hamad', collar: 'classic-qatari', fabric: 'japanese-cotton', price: 315 },
       { member: khalifa, name: 'Khalifa', collar: 'mandarin-band', fabric: 'linen-blend', price: 350 },
     ], [['measured', 144], ['cutting', 96], ['stitching', 30]], 40);
     void home;
@@ -206,14 +208,14 @@ async function seedDemoCustomer() {
         [cust.id, pts, remaining, String(daysAgo), orderId, label],
       );
     // 320 points earned in all (Gold), 165 spent at checkout: 155 to use.
-    await earn(o1, 15, 'Order #AR-09918', 347);
+    await earn(o1, 15, 'Order #9918', 347);
     await earn(o1, 290, 'Loyalty card transfer', 200, 125);
-    await earn(o2, 15, 'Order #AR-10311', 82);
-    await c.query(`insert into points_ledger (customer_id, kind, points, order_id, label, created_at) values ($1,'redeem',-165,$2,'Order #AR-10482', now() - interval '6 days')`, [cust.id, o3]);
+    await earn(o2, 15, 'Order #10311', 82);
+    await c.query(`insert into points_ledger (customer_id, kind, points, order_id, label, created_at) values ($1,'redeem',-165,$2,'Order #10482', now() - interval '6 days')`, [cust.id, o3]);
     await c.query(
       `insert into notifications (customer_id, kind, title_en, title_ar, body_en, body_ar, link, created_at) values
        ($1,'points','You''re now Gold','أصبحت في الفئة ذهبي','Every thobe now earns 20 points and every product 15.','كل ثوب يمنحك الآن 20 نقطة وكل منتج 15 نقاط.','/rewards', now() - interval '2 hours'),
-       ($1,'order','Sewing','الخياطة','#AR-10482 · Your thobes are being sewn.','#AR-10482 · ثيابك قيد الخياطة.','/orders', now() - interval '30 hours')`,
+       ($1,'order','Sewing','الخياطة','#10482 · Your thobes are being sewn.','#10482 · ثيابك قيد الخياطة.','/orders', now() - interval '30 hours')`,
       [cust.id],
     );
   });

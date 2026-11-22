@@ -25,7 +25,7 @@ export const PERMISSIONS = [
   'expenses', // record expenses
   'reports', // reports and exports
   'audit', // activity log
-  'staff', // users, roles and agents
+  'staff', // users and roles
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 export type StaffUser = { id: string; email: string; name: string; role: Role; branch_id: string | null; permissions: string[]; language: 'ar' | 'en'; role_en?: string; role_ar?: string };
@@ -102,6 +102,7 @@ export async function ensureOwner() {
   if (!email || !password) return;
   const exists = await db.one('select 1 from staff_users limit 1');
   if (exists) return;
-  await db.pool.query(`insert into staff_users (email, name, role, password_hash) values ($1, 'Owner', 'owner', $2)`, [email, await hashPassword(password)]);
+  const name = process.env.ADMIN_NAME?.trim() || 'Owner';
+  await db.pool.query(`insert into staff_users (email, name, role, password_hash) values ($1, $2, 'owner', $3)`, [email, name, await hashPassword(password)]);
   console.log(`created owner account ${email}`);
 }

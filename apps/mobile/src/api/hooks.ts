@@ -3,9 +3,12 @@ import { api } from './client';
 import { useSession } from '@/state/session';
 
 export type Bi = { name_en: string; name_ar: string };
-export type Collar = Bi & { id: string; shape?: string };
+export type Collar = Bi & { id: string; shape?: string; image_url?: string | null };
+export type Cuff = Bi & { id: string; image_url?: string | null };
 export type Category = Bi & { id: string };
-export type Fabric = Bi & { id: string; note_en: string; note_ar: string; price: number; colour_ids: string[] };
+/** Cloth is sold by the metre; `price` is one thobe at its usual length (`metres`). */
+export type Fabric = Bi & { id: string; note_en: string; note_ar: string; price: number; price_per_metre: number; metres: number };
+/** Kept for orders placed before colours were retired. */
 export type Colour = Bi & { id: string; hex: string };
 export type Product = Bi & {
   id: string;
@@ -24,8 +27,8 @@ export type Product = Bi & {
 export type Branch = Bi & { id: string; address_en: string; address_ar: string; phone: string; whatsapp: string; hours_en: string; hours_ar: string; closed_weekdays: number[]; lat: number | null; lng: number | null };
 export type Catalogue = {
   collars: Collar[];
+  cuffs: Cuff[];
   fabrics: Fabric[];
-  colours: Colour[];
   categories: Category[];
   products: Product[];
   branches: Branch[];
@@ -89,7 +92,7 @@ export type BasketLine = {
   points: number;
   product?: Bi & { id: string; category: string; image_url?: string | null };
   size?: string | null;
-  thobe?: { collar: Collar; fabric: Fabric; colour: Colour };
+  thobe?: { collar: Collar; cuff?: Cuff | null; fabric: Fabric; metres?: number; colour?: Colour | null };
   member?: { id: string; name: string; relation: string; size: string };
   measureMethod?: 'saved' | 'branch' | 'home';
   remarks?: string | null;
@@ -125,7 +128,7 @@ export type OrderSummary = {
   thobes: ThobeLine[] | null;
 };
 /** One thobe line of a past order, as re-order shows it. */
-export type ThobeLine = { collar: Collar; fabric: Bi & { id: string; price: number }; colour: Colour | null; member: { id: string; name: string }; qty: number };
+export type ThobeLine = { collar: Collar; cuff?: Cuff | null; fabric: Bi & { id: string; price: number }; metres?: number | null; colour: Colour | null; member: { id: string; name: string }; qty: number };
 export type OrderItem = { id: string; kind: 'thobe' | 'product' | 'reward'; snapshot: any; qty: number; unit_price: number; line_total: number; discount?: number };
 export type OrderDetail = OrderSummary & {
   subtotal: number;
@@ -166,7 +169,7 @@ export type Appointment = {
 export type LedgerEntry = { id: string; kind: 'earn' | 'redeem' | 'expire' | 'adjust' | 'refund'; points: number; remaining?: number; expires_at: string | null; label: string | null; created_at: string };
 export type Rewards = { balance: number; tier: Tier; next: Tier | null; lifetime: number; toNext: number; expiryMonths: number };
 export type Notification = { id: string; kind: string; title_en: string; title_ar: string; body_en: string; body_ar: string; link: string | null; created_at: string; read_at: string | null };
-export type Slots = { closedWeekdays: number[]; days: { date: string; weekday: number; available: boolean; times: { startsAt: string; minute: number; available: boolean }[] }[] };
+export type Slots = { closedWeekdays: number[]; days: { date: string; weekday: number; available: boolean; times: { startsAt: string; endsAt?: string; minute: number; endMinute?: number; available: boolean }[] }[] };
 
 const authed = () => ({ enabled: useSession().signedIn });
 

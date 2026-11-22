@@ -6,11 +6,11 @@ the built customer app and admin, `psql`, and Chrome. On a fresh database:
     API=http://localhost:4000 APP=http://localhost:8081 ADMIN=http://localhost:5174 python3 tests/e2e/journey.py
 
 
-Customer: language -> phone sign-up -> New order -> book a visit and pay the
-QAR 70 booking fee on the test page -> booking confirmed.
+Customer: language -> phone sign-up -> New order -> book a home visit in one of
+the three windows and pay the QAR 70 booking fee on the test page -> confirmed.
 Staff (admin, another browser): at the visit, record measurements and place the
-order (type, cloth, how many; paid on the card machine), move it through every
-stage. Customer: sees the order and each stage live, earns points for their
+order (type and cuff by picture, cloth and its metres, how many; paid on the
+card machine), move it through every stage. Customer: sees the order and each stage live, earns points for their
 tier (Silver). In English, staff top up points so the customer reaches Gold;
 the customer re-orders a past thobe with a different type and cloth and pays
 part of it with points.
@@ -92,8 +92,10 @@ def journey(browser, lang, method, phone, name, reorder):
     # ---- New order = book a visit and pay the booking fee ----
     page.goto(APP + "/home"); tap(page, '[data-testid="home-design"]')
     page.wait_for_url("**/book**", timeout=20000)
-    tap(page, f'[data-testid="kind-{method}"]')
     vis(page, '[data-testid^="date-"]').wait_for(timeout=20000); page.wait_for_timeout(800)
+    check(f"{tag}: home visits only, in the 9-1, 4-7 and 7-10 windows",
+          page.locator('[data-testid="kind-branch"]').count() == 0
+          and sorted(set(x.get_attribute("data-testid") for x in page.locator('[data-testid^="time-"] >> visible=true').all())) == ["time-1140", "time-540", "time-960"])
     page.locator('[data-testid^="time-"]:not([aria-disabled="true"]) >> visible=true').first.click()
     vis(page, '[data-testid="book-summary"]').wait_for(timeout=20000)
     label = vis(page, '[data-testid="book-confirm"]').inner_text()
@@ -124,17 +126,24 @@ def journey(browser, lang, method, phone, name, reorder):
     for k, v in {"length_cm": 149, "shoulder_cm": 47, "chest_cm": 111, "waist_cm": 102, "sleeve_cm": 62, "neck_cm": 41, "cuff_cm": 24}.items():
         admin.fill(f'[data-testid="m-{k}"]', str(v))
     admin.click('[data-testid="measure-save"]'); admin.wait_for_timeout(1500)
-    admin.click(f'[data-testid="appt-order-{name}"]'); admin.wait_for_selector('[data-testid="po-type-0"]', timeout=15000)
-    admin.select_option('[data-testid="po-type-0"]', "classic-qatari")
+    admin.click(f'[data-testid="appt-order-{name}"]'); admin.wait_for_selector('[data-testid="po-type-0-classic-qatari"]', timeout=15000)
+    admin.click('[data-testid="po-type-0-classic-qatari"]')
+    admin.click('[data-testid="po-cuff-0-double"]')
     admin.select_option('[data-testid="po-cloth-0"]', "japanese-cotton")
+    start = admin.input_value('[data-testid="po-metres-0"]')
+    admin.click('[data-testid="po-metres-0-more"]'); admin.click('[data-testid="po-metres-0-less"]'); admin.click('[data-testid="po-metres-0-less"]')
+    stepped = admin.input_value('[data-testid="po-metres-0"]')
+    admin.fill('[data-testid="po-metres-0"]', "3.75")
+    check(f"{tag}: the cloth length starts at the usual {fabric['metres']} m and the buttons move 0.5 m",
+          float(start) == fabric["metres"] and float(stepped) == fabric["metres"] - 0.5, f"{start} {stepped}")
     admin.fill('[data-testid="po-qty-0"]', "2")
-    total = fabric["price"] * 2
+    total = round(fabric["price_per_metre"] * 3.75, 2) * 2
     po_total = admin.locator('[data-testid="po-total"]').inner_text().replace(",", "")
     admin.check('[data-testid="po-paid"]'); admin.click('[data-testid="place-order"]')
     admin.wait_for_url("**/orders/**", timeout=15000)
     order_id = admin.url.rstrip("/").split("/")[-1]
     number = sql(f"select number from orders where id = '{order_id}'")
-    check(f"{tag}: staff place the order at the visit (2 thobes, QAR {total:.2f}, card machine, to collect from the branch); it starts at Taking measurements",
+    check(f"{tag}: staff place the order at the visit (2 thobes of 3.75 m, QAR {total:.2f}, card machine, to collect from the branch); it starts at Taking measurements",
           float("".join(ch for ch in po_total if ch.isdigit() or ch == ".")) == total and sql(f"select stage || ':' || total::numeric(10,2) from orders where id = '{order_id}'") == f"measured:{total:.2f}"
           and sql(f"select provider from payments where order_id = '{order_id}'") == "card_machine", f"{po_total} {sql(f'select stage, total from orders where id = {chr(39)}{order_id}{chr(39)}')}")
 
@@ -192,7 +201,8 @@ def journey(browser, lang, method, phone, name, reorder):
         page.screenshot(path=f"{SHOTS}/full-reorder-{lang}.png", full_page=True)
         tap(page, '[data-testid="reorder-place"]'); page.wait_for_url("**/checkout**", timeout=20000)
         vis(page, '[data-testid="checkout-total"]').wait_for(timeout=20000); page.wait_for_timeout(1500)
-        voile = next(f for f in cat["fabrics"] if f["id"] == "swiss-voile")["price"]
+        # The same 3.75 m a thobe as the first order, in the new cloth.
+        voile = round(next(f for f in cat["fabrics"] if f["id"] == "swiss-voile")["price_per_metre"] * 3.75, 2)
         due = voile * 2
         branch_card = vis(page, '[data-testid="pickup-branch"]').inner_text()
         check(f"{tag}: checkout says to collect from the branch, with no delivery fee", cat["branches"][0]["name_en"] in branch_card and "Delivery" not in vis(page, '[data-testid="checkout-total"]').locator("xpath=../..").inner_text(), branch_card)
@@ -204,9 +214,9 @@ def journey(browser, lang, method, phone, name, reorder):
         tap(page, '[data-testid="checkout-pay"]'); page.locator("button.pay").wait_for(timeout=20000); page.locator("button.pay").click()
         page.wait_for_url("**/order-placed/**", timeout=20000)
         o2 = page.url.rstrip("/").split("/")[-1]
-        line = sql(f"select (snapshot->'thobe'->'collar'->>'id') || ':' || (snapshot->'thobe'->'fabric'->>'id') || ':' || coalesce(snapshot->'thobe'->>'colour', 'none') || ':' || (snapshot->>'measureMethod') || ':' || qty from order_items where order_id = '{o2}' and kind = 'thobe'")
-        check(f"{tag}: the re-order keeps the saved measurements, with the new type and cloth and no colour",
-              line == "mandarin-band:swiss-voile:none:saved:2" and sql(f"select points_used from orders where id = '{o2}'") == str(used), line)
+        line = sql(f"select (snapshot->'thobe'->'collar'->>'id') || ':' || (snapshot->'thobe'->'cuff'->>'id') || ':' || (snapshot->'thobe'->'fabric'->>'id') || ':' || (snapshot->'thobe'->>'metres') || ':' || coalesce(snapshot->'thobe'->>'colour', 'none') || ':' || (snapshot->>'measureMethod') || ':' || qty from order_items where order_id = '{o2}' and kind = 'thobe'")
+        check(f"{tag}: the re-order keeps the saved measurements, the cuff and the 3.75 m, with the new type and cloth and no colour",
+              line == "mandarin-band:double:swiss-voile:3.75:none:saved:2" and sql(f"select points_used from orders where id = '{o2}'") == str(used), line)
         check(f"{tag}: the points are spent; the tier stays Gold",
               read_rewards(cid) == (bal - used, "gold"), str(read_rewards(cid)))
     actx.close()
@@ -254,7 +264,7 @@ def crash_screens(browser):
 
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=CHROME, args=["--no-sandbox"])
-    journey(browser, "en", "branch", "55594001", "Nasser Al-Hajri", reorder=True)
+    journey(browser, "en", "home", "55594001", "Nasser Al-Hajri", reorder=True)
     journey(browser, "ar", "home", "55594002", "فيصل الكواري", reorder=False)
     crash_screens(browser)
     browser.close()

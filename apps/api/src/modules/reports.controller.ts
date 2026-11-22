@@ -104,13 +104,11 @@ async function build(name: string, from: string, to: string, branch: string | nu
     case 'sales-by-branch':
     case 'sales-by-channel':
     case 'staff':
-    case 'agents':
     case 'groups': {
       const group = {
         'sales-by-branch': { sel: `coalesce(b.name_en, '—') as name_en, coalesce(b.name_ar, '—') as name_ar`, by: 'b.name_en, b.name_ar' },
         'sales-by-channel': { sel: `o.channel as name_en, o.channel as name_ar`, by: 'o.channel' },
         staff: { sel: `coalesce(u.name, 'Customer app') as name_en, coalesce(u.name, 'تطبيق العملاء') as name_ar`, by: 'u.name' },
-        agents: { sel: `ag.name as name_en, ag.name as name_ar, max(ag.commission_percent)::float as commission_percent, round(sum(o.total) * max(ag.commission_percent) / 100, 2)::float as commission`, by: 'ag.name' },
         groups: { sel: `coalesce(g.name_en, 'No group') as name_en, coalesce(g.name_ar, 'بدون مجموعة') as name_ar, count(distinct o.customer_id)::int as customers`, by: 'g.name_en, g.name_ar' },
       }[name]!;
       const rows = await db.many(
@@ -119,25 +117,18 @@ async function build(name: string, from: string, to: string, branch: string | nu
                 coalesce(sum(greatest(0, o.total - (select coalesce(sum(amount),0) from payments p where p.order_id = o.id and p.status = 'paid'))),0)::float as due
            from orders o left join branches b on b.id = o.branch_id left join staff_users u on u.id = o.placed_by_staff_id
            left join customers c on c.id = o.customer_id left join customer_groups g on g.id = c.group_id
-           ${name === 'agents' ? 'join' : 'left join'} agents ag on ag.id = o.agent_id
           where ${SALES} group by ${group.by} order by net desc`,
         p,
       );
       const cols: Col[] = [
-        { key: 'name', en: name === 'staff' ? 'Staff' : name === 'agents' ? 'Agent' : name === 'groups' ? 'Customer group' : name === 'sales-by-channel' ? 'Channel' : 'Branch', ar: name === 'staff' ? 'الموظف' : name === 'agents' ? 'الوكيل' : name === 'groups' ? 'مجموعة العملاء' : name === 'sales-by-channel' ? 'القناة' : 'الفرع' },
+        { key: 'name', en: name === 'staff' ? 'Staff' : name === 'groups' ? 'Customer group' : name === 'sales-by-channel' ? 'Channel' : 'Branch', ar: name === 'staff' ? 'الموظف' : name === 'groups' ? 'مجموعة العملاء' : name === 'sales-by-channel' ? 'القناة' : 'الفرع' },
         ...(name === 'groups' ? [{ key: 'customers', en: 'Customers', ar: 'العملاء', type: 'int' } as Col] : []),
         { key: 'count', en: 'Number of sales', ar: 'عدد المبيعات', type: 'int' },
         { key: 'net', en: 'Net sales', ar: 'صافي المبيعات', type: 'money' },
         { key: 'paid', en: 'Paid', ar: 'المدفوع', type: 'money' },
         { key: 'due', en: 'Due', ar: 'المتبقي', type: 'money' },
-        ...(name === 'agents'
-          ? ([
-              { key: 'commission_percent', en: 'Commission %', ar: 'نسبة العمولة', type: 'percent' },
-              { key: 'commission', en: 'Commission', ar: 'العمولة', type: 'money' },
-            ] as Col[])
-          : []),
       ];
-      return { columns: cols, rows, totals: totalsFor(rows, ['count', 'net', 'paid', 'due', ...(name === 'agents' ? ['commission'] : [])]) };
+      return { columns: cols, rows, totals: totalsFor(rows, ['count', 'net', 'paid', 'due']) };
     }
     case 'products': {
       const rows = await db.many(
@@ -372,7 +363,7 @@ async function build(name: string, from: string, to: string, branch: string | nu
   throw new NotFoundException({ code: 'not_found' });
 }
 
-export const REPORTS = ['profit-loss', 'sales-daily', 'sales-by-branch', 'sales-by-channel', 'products', 'stock', 'purchases', 'suppliers', 'expenses', 'payments', 'customers', 'groups', 'agents', 'staff', 'tax', 'registers', 'adjustments'];
+export const REPORTS = ['profit-loss', 'sales-daily', 'sales-by-branch', 'sales-by-channel', 'products', 'stock', 'purchases', 'suppliers', 'expenses', 'payments', 'customers', 'groups', 'staff', 'tax', 'registers', 'adjustments'];
 
 @Controller('v1/admin')
 export class ReportsController {

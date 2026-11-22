@@ -8,7 +8,7 @@ pnpm + Turborepo monorepo:
 | --- | --- | --- |
 | `apps/mobile` | Expo (React Native) app: the web PWA now, iOS and Android later from the same code | Vercel |
 | `apps/api` | NestJS API on PostgreSQL: auth, catalogue, family and measurements, bookings, basket, orders, payments, points, staff and audit log | Railway (Docker) + Railway Postgres |
-| `apps/admin` | Admin web app for staff (React + Vite): orders board, appointments, customers and measurements, catalogue, branches, fees, rewards, staff | Vercel |
+| `apps/admin` | Admin web app for staff (React + Vite): POS, orders board, home orders, customers and measurements, catalogue, branches, fees, rewards, staff | Vercel |
 | `docs/deployment.md` | Step-by-step setup for GitHub, Railway and Vercel | |
 
 Designs: [AlRMH in Figma](https://www.figma.com/design/wb9npW3MTKUTTmddJIChnf/AlRMH).
@@ -39,6 +39,8 @@ pnpm dev
 API smoke test (creates a customer, books, pays and delivers an order; signs in as the owner from `ADMIN_EMAIL`/`ADMIN_PASSWORD`): `API=http://localhost:4000 python3 apps/api/scripts/smoke.py 55559999`
 
 Regression checks for the money, booking, points and sign-in rules (needs `psql`, and the API started with `RATE_LIMITS=off`, `SEED_DEMO=true`, `HOUSEKEEPING_SECONDS=5`, `QUIET_HOURS=off` and `CORS_ORIGINS=http://localhost:8081`): `API=http://localhost:4000 python3 apps/api/scripts/regress.py`
+
+Counter checks for cloth by the metre, cuffs, new customers with measurements, measurement edits, home-visit windows, pickup reminders and staff alerts (same setup as the regression checks): `API=http://localhost:4000 python3 apps/api/scripts/counter.py`
 
 Browser checks (need Google Chrome and `pip install playwright`; the app served on 8081 and the admin on 5174 against a fresh database):
 - `tests/e2e/journey.py` signs up, designs, books, pays and follows an order through every stage in the admin, in English and Arabic, and checks the crash screens.
@@ -79,7 +81,7 @@ Staff sign in with email and password. The first owner is created from `ADMIN_EM
 - **Checkout:** one open checkout per customer; starting a new one closes the earlier unpaid attempt, so a voucher or coupon is paid for once.
 - **Bookings:** a held time is checked again at checkout; a visit booked on its own is one per person at a time and can be cancelled by the customer.
 - **Coupons:** optional uses per customer (default 1), total uses and minimum subtotal, set in the admin.
-- **Catalogue:** categories, collars (each with one of the app's four collar drawings), fabrics, colours, products and their photos are managed in the admin. Photos are JPEG, PNG or WebP up to 2 MB; the admin shrinks large ones first.
+- **Catalogue:** categories, collars (each with a picture and one of the app's four collar drawings), cuffs (with a picture), cloth, products and their photos are managed in the admin. Thobes have no colour. Photos are JPEG, PNG or WebP up to 2 MB; the admin shrinks large ones first.
 - **Branches:** several branches can be live; customers pick one when booking. A branch needs its map position for the Directions button.
 - **Staying current:** an open tracking screen asks for the stage every 10 seconds, the orders list and home every 20 to 30, and the catalogue is re-read after 30 seconds when a screen opens or the app returns to the front.
 - **Push notifications:** every in-app notification is also sent to the customer's phones that turned notifications on (Account > Notifications, or after an order). Only known push services are accepted as addresses.
@@ -89,6 +91,12 @@ Staff sign in with email and password. The first owner is created from `ADMIN_EM
 - **Refunds:** staff record refunds made in SADAD on the order (in parts if needed, never more than was paid); cancelled paid orders are listed as refunds due on the overview, and the customer is notified.
 - **Exports:** managers download paid orders (by date) and customers as CSV from the Orders and Customers pages.
 - **Home visits booked on their own:** the fee is recorded on the visit and marked as collected by staff.
+- **Home orders:** the app books home visits only, in fixed windows (default 9:00-13:00, 16:00-19:00 and 19:00-22:00, one visit per window), set under Branches & visits.
+- **Thobe price:** cloth is priced per metre; a thobe costs its metres × that price. Staff set the length at the counter or the visit (0.5 to 20 m, two decimals, the buttons move 0.5 m, starting at the cloth's usual metres). App orders use the cloth's usual length, and a re-order keeps the earlier length. The cloth taken from stock is the metres sold.
+- **Counter:** staff choose an existing customer or add a new one; a new customer needs a name, a mobile and all seven measurements. Collars and cuffs are picked by picture. There are no agents or service types.
+- **Order numbers:** plain numbers (10530). Searching for an old receipt's AR-10530 still finds it.
+- **Pickup reminders:** the day before a thobe order's pickup date, the customer is told once it has reached quality inspection or is ready; thobes left ready for more than 3 days (a setting) get one nudge with any balance due. Staff see thobes due tomorrow that are not ready, late thobes, thobes waiting to be collected, today's home visits and low stock under the bell in the admin and on Home.
+- **Edits:** saving a change to something that already exists asks first. Saved measurements can be corrected in place (from the customer page or Customer measurements); the correction is in the activity log.
 - **Delete account:** removes the profile, family, measurements, addresses, points and notifications; past orders stay as sales records. Refused while an order is in progress.
 
 ## What's not real yet

@@ -5,7 +5,7 @@ import { api, errorMessage } from '../lib/api';
 import { L, t } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { date, money, num } from '../lib/format';
-import { Field, Input, Loading, Modal, PageHead, useToast } from '../ui';
+import { Field, Input, Loading, Modal, PageHead, useToast, confirmSave } from '../ui';
 
 type Tier = { id: string; name_en: string; name_ar: string; min_points: number; points_per_product: number; points_per_thobe: number; colour: string; customers: number };
 type Coupon = { code: string; percent: number; max_discount: number | null; starts_at: string | null; expires_at: string | null; active: boolean; uses: number; per_customer_limit: number | null; max_uses: number | null; min_subtotal: number | null };
@@ -150,7 +150,7 @@ export default function Rewards() {
                 </button>
               ) : null}
               <button className="btn secondary" onClick={() => setTier(null)}>{t('Cancel', 'إلغاء')}</button>
-              <button className="btn" data-testid="tier-save" disabled={saveTier.isPending} onClick={() => saveTier.mutate()}>{t('Save', 'حفظ')}</button>
+              <button className="btn" data-testid="tier-save" disabled={saveTier.isPending} onClick={async () => (tier!.isNew || (await confirmSave())) && saveTier.mutate()}>{t('Save', 'حفظ')}</button>
             </>
           }
         >
@@ -168,7 +168,7 @@ export default function Rewards() {
       ) : null}
 
       {cp ? (
-        <Modal title={cp.isNew ? 'New coupon' : `Edit ${cp.code}`} onClose={() => setCp(null)} footer={<><button className="btn secondary" onClick={() => setCp(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" data-testid="coupon-save" disabled={saveCp.isPending} onClick={() => saveCp.mutate()}>{t('Save', 'حفظ')}</button></>}>
+        <Modal title={cp.isNew ? 'New coupon' : `Edit ${cp.code}`} onClose={() => setCp(null)} footer={<><button className="btn secondary" onClick={() => setCp(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" data-testid="coupon-save" disabled={saveCp.isPending} onClick={async () => (cp!.isNew || (await confirmSave())) && saveCp.mutate()}>{t('Save', 'حفظ')}</button></>}>
           <div className="grid k2">
             <Field label={t('Code', 'الرمز')} hint={t('Letters and numbers, 3–20', 'حروف وأرقام، 3–20')}>
               <Input data-testid="coupon-code" disabled={!cp.isNew} value={cp.code ?? ''} onChange={(e) => setCp({ ...cp, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} />

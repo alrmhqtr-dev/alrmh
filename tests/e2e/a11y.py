@@ -29,7 +29,7 @@ thobe_order = next(o["id"] for o in orders["active"] + orders["past"] if o.get("
 appts = json.loads(urllib.request.urlopen(urllib.request.Request(API + "/appointments", headers={"Authorization": "Bearer " + tok})).read())
 
 SIGNED_OUT = ["/onboarding/language", "/onboarding/welcome", "/auth/phone", "/install"]
-SIGNED_IN = ["/home", "/shop", "/product/white-ghutra", "/design/collar", "/design/fabric", "/design/colour", "/design/for-whom", "/design/measure",
+SIGNED_IN = ["/home", "/shop", "/product/white-ghutra", "/design/collar", "/design/fabric", "/design/for-whom", "/design/measure",
              "/book?standalone=1&kind=branch", "/basket", "/checkout", "/orders", f"/orders/{order}", "/rewards", "/reorder", f"/reorder/{thobe_order}",
              *([f"/booked/{appts[0]['id']}"] if appts else []), "/account",
              "/account/notifications", "/account/help", "/account/profile", "/account/addresses", "/account/family", f"/account/member/{family[0]['id']}"]

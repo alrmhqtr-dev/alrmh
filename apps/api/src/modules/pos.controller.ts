@@ -39,14 +39,14 @@ const SALE_ROW = `
   o.id, o.number, o.channel, o.stage, o.created_at, o.paid_at, o.total::float as total, o.subtotal::float as subtotal, o.discount::float as discount,
   o.tax::float as tax, o.points_used, o.expected_delivery, o.branch_id, b.name_en as branch_en, b.name_ar as branch_ar,
   o.customer_id, coalesce(c.name, o.walk_in_name) as customer_name, coalesce(c.phone, o.walk_in_phone) as phone,
-  u.name as staff_name, ag.name as agent_name,
+  u.name as staff_name,
   coalesce((select sum(amount) from payments p where p.order_id = o.id and p.status = 'paid'),0)::float as paid,
   coalesce((select sum(amount) from refunds r where r.order_id = o.id),0)::float as refunded,
   (select string_agg(distinct p.provider, ',') from payments p where p.order_id = o.id and p.status = 'paid') as methods,
   (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id and i.kind = 'thobe') as thobe_count,
   (select coalesce(sum(qty),0)::int from order_items i where i.order_id = o.id) as item_count`;
 const SALE_FROM = `orders o left join customers c on c.id = o.customer_id left join branches b on b.id = o.branch_id
-  left join staff_users u on u.id = o.placed_by_staff_id left join agents ag on ag.id = o.agent_id`;
+  left join staff_users u on u.id = o.placed_by_staff_id`;
 
 @Controller('v1/admin')
 export class PosController {
@@ -56,18 +56,15 @@ export class PosController {
   @UseGuards(AnyStaff)
   async items(@CurrentStaff() me: StaffUser, @Query('branch') branch?: string) {
     const branchId = uuidOrNull(branch) ?? me.branch_id ?? (await db.one('select id from branches where active order by sort limit 1'))?.id ?? null;
-    const [products, fabrics, collars, colours, links, categories, services, agents, branches, stock] = await Promise.all([
+    const [products, fabrics, collars, cuffs, categories, branches, stock] = await Promise.all([
       db.many(
         `select p.id, p.sku, p.category, p.brand_id, p.name_en, p.name_ar, p.price::float as price, p.sizes, p.image_url, p.track_stock, p.alert_qty::float as alert_qty, u.short_name as unit
            from products p left join units u on u.id = p.unit_id where p.active order by p.category, p.sort, p.name_en`,
       ),
       db.many('select id, sku, name_en, name_ar, price::float as price, track_stock, metres_per_thobe::float as metres_per_thobe from fabrics where active order by sort'),
-      db.many('select id, name_en, name_ar, shape from collars where active order by sort'),
-      db.many('select id, name_en, name_ar, hex from colours order by sort'),
-      db.many('select fabric_id, colour_id from fabric_colours'),
+      db.many('select id, name_en, name_ar, shape, image_url from collars where active order by sort'),
+      db.many('select id, name_en, name_ar, image_url from cuffs where active order by sort'),
       db.many('select id, name_en, name_ar from categories where active order by sort, name_en'),
-      db.many('select id, name_en, name_ar, charge_kind, charge::float as charge, lead_days from service_types where active order by sort, name_en'),
-      db.many('select id, name, commission_percent::float as commission_percent from agents where active order by name'),
       db.many('select id, name_en, name_ar from branches where active order by sort'),
       db.many(
         `select item_kind, item_id, size, sum(qty)::float as qty from stock_moves where branch_id = $1 group by 1,2,3`,
@@ -79,15 +76,13 @@ export class PosController {
       branchId,
       branches,
       categories,
-      services,
-      agents,
       collars,
-      colours,
+      cuffs,
       products: products.map((p) => ({
         ...p,
         stock: p.track_stock ? (p.sizes.length ? Object.fromEntries(p.sizes.map((s: string) => [s, level('product', p.id, s)])) : { '': level('product', p.id) }) : null,
       })),
-      fabrics: fabrics.map((f) => ({ ...f, colour_ids: links.filter((l) => l.fabric_id === f.id).map((l) => l.colour_id), stock: f.track_stock ? level('fabric', f.id) : null })),
+      fabrics: fabrics.map((f) => ({ ...f, stock: f.track_stock ? level('fabric', f.id) : null })),
       methods: PAY_METHODS,
     };
   }
@@ -177,7 +172,7 @@ export class PosController {
   async quote(@CurrentStaff() me: StaffUser, @Body() body: SaleInput) {
     const q = await priceSale(body ?? ({} as SaleInput), me);
     const needs = await stockNeeds(
-      q.lines.map((l) => ({ kind: l.kind, qty: l.qty, productId: l.product?.id, size: l.size, fabricId: l.thobe?.fabric?.id })),
+      q.lines.map((l) => ({ kind: l.kind, qty: l.qty, productId: l.product?.id, size: l.size, fabricId: l.thobe?.fabric?.id, metres: l.thobe?.metres ?? null })),
       db.pool,
     );
     let stockError: any = null;
@@ -202,21 +197,21 @@ export class PosController {
       if (q.customer && settle.balance > 0 && settings.pos.min_deposit_percent > 0 && settle.paid < round2((q.total * settings.pos.min_deposit_percent) / 100))
         fail('deposit_too_small', { min: round2((q.total * settings.pos.min_deposit_percent) / 100) });
       const needs = await stockNeeds(
-        q.lines.map((l) => ({ kind: l.kind, qty: l.qty, productId: l.product?.id, size: l.size, fabricId: l.thobe?.fabric?.id })),
+        q.lines.map((l) => ({ kind: l.kind, qty: l.qty, productId: l.product?.id, size: l.size, fabricId: l.thobe?.fabric?.id, metres: l.thobe?.metres ?? null })),
         c,
       );
       for (const n of needs) await c.query('select pg_advisory_xact_lock(hashtext($1))', [`stock:${n.kind}:${n.id}:${n.size}:${q.branch.id}`]);
       await assertInStock(needs, q.branch.id, c);
 
-      const number = await nextNumber('order_number_seq', 'AR-', c);
+      const number = await nextNumber('order_number_seq', '', c);
       const delivery = Boolean(body.sale.deliveryAddressId);
       // Thobes start at Taking measurements; shop items are handed over (or delivered).
       const stage = q.hasThobes ? 'measured' : delivery ? 'confirmed' : 'delivered';
       const order = await db.one(
         `insert into orders (number, customer_id, stage, subtotal, delivery_fee, discount, discount_label, total, address, points_to_earn, points_used,
-                             expected_delivery, paid_at, placed_by_staff_id, channel, branch_id, walk_in_name, walk_in_phone, agent_id, service_type_id,
-                             service_charge, tax, notes, register_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pos',$15,$16,$17,$18,$19,$20,$21,$22,$23) returning id, number, receipt_token`,
+                             expected_delivery, paid_at, placed_by_staff_id, channel, branch_id, walk_in_name, walk_in_phone,
+                             tax, notes, register_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pos',$15,$16,$17,$18,$19,$20) returning id, number, receipt_token`,
         [
           number,
           q.customer?.id ?? null,
@@ -235,11 +230,8 @@ export class PosController {
           q.branch.id,
           q.customer ? null : body.sale.walkInName ? String(body.sale.walkInName).trim().slice(0, 80) : null,
           q.customer ? null : body.sale.walkInPhone ? String(body.sale.walkInPhone).trim().slice(0, 20) : null,
-          uuidOrNull(body.sale.agentId),
-          q.service?.id ?? null,
-          q.serviceCharge,
           q.tax,
-          body.sale.notes ? String(body.sale.notes).slice(0, 500) : null,
+          body.sale.notes ? String(body.sale.notes).slice(0, 2000) : null,
           register?.id ?? null,
         ],
         c,
@@ -658,9 +650,9 @@ export async function receiptData(idOrToken: { id?: string; token?: string } | s
   const by = typeof idOrToken === 'string' ? { id: idOrToken } : idOrToken;
   const o = await db.one(
     `select ${SALE_ROW}, o.delivery_fee::float as delivery_fee, o.home_visit_fee::float as home_visit_fee, o.service_charge::float as service_charge, o.address,
-            o.discount_label, o.points_to_earn, o.receipt_token, o.notes, o.walk_in_name, st.name_en as service_en, st.name_ar as service_ar,
+            o.discount_label, o.points_to_earn, o.receipt_token, o.notes, o.walk_in_name,
             b.address_en as branch_address_en, b.address_ar as branch_address_ar, b.phone as branch_phone
-       from ${SALE_FROM} left join service_types st on st.id = o.service_type_id
+       from ${SALE_FROM}
       where ${by.id ? 'o.id = $1' : 'o.receipt_token = $1'}`,
     [by.id ?? by.token],
   );

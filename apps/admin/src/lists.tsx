@@ -67,21 +67,6 @@ export const LISTS: Record<string, ListDef> = {
     columns: [{ key: 'name', label: () => t('Name', 'الاسم') }, { key: 'percent', label: () => t('Rate', 'النسبة'), type: 'percent' }, activeCol],
     fields: [{ key: 'name', label: () => t('Name', 'الاسم'), type: 'text', required: true }, { key: 'percent', label: () => t('Rate %', 'النسبة %'), type: 'percent', required: true }, activeField],
   },
-  'service-types': {
-    resource: 'service-types',
-    title: () => t('Service types', 'أنواع الخدمة'),
-    sub: () => t('Chosen at the counter. Express adds a charge and shortens the time until thobes are ready.', 'تُختار في نقطة البيع. المستعجل يضيف رسومًا ويقصّر مدة تجهيز الثياب.'),
-    perms: ['manage'],
-    columns: [{ key: 'name', label: () => t('Service', 'الخدمة'), type: 'bilingual' }, { key: 'charge', label: () => t('Charge', 'الرسوم'), type: 'money' }, { key: 'lead_days', label: () => t('Working days', 'أيام العمل'), type: 'num' }, activeCol],
-    fields: [
-      ...nameEnAr,
-      { key: 'charge_kind', label: () => t('Charge type', 'نوع الرسوم'), type: 'select', options: () => [['fixed', t('Fixed amount', 'مبلغ ثابت')], ['percent', t('Percent of the sale', 'نسبة من الفاتورة')]] },
-      { key: 'charge', label: () => t('Charge', 'الرسوم'), type: 'money' },
-      { key: 'lead_days', label: () => t('Working days until ready', 'أيام العمل حتى الجاهزية'), type: 'number', hint: () => t('Leave empty for the usual lead time.', 'اتركه فارغًا للمدة المعتادة.') },
-      activeField,
-    ],
-    defaults: { charge_kind: 'fixed', charge: 0 },
-  },
   'customer-groups': {
     resource: 'customer-groups',
     title: () => t('Customer groups', 'مجموعات العملاء'),
@@ -97,14 +82,6 @@ export const LISTS: Record<string, ListDef> = {
     perms: ['expenses', 'manage'],
     columns: [{ key: 'name', label: () => t('Category', 'الفئة'), type: 'bilingual' }, { key: 'expense_count', label: () => t('Expenses', 'المصاريف'), type: 'num' }, activeCol],
     fields: [...nameEnAr, activeField],
-  },
-  agents: {
-    resource: 'agents',
-    title: () => t('Agents', 'الوكلاء'),
-    sub: () => t('Sales agents who bring customers. Pick one on a sale; the agents report works out their commission.', 'وكلاء المبيعات. اختر الوكيل في الفاتورة؛ يحسب تقرير الوكلاء عمولتهم.'),
-    perms: ['staff'],
-    columns: [{ key: 'name', label: () => t('Agent', 'الوكيل') }, { key: 'phone', label: () => t('Mobile', 'الجوال') }, { key: 'commission_percent', label: () => t('Commission', 'العمولة'), type: 'percent' }, { key: 'sales_total', label: () => t('Sales', 'المبيعات'), type: 'money' }, activeCol],
-    fields: [{ key: 'name', label: () => t('Name', 'الاسم'), type: 'text', required: true }, { key: 'phone', label: () => t('Mobile', 'الجوال'), type: 'text', dir: 'ltr' }, { key: 'email', label: () => t('Email', 'البريد'), type: 'text', dir: 'ltr' }, { key: 'commission_percent', label: () => t('Commission %', 'العمولة %'), type: 'percent' }, activeField],
   },
   suppliers: {
     resource: 'suppliers',

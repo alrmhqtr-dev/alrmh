@@ -6,7 +6,7 @@ import type { BuilderState } from '@/state/builder';
 export function defaultsFor(cat: Catalogue | undefined): Partial<BuilderState> {
   if (!cat) return {};
   const fabric = cat.fabrics[0];
-  return { collarId: cat.collars[0]?.id ?? null, fabricId: fabric?.id ?? null, colourId: fabric?.colour_ids.includes('ivory') ? 'ivory' : (fabric?.colour_ids[0] ?? null) };
+  return { collarId: cat.collars[0]?.id ?? null, fabricId: fabric?.id ?? null, colourId: null };
 }
 
 export function openWhatsApp(number: string, text?: string) {
@@ -33,7 +33,7 @@ export function reorderStateFrom(order: OrderDetail): Partial<BuilderState> | nu
   return {
     collarId: s.thobe.collar?.id ?? null,
     fabricId: s.thobe.fabric?.id ?? null,
-    colourId: s.thobe.colour?.id ?? null,
+    colourId: null,
     memberId: s.member?.id ?? null,
     method: 'saved',
     qty: thobe.qty,

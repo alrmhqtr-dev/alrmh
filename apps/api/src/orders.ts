@@ -54,12 +54,12 @@ export async function createOrder(customerId: string, input: QuoteInput) {
     const stockBranch = q.pickup ? q.address?.branchId : await onlineBranchId(c);
     if (stockBranch) {
       const needs = await stockNeeds(
-        (q.items as any[]).map((i) => ({ kind: i.kind, qty: i.qty, productId: i.product?.id, size: i.size, fabricId: i.thobe?.fabric?.id })),
+        (q.items as any[]).map((i) => ({ kind: i.kind, qty: i.qty, productId: i.product?.id, size: i.size, fabricId: i.thobe?.fabric?.id, metres: i.thobe?.metres ?? null })),
         c,
       );
       await assertInStock(needs, stockBranch, c);
     }
-    const number = `AR-${(await db.one<{ n: number }>(`select nextval('order_number_seq')::int as n`, [], c))!.n}`;
+    const number = String((await db.one<{ n: number }>(`select nextval('order_number_seq')::int as n`, [], c))!.n);
     const order = await db.one(
       `insert into orders (number, customer_id, subtotal, delivery_fee, home_visit_fee, discount, discount_label, total, coupon_code, address, points_to_earn, points_used, branch_id, tax)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id, number, total`,

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Plus } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { L, t } from '../lib/i18n';
-import { Field, Input, Loading, Modal, PageHead, useToast } from '../ui';
+import { Field, Input, Loading, Modal, PageHead, useToast, confirmSave } from '../ui';
 
 export const PERM_TEXT: Record<string, [string, string, string, string]> = {
   pos: ['Sell at the counter', 'البيع في نقطة البيع', 'Sales, drafts, quotations, own cash register, balance payments', 'المبيعات والمسودات وعروض الأسعار وصندوقه والدفعات المتبقية'],
@@ -17,7 +17,7 @@ export const PERM_TEXT: Record<string, [string, string, string, string]> = {
   reports: ['Reports and exports', 'التقارير والتصدير', 'All registers, profit and loss, CSV exports', 'كل الصناديق والأرباح والخسائر وتصدير CSV'],
   manage: ['Settings and catalogue', 'الإعدادات والكتالوج', 'Fees, branches, rewards, coupons, discounts, company and invoice settings', 'الرسوم والفروع والمكافآت والقسائم والخصومات وإعدادات الشركة والفواتير'],
   audit: ['Activity log', 'سجل النشاط', '', ''],
-  staff: ['Users and permissions', 'المستخدمون والصلاحيات', 'Staff accounts, roles and agents', 'حسابات الموظفين والأدوار والوكلاء'],
+  staff: ['Users and permissions', 'المستخدمون والصلاحيات', 'Staff accounts and roles', 'حسابات الموظفين والأدوار'],
 };
 
 type Role = { id: string; name_en: string; name_ar: string; permissions: string[]; builtin: boolean; staff_count: number };
@@ -83,7 +83,7 @@ export default function Roles() {
               {edit.id && !edit.builtin ? <button className="btn danger" onClick={() => del.mutate()}>{t('Delete', 'حذف')}</button> : null}
               <div className="grow" />
               <button className="btn secondary" onClick={() => setEdit(null)}>{t('Cancel', 'إلغاء')}</button>
-              <button className="btn" data-testid="role-save" disabled={!edit.name_en || !edit.name_ar || save.isPending} onClick={() => save.mutate()}>{t('Save', 'حفظ')}</button>
+              <button className="btn" data-testid="role-save" disabled={!edit.name_en || !edit.name_ar || save.isPending} onClick={async () => (!edit.id || (await confirmSave())) && save.mutate()}>{t('Save', 'حفظ')}</button>
             </>
           }
         >
