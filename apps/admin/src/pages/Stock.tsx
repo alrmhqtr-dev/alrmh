@@ -49,24 +49,29 @@ export function StockHistory({ kind, id }: { kind: string; id: string }) {
 }
 
 /** Adds new stock that has arrived: metres of cloth or a number of a product, at one branch. */
-function ReceiveModal({ item, onClose }: { item: (Pickable & { branch_id?: string }) | null; onClose: () => void }) {
+export type ReceiveItem = Pickable & { branch_id?: string; sizes?: string[] };
+export function ReceiveModal({ item, onClose }: { item: ReceiveItem | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const { staff } = useAuth();
   const [picked, setPicked] = useState<Pickable | null>(item);
   const [branch, setBranch] = useState(item?.branch_id ?? staff?.branch_id ?? '');
   const [qty, setQty] = useState('');
+  // A product kept per size: the size received.
+  const [size, setSize] = useState(item?.size ?? item?.sizes?.[0] ?? '');
+  const needsSize = Boolean(item?.sizes?.length && !item.size);
   const [note, setNote] = useState('');
   const branches = useQuery({ queryKey: ['branches'], queryFn: () => api<{ id: string; name_en: string; name_ar: string; active: boolean }[]>('/branches') });
   const branchId = branch || branches.data?.find((b) => b.active)?.id || '';
   const cloth = picked?.kind === 'fabric';
   const valid = Number(qty) > 0 && (cloth ? Math.round(Number(qty) * 100) === Number(qty) * 100 : Number.isInteger(Number(qty)));
   const save = useMutation({
-    mutationFn: () => api<{ level: number }>('/stock/receive', { body: { branchId, kind: picked!.kind, id: picked!.id, size: picked!.size || null, qty: Number(qty), note: note.trim() || null } }),
+    mutationFn: () => api<{ level: number }>('/stock/receive', { body: { branchId, kind: picked!.kind, id: picked!.id, size: (needsSize ? size : picked!.size) || null, qty: Number(qty), note: note.trim() || null } }),
     onSuccess: (r) => {
       toast(t(`Received. Now ${num(r.level)} ${cloth ? 'm' : ''} in stock.`, `تم الاستلام. المخزون الآن ${num(r.level)} ${cloth ? 'م' : ''}.`));
       qc.invalidateQueries({ queryKey: ['stock'] });
       qc.invalidateQueries({ queryKey: ['pos-items'] });
+      qc.invalidateQueries({ queryKey: ['stock-history'] });
       onClose();
     },
     onError: (e) => toast(errorMessage(e), 'error'),
@@ -96,6 +101,13 @@ function ReceiveModal({ item, onClose }: { item: (Pickable & { branch_id?: strin
             {(branches.data ?? []).filter((b) => b.active).map((b) => <option key={b.id} value={b.id}>{L(b)}</option>)}
           </Select>
         </Field>
+        {needsSize ? (
+          <Field label={t('Size', 'المقاس')}>
+            <Select data-testid="receive-size" value={size} onChange={(e) => setSize(e.target.value)}>
+              {item!.sizes!.map((z) => <option key={z} value={z}>{z}</option>)}
+            </Select>
+          </Field>
+        ) : null}
         <Field label={cloth ? t('Metres received', 'الأمتار المستلمة') : t('Quantity received', 'الكمية المستلمة')}>
           <Input data-testid="receive-qty" type="number" inputMode="decimal" min={0} step={cloth ? '0.01' : '1'} value={qty} onChange={(e) => setQty(e.target.value)} autoFocus={Boolean(item)} />
         </Field>
@@ -113,7 +125,7 @@ export function StockLevels() {
   const [q, setQ] = useState(params.get('q') ?? '');
   const [low, setLow] = useState(params.get('low') === '1');
   const [hist, setHist] = useState<any>(null);
-  const [receive, setReceive] = useState<{ item: (Pickable & { branch_id?: string }) | null } | null>(null);
+  const [receive, setReceive] = useState<{ item: ReceiveItem | null } | null>(null);
   const list = useQuery({ queryKey: ['stock', branch, q, low], queryFn: () => api<any[]>(`/stock?${new URLSearchParams({ ...(branch ? { branch } : {}), ...(q ? { q } : {}), ...(low ? { low: '1' } : {}) })}`) });
   const rows = (list.data ?? []).filter((r) => r.kind === tab);
   const cloth = tab === 'fabric';

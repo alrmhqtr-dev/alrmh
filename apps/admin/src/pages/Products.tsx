@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
 import { money, num } from '../lib/format';
 import { Empty, Field, Input, Loading, Modal, PageHead, SearchBox, Select, TextArea, useToast, confirmSave } from '../ui';
-import { StockHistory } from './Stock';
+import { ReceiveModal, StockHistory, type ReceiveItem } from './Stock';
 
 export type Product = {
   id: string;
@@ -40,6 +40,8 @@ export default function Products() {
   const [cat, setCat] = useState('');
   const [edit, setEdit] = useState<Partial<Product> | null>(params.get('new') ? {} : null);
   const [history, setHistory] = useState<Product | null>(null);
+  const [receive, setReceive] = useState<ReceiveItem | null>(null);
+  const canStock = can('products');
   const data = useQuery({ queryKey: ['catalogue'], queryFn: () => api<Cat>('/catalogue') });
   const stock = useQuery({ queryKey: ['stock', ''], queryFn: () => api<any[]>('/stock') });
   const brands = useList('brands');
@@ -95,8 +97,23 @@ export default function Products() {
                     <td className="small">{brands.data?.find((b) => b.id === p.brand_id)?.name ?? '—'}</td>
                     <td className="right num">{money(p.cost)}</td>
                     <td className="right num">{money(p.price)}</td>
-                    <td className="right num" onClick={(e) => { if (p.track_stock) { e.stopPropagation(); setHistory(p); } }}>
-                      {p.track_stock ? <span className={st !== undefined && st <= p.alert_qty ? 'tone-error strong' : ''}>{num(st ?? 0)} <History size={12} /></span> : <span className="muted">—</span>}
+                    <td className="right num" style={{ whiteSpace: 'nowrap' }}>
+                      {p.track_stock ? (
+                        <button className="linklike" title={t('Stock history', 'حركة المخزون')} onClick={(e) => { e.stopPropagation(); setHistory(p); }}>
+                          <span className={st !== undefined && st <= p.alert_qty ? 'tone-error strong' : ''}>{num(st ?? 0)}</span> <History size={12} />
+                        </button>
+                      ) : <span className="muted">—</span>}
+                      {canStock ? (
+                        <button
+                          className="btn sm secondary icon-add"
+                          data-testid={`add-stock-${p.sku}`}
+                          title={t('Add stock', 'إضافة مخزون')}
+                          aria-label={`${t('Add stock', 'إضافة مخزون')} · ${L(p)}`}
+                          onClick={(e) => { e.stopPropagation(); setReceive({ kind: 'product', id: p.id, sku: p.sku, name: L(p), size: '', sizes: p.sizes, cost: p.cost, price: p.price, unit: '' } as ReceiveItem); }}
+                        >
+                          <Plus size={13} />
+                        </button>
+                      ) : null}
                     </td>
                     <td className="small">
                       {!p.active ? <span className="badge">{t('Hidden', 'مخفي')}</span> : p.in_app ? <span className="badge ok">{t('Counter + app', 'المحل + التطبيق')}</span> : <span className="badge outline">{t('Counter only', 'المحل فقط')}</span>}
@@ -111,6 +128,7 @@ export default function Products() {
         )}
       </div>
       {edit ? <ProductModal item={edit} categories={data.data.categories} onClose={close} /> : null}
+      {receive ? <ReceiveModal item={receive} onClose={() => setReceive(null)} /> : null}
       {history ? (
         <Modal title={`${L(history)} · ${t('stock history', 'حركة المخزون')}`} onClose={() => setHistory(null)} wide>
           <StockHistory kind="product" id={history.id} />

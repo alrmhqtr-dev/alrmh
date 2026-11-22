@@ -6,7 +6,7 @@ import { api, downloadCsv, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { SHOP_FLOW, STAGES, STAGE_LABEL, THOBE_FLOW, channelLabel, date, stageLabel, dateTime, money, phone, todayQatar } from '../lib/format';
 import { t } from '../lib/i18n';
-import { Empty, Field, Input, Loading, Modal, PageHead, SearchBox, StageBadge, Tabs, useToast } from '../ui';
+import { Empty, Field, Input, Loading, Modal, PageHead, SearchBox, StageBadge, Tabs, confirmSave, useToast } from '../ui';
 
 export type OrderRow = {
   id: string;
@@ -58,6 +58,58 @@ export default function Orders() {
     },
     onError: (e) => toast(errorMessage(e), 'error'),
   });
+  /**
+   * Every stage move asks first, from the arrow on a card or by dragging it to another column.
+   * Orders only move forward; handing thobes over needs the balance paid.
+   */
+  const askMove = async (o: OrderRow, to: string) => {
+    const thobes = o.thobe_count > 0;
+    const flow = thobes ? THOBE_FLOW : SHOP_FLOW;
+    const from = flow.indexOf(o.stage);
+    const at = flow.indexOf(to);
+    if (at < 0) return toast(t(`#${o.number} doesn't go through ${stageLabel(to, thobes)}.`, `الطلب #${o.number} لا يمر بمرحلة ${stageLabel(to, thobes)}.`), 'error');
+    if (at <= from) return toast(t('Orders only move forward.', 'تنتقل الطلبات إلى الأمام فقط.'), 'error');
+    if (to === 'delivered' && o.balance > 0) return toast(t(`Take the balance of ${money(o.balance)} first.`, `استلم المتبقي ${money(o.balance)} أولًا.`), 'error');
+    const skipped = flow.slice(from + 1, at).map((x) => stageLabel(x, thobes));
+    const ok = await confirmSave({
+      title: t(`Move #${o.number} to ${stageLabel(to, thobes)}?`, `نقل الطلب #${o.number} إلى ${stageLabel(to, thobes)}؟`),
+      message:
+        (skipped.length ? t(`It also passes through ${skipped.join(', ')}. `, `سيمر أيضًا بمرحلة ${skipped.join('، ')}. `) : '') +
+        (o.customer_name ? t(`${o.customer_name} will be notified.`, `سيتم إبلاغ ${o.customer_name}.`) : t('The customer will be notified.', 'سيتم إبلاغ العميل.')),
+      ok: t('Move', 'نقل'),
+    });
+    if (ok) move.mutate({ id: o.id, to, thobes });
+  };
+  const [dragging, setDragging] = useState<OrderRow | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  /** Where the card being dragged may go: a later stage of its own flow. */
+  const canDrop = (to: string) => {
+    if (!dragging) return false;
+    const flow = dragging.thobe_count > 0 ? THOBE_FLOW : SHOP_FLOW;
+    return flow.indexOf(to) > flow.indexOf(dragging.stage);
+  };
+  const dropZone = (to: string) =>
+    can('workshop')
+      ? {
+          onDragOver: (e: React.DragEvent) => {
+            if (!canDrop(to)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (over !== to) setOver(to);
+          },
+          onDragLeave: (e: React.DragEvent) => {
+            if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setOver((x) => (x === to ? null : x));
+          },
+          onDrop: (e: React.DragEvent) => {
+            e.preventDefault();
+            const o = dragging;
+            setDragging(null);
+            setOver(null);
+            if (o) askMove(o, to);
+          },
+        }
+      : {};
+  const dropClass = (to: string) => (dragging ? (canDrop(to) ? `drop-ok${over === to ? ' drop-over' : ''}` : 'drop-no') : '');
   const today = todayQatar();
   const [showDone, setShowDone] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -114,7 +166,7 @@ export default function Orders() {
               // Oldest first: the order waiting longest is at the top.
               const list = orders.data.filter((o) => o.stage === s).sort((a, b) => a.created_at.localeCompare(b.created_at));
               return (
-                <div key={s} className="col" data-testid={`col-${s}`}>
+                <div key={s} className={`col ${dropClass(s)}`} data-testid={`col-${s}`} {...dropZone(s)}>
                   <div className="col-head">
                     <span>{STAGE_LABEL[s]}</span>
                     <span className="badge outline">{list.length}</span>
@@ -124,8 +176,22 @@ export default function Orders() {
                     const next = nextStage(o.stage, thobes);
                     const late = o.expected_delivery && o.expected_delivery < today && o.stage !== 'ready';
                     return (
-                      <div key={o.id} className={`ticket row1 ${late ? 'late' : ''}`} data-testid={`ticket-${o.number}`}>
-                        <Link to={`/orders/${o.id}`} className="ticket-main" title={`${o.customer_name ?? ''} · ${thobes ? t(`${o.thobe_count} thobes`, `${o.thobe_count} ثوب`) : t(`${o.item_count} items`, `${o.item_count} صنف`)}`}>
+                      <div
+                        key={o.id}
+                        className={`ticket row1 ${late ? 'late' : ''} ${dragging?.id === o.id ? 'dragging' : ''}`}
+                        data-testid={`ticket-${o.number}`}
+                        draggable={can('workshop') && Boolean(next)}
+                        onDragStart={(e) => {
+                          e.dataTransfer.effectAllowed = 'move';
+                          e.dataTransfer.setData('text/plain', o.number);
+                          setDragging(o);
+                        }}
+                        onDragEnd={() => {
+                          setDragging(null);
+                          setOver(null);
+                        }}
+                      >
+                        <Link to={`/orders/${o.id}`} className="ticket-main" draggable={false} title={`${o.customer_name ?? ''} · ${thobes ? t(`${o.thobe_count} thobes`, `${o.thobe_count} ثوب`) : t(`${o.item_count} items`, `${o.item_count} صنف`)}`}>
                           <span className="strong num">#{o.number}</span>
                           <span className="ticket-name" dir="auto">{o.customer_name ?? t('Walk-in', 'زبون')}</span>
                           {(thobes ? o.thobe_count : o.item_count) > 1 ? <span className="small muted num ltr">×{thobes ? o.thobe_count : o.item_count}</span> : null}
@@ -138,7 +204,7 @@ export default function Orders() {
                             disabled={move.isPending}
                             title={`${t('Move to', 'نقل إلى')} ${stageLabel(next, thobes)}`}
                             aria-label={`${t('Move to', 'نقل إلى')} ${stageLabel(next, thobes)}`}
-                            onClick={() => move.mutate({ id: o.id, to: next, thobes })}
+                            onClick={() => askMove(o, next)}
                           >
                             {next === 'delivered' ? <CircleCheck size={16} /> : <ChevronRight size={16} className="flip-rtl" />}
                           </button>
@@ -154,7 +220,7 @@ export default function Orders() {
           {(() => {
             const done = orders.data.filter((o) => o.stage === 'delivered').sort((a, b) => (b.done_at ?? b.created_at).localeCompare(a.done_at ?? a.created_at));
             return (
-              <div className="card pad stack" style={{ gap: 8 }} data-testid="done-section">
+              <div className={`card pad stack ${dropClass('delivered')}`} style={{ gap: 8 }} data-testid="done-section" {...dropZone('delivered')}>
                 <button className="row spread" style={{ background: 'none', border: 0, padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }} aria-expanded={showDone} onClick={() => setShowDone(!showDone)}>
                   <span className="row" style={{ gap: 8 }}>
                     <CircleCheck size={18} className="tone-ok" />

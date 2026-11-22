@@ -8,7 +8,7 @@ import { L, isAr, t } from '../lib/i18n';
 import { RELATION, channelLabel, date, dateTime, methodLabel, money, money2, num, phone, stageLabel } from '../lib/format';
 import { fill, receiptUrl, waLink, type Templates } from '../lib/whatsapp';
 import { MeasureModal, MeasurementGrid, type Measurement } from '../measure';
-import { Field, Input, Loading, Modal, PageHead, Select, StageBadge, TextArea, openPrint, useToast } from '../ui';
+import { Field, Input, Loading, Modal, PageHead, Select, StageBadge, TextArea, openPrint, useToast, confirmSave } from '../ui';
 import { nextStage } from './Orders';
 import { PhotoUploader } from './Factory';
 
@@ -152,7 +152,7 @@ export default function OrderDetail() {
         {isThobe && !invoice ? <button className="btn secondary" onClick={() => openPrint(`ticket/${o.id}`)}><Ruler size={16} /> {t('Tailor ticket', 'ورقة الخياط')}</button> : null}
         {invoice ? <Link className="btn ghost" to={`/orders/${o.id}`}>{t('Open the order', 'فتح الطلب')}</Link> : null}
         {next && can('workshop') && !invoice ? (
-          <button className="btn" data-testid="detail-advance" disabled={move.isPending || (next === 'delivered' && o.balance > 0)} title={next === 'delivered' && o.balance > 0 ? t('Take the balance first', 'استلم المتبقي أولًا') : undefined} onClick={() => move.mutate(next)}>
+          <button className="btn" data-testid="detail-advance" disabled={move.isPending || (next === 'delivered' && o.balance > 0)} title={next === 'delivered' && o.balance > 0 ? t('Take the balance first', 'استلم المتبقي أولًا') : undefined} onClick={async () => (await confirmSave({ title: t(`Move #${o.number} to ${stageLabel(next, isThobe)}?`, `نقل الطلب #${o.number} إلى ${stageLabel(next, isThobe)}؟`), message: t('The customer will be notified.', 'سيتم إبلاغ العميل.'), ok: t('Move', 'نقل') })) && move.mutate(next)}>
             {t('Move to', 'نقل إلى')} {stageLabel(next, isThobe)} <ArrowRight size={16} className="flip-rtl" />
           </button>
         ) : null}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -7,6 +7,7 @@ import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
 import { money, num } from '../lib/format';
 import { Field, Input, Loading, Modal, PageHead, Select, Tabs, useConfirm, useToast } from '../ui';
+import { ReceiveModal, type ReceiveItem } from './Stock';
 
 type Product = { id: string; category: string; name_en: string; name_ar: string; description_en: string; description_ar: string; price: number; sizes: string[]; image_url: string | null; active: boolean };
 type Fabric = { id: string; name_en: string; name_ar: string; note_en: string; note_ar: string; price: number; active: boolean; sku: string; cost: number; track_stock: boolean; alert_qty: number; metres_per_thobe: number; tax_rate_id: string | null };
@@ -27,6 +28,15 @@ export default function Catalogue() {
   const [edit, setEdit] = useState<{ kind: Kind; item: any | null } | null>(null);
   const { can } = useAuth();
   const editable = can('manage') || (tab === 'categories' && can('products'));
+  const canStock = can('products');
+  const [receive, setReceive] = useState<ReceiveItem | null>(null);
+  const stock = useQuery({ queryKey: ['stock', ''], queryFn: () => api<any[]>('/stock') });
+  /** Metres of each cloth in stock, all branches together. */
+  const metres = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of stock.data ?? []) if (r.kind === 'fabric') m.set(r.id, (m.get(r.id) ?? 0) + r.qty);
+    return m;
+  }, [stock.data]);
   const q = useQuery({ queryKey: ['catalogue'], queryFn: () => api<Cat>('/catalogue') });
   if (!q.data) return <Loading />;
   const c = q.data;
@@ -59,7 +69,7 @@ export default function Catalogue() {
           </table>
         ) : tab === 'fabrics' ? (
           <table>
-            <thead><tr><th>{t('Cloth', 'القماش')}</th><th>{t('Code', 'الرمز')}</th><th className="right">{t('Price per metre', 'سعر المتر')}</th><th className="right">{t('Usual metres a thobe', 'الأمتار المعتادة للثوب')}</th><th className="right">{t('Thobe at that length', 'الثوب بهذا الطول')}</th><th>{t('Stock', 'المخزون')}</th><th>{t('Status', 'الحالة')}</th></tr></thead>
+            <thead><tr><th>{t('Cloth', 'القماش')}</th><th>{t('Code', 'الرمز')}</th><th className="right">{t('Price per metre', 'سعر المتر')}</th><th className="right">{t('Usual metres a thobe', 'الأمتار المعتادة للثوب')}</th><th className="right">{t('Thobe at that length', 'الثوب بهذا الطول')}</th><th>{t('Stock (metres)', 'المخزون (متر)')}</th><th>{t('Status', 'الحالة')}</th></tr></thead>
             <tbody>
               {c.fabrics.map((f) => (
                 <tr key={f.id} className={editable ? 'click' : ''} data-testid={`fabric-${f.id}`} onClick={() => editable && setEdit({ kind: 'fabrics', item: f })}>
@@ -68,7 +78,24 @@ export default function Catalogue() {
                   <td className="right num">{money(f.price)}</td>
                   <td className="right num">{num(f.metres_per_thobe)}</td>
                   <td className="right num muted">{money(Math.round(f.price * f.metres_per_thobe * 100) / 100)}</td>
-                  <td className="small">{f.track_stock ? <Link to={`/stock?q=${encodeURIComponent(f.sku)}`} onClick={(e) => e.stopPropagation()}>{t('Tracked', 'متتبع')}</Link> : <span className="muted">{t('Not tracked', 'غير متتبع')}</span>}</td>
+                  <td className="small" style={{ whiteSpace: 'nowrap' }}>
+                    {f.track_stock ? (
+                      <Link to={`/stock?q=${encodeURIComponent(f.sku)}`} onClick={(e) => e.stopPropagation()} className={(metres.get(f.id) ?? 0) <= (f.alert_qty ?? 0) ? 'tone-error strong num' : 'num'}>
+                        {num(metres.get(f.id) ?? 0)} {t('m', 'م')}
+                      </Link>
+                    ) : <span className="muted">{t('Not tracked', 'غير متتبع')}</span>}
+                    {canStock ? (
+                      <button
+                        className="btn sm secondary icon-add"
+                        data-testid={`add-stock-${f.sku}`}
+                        title={t('Add stock', 'إضافة مخزون')}
+                        aria-label={`${t('Add stock', 'إضافة مخزون')} · ${L(f)}`}
+                        onClick={(e) => { e.stopPropagation(); setReceive({ kind: 'fabric', id: f.id, sku: f.sku, name: L(f), size: '', cost: f.cost, price: f.price, unit: 'm' } as ReceiveItem); }}
+                      >
+                        <Plus size={13} />
+                      </button>
+                    ) : null}
+                  </td>
                   <td>{f.active ? <span className="badge ok">{t('Live', 'ظاهر')}</span> : <span className="badge">{t('Hidden', 'مخفي')}</span>}</td>
                 </tr>
               ))}
@@ -106,6 +133,7 @@ export default function Catalogue() {
         )}
       </div>
       {tab === 'collars' || tab === 'cuffs' ? <div className="small muted">{t('Staff choose collars and cuffs by picture at the counter. Upload a clear photo of each style.', 'يختار الموظفون الياقة والكبك بالصورة في نقطة البيع. ارفع صورة واضحة لكل نوع.')}</div> : null}
+      {receive ? <ReceiveModal item={receive} onClose={() => setReceive(null)} /> : null}
       {edit ? <EditModal kind={edit.kind} item={edit.item} cat={c} onClose={() => setEdit(null)} /> : null}
     </div>
   );

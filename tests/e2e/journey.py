@@ -156,7 +156,7 @@ def journey(browser, lang, method, phone, name, reorder):
         btn = admin.locator('[data-testid="detail-advance"]')
         if not btn.count():
             break
-        btn.click(); admin.wait_for_timeout(1300)
+        btn.click(); admin.click('[data-testid="confirm-ok"]'); admin.wait_for_timeout(1300)
         moved.append(sql(f"select stage from orders where id = '{order_id}'"))
     want = ["cutting", "stitching", "quality", "ready", "delivered"]
     check(f"{tag}: staff move it through every stage to Collected", moved == want, str(moved))

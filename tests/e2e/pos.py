@@ -254,13 +254,32 @@ def workshop(browser, lang):
     check(f"{tag} order cards are one row, oldest at the top, with no price",
           numbers.index(a["number"]) < numbers.index(b["number"]) and box["height"] < 52 and "QAR" not in tk.inner_text() and "ر.ق" not in tk.inner_text(), f"{numbers} {box}")
     page.screenshot(path=f"{SHOTS}/board-{lang}.png", full_page=True)
-    page.click(f'[data-testid="advance-{a["number"]}"]'); page.wait_for_timeout(1200)
-    check(f"{tag} the small arrow on a card moves it to the next stage", sql(f"select stage from orders where id = '{a['orderId']}'") == "cutting")
+    page.click(f'[data-testid="advance-{a["number"]}"]')
+    asked = page.locator('[data-testid="confirm-dialog"]').inner_text()
+    page.click('[data-testid="confirm-cancel"]'); page.wait_for_timeout(600)
+    kept = sql(f"select stage from orders where id = '{a['orderId']}'") == "measured"
+    page.click(f'[data-testid="advance-{a["number"]}"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
+    check(f"{tag} the arrow asks before moving (Cancel keeps the stage), then moves the card to the next stage",
+          f"#{a['number']}" in asked and kept and sql(f"select stage from orders where id = '{a['orderId']}'") == "cutting", asked)
+    # Drag a card two columns on: it asks, says which stage it passes through, and records both.
+    page.reload(); page.wait_for_selector(f'[data-testid="ticket-{b["number"]}"]', timeout=15000)
+    page.locator(f'[data-testid="ticket-{b["number"]}"]').drag_to(page.locator('[data-testid="col-stitching"]'))
+    page.wait_for_selector('[data-testid="confirm-dialog"]', timeout=5000)
+    asked = page.locator('[data-testid="confirm-dialog"]').inner_text()
+    page.screenshot(path=f"{SHOTS}/drag-confirm-{lang}.png")
+    page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
+    check(f"{tag} dragging a card to a later column asks first, then moves it through the stages in between",
+          sql(f"select stage from orders where id = '{b['orderId']}'") == "stitching"
+          and sql(f"select string_agg(stage, ',' order by at) from order_events where order_id = '{b['orderId']}' and stage in ('cutting','stitching')") == "cutting,stitching", asked)
+    page.locator(f'[data-testid="ticket-{b["number"]}"]').drag_to(page.locator('[data-testid="col-measured"]'))
+    page.wait_for_timeout(600)
+    check(f"{tag} a card can't be dragged back to an earlier stage",
+          page.locator('[data-testid="confirm-dialog"]').count() == 0 and sql(f"select stage from orders where id = '{b['orderId']}'") == "stitching")
     for st in ["stitching", "quality", "ready"]:
         call("POST", f"/admin/orders/{a['orderId']}/stage", {"stage": st}, owner)
     page.reload(); page.wait_for_selector(f'[data-testid="advance-{a["number"]}"]', timeout=15000)
     label = page.locator(f'[data-testid="advance-{a["number"]}"]').get_attribute("aria-label")
-    page.click(f'[data-testid="advance-{a["number"]}"]'); page.wait_for_timeout(1200)
+    page.click(f'[data-testid="advance-{a["number"]}"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
     page.click('[data-testid="done-section"] button[aria-expanded]'); page.wait_for_timeout(400)
     check(f"{tag} the last stage is Done (تم الاستلام); done orders move to the Completed section",
           ("Done" in label or "تم الاستلام" in label) and sql(f"select stage from orders where id = '{a['orderId']}'") == "delivered"
@@ -306,6 +325,23 @@ def workshop(browser, lang):
     got = sql(f"select coalesce(sum(qty),0)::float from stock_moves where item_kind = 'fabric' and item_id = 'japanese-cotton' and reason = 'received'")
     page.screenshot(path=f"{SHOTS}/stock-cloth-{lang}.png", full_page=True)
     check(f"{tag} cloth stock is received in metres on the stock page", float(got) >= 25.5, got)
+
+    # Adding stock straight from the products list and the cloth list
+    page.goto(ADMIN + "/products"); page.wait_for_selector('[data-testid^="add-stock-"]', timeout=15000)
+    btn = page.locator('[data-testid^="add-stock-"]').first
+    sku = btn.get_attribute("data-testid").replace("add-stock-", "")
+    pid = sql(f"select id from products where sku = '{sku}'")
+    before = float(sql(f"select coalesce(sum(qty),0) from stock_moves where item_kind = 'product' and item_id = '{pid}'"))
+    btn.click(); page.fill('[data-testid="receive-qty"]', "5"); page.click('[data-testid="receive-save"]'); page.wait_for_timeout(1200)
+    after = float(sql(f"select coalesce(sum(qty),0) from stock_moves where item_kind = 'product' and item_id = '{pid}'"))
+    check(f"{tag} products: the + beside the stock adds new stock", after == before + 5, f"{sku} {before} -> {after}")
+    page.goto(ADMIN + "/catalogue"); page.wait_for_selector('[role="tab"]', timeout=15000)
+    page.locator('[role="tab"]').nth(1).click(); page.wait_for_selector('[data-testid="add-stock-F-SWISS-VOILE"]', timeout=15000)
+    before = float(sql("select coalesce(sum(qty),0) from stock_moves where item_kind = 'fabric' and item_id = 'swiss-voile'"))
+    page.click('[data-testid="add-stock-F-SWISS-VOILE"]'); page.fill('[data-testid="receive-qty"]', "10.25"); page.click('[data-testid="receive-save"]'); page.wait_for_timeout(1200)
+    after = float(sql("select coalesce(sum(qty),0) from stock_moves where item_kind = 'fabric' and item_id = 'swiss-voile'"))
+    page.screenshot(path=f"{SHOTS}/cloth-stock-{lang}.png", full_page=True)
+    check(f"{tag} cloth: the + beside the metres adds new stock", abs(after - before - 10.25) < 0.001, f"{before} -> {after}")
 
     # The invoice page: payments, no measurements
     page.goto(ADMIN + "/sales"); page.wait_for_selector(f'[data-testid="sale-{b["number"]}"]', timeout=15000)
