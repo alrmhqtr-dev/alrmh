@@ -254,7 +254,7 @@ export function Shipments() {
                   <td className="right num">{money(o.total)}</td>
                   <td className="right">
                     <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                      <button className="btn sm secondary" onClick={() => setEdit({ id: o.id, number: o.number, shipping: { courier: o.shipping?.courier ?? '', tracking: o.shipping?.tracking ?? '', driverPhone: o.shipping?.driverPhone ?? '', note: o.shipping?.note ?? '' } })}><Truck size={14} /></button>
+                      <button className="btn sm secondary" aria-label={t('Courier and tracking', 'المندوب ورقم التتبع')} title={t('Courier and tracking', 'المندوب ورقم التتبع')} onClick={() => setEdit({ id: o.id, number: o.number, shipping: { courier: o.shipping?.courier ?? '', tracking: o.shipping?.tracking ?? '', driverPhone: o.shipping?.driverPhone ?? '', note: o.shipping?.note ?? '' } })}><Truck size={14} /></button>
                       {next[o.stage] && can('workshop') ? <button className="btn sm" onClick={() => move.mutate({ id: o.id, stage: next[o.stage] })}>{stageLabel(next[o.stage], false)}</button> : null}
                     </div>
                   </td>

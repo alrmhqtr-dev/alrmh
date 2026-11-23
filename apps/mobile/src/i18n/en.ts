@@ -642,6 +642,7 @@ export const en = {
   'again.cloth': "Cloth",
   'again.cuff': "Cuff",
   'again.metres': "m",
+  'again.pocket': "chest pocket",
   'book.windowNote': "The tailor arrives within the time you choose.",
   'track.discount': "Discount",
   'track.pickup': "Collect from {branch}",

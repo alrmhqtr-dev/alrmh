@@ -25,7 +25,7 @@ s, r, _ = call("GET", "/admin/reports/agents", token=owner)
 check("the agents report is gone", s == 404, s)
 items = call("GET", "/admin/pos/items", token=owner)[1]
 check("counter: no agents, service types or colours; cuffs and collars come with their pictures",
-      "agents" not in items and "services" not in items and "colours" not in items and len(items["cuffs"]) >= 3
+      "agents" not in items and "services" not in items and "colours" not in items and len(items["cuffs"]) == 2
       and all("image_url" in c for c in items["collars"] + items["cuffs"]), list(items.keys()))
 
 # ---- new customer at the counter, with measurements ----------------------------------------
@@ -69,16 +69,28 @@ found = call("GET", f"/admin/orders?q=AR-{sold['number']}", token=owner)[1]
 check("orders: an old-style AR- number still finds the order", any(o["id"] == sold["orderId"] for o in found), len(found))
 snap = sql(f"select snapshot->'thobe'->>'metres' || ':' || (snapshot->'thobe'->'cuff'->>'id') from order_items where order_id = '{sold['orderId']}'")
 check("orders: metres and cuff kept on the order", snap == "3.75:double", snap)
-s, r, _ = call("POST", f"/admin/customers/{cust['id']}/orders", {"memberId": member, "paidByCard": True, "lines": [{"collarId": "round-neck", "cuffId": "round", "fabricId": "swiss-voile", "metres": 4, "qty": 1, "remarks": "Pocket on the left"}]}, owner)
+s, r, _ = call("POST", f"/admin/customers/{cust['id']}/orders", {"memberId": member, "paidByCard": True, "lines": [{"collarId": "wide-collar", "cuffId": "single", "fabricId": "swiss-voile", "metres": 4, "qty": 1, "remarks": "Pocket on the left"}]}, owner)
 sw = next(f for f in call("GET", "/catalogue")[1]["fabrics"] if f["id"] == "swiss-voile")
 check("staff order at a visit: priced by the metre, with cuff and notes",
       s == 201 and r["total"] == round(sw["price_per_metre"] * 4, 2) and sql(f"select snapshot->>'remarks' from order_items where order_id = '{r['orderId']}'") == "Pocket on the left", r)
+
+# ---- the shop's collar and cuff styles, and the pocket ---------------------------------------
+items = call("GET", "/admin/pos/items", token=owner)[1]
+check("styles: three collars and two cuffs, each with its picture",
+      sorted(c["id"] for c in items["collars"]) == ["classic-qatari", "mandarin-band", "wide-collar"] and sorted(c["id"] for c in items["cuffs"]) == ["double", "single"]
+      and all(c["image_url"] for c in items["collars"] + items["cuffs"]), [(c["id"], c["image_url"]) for c in items["collars"] + items["cuffs"]])
+s_, r_, _ = call("POST", "/admin/pos/quote", {**sale, "lines": [{**line, "pocket": True}]}, owner)
+check("pocket: a chest pocket is kept on the thobe and doesn't change the price", r_["lines"][0]["thobe"]["pocket"] is True and r_["total"] == q["total"], r_.get("lines"))
+s_, r_, _ = call("POST", "/admin/pos/quote", {**sale, "lines": [{**line, "cuffId": "round"}]}, owner)
+check("styles: a hidden cuff can't be sold", r_.get("code") == "invalid_thobe_options", r_)
 
 # ---- app: re-order keeps the earlier length ------------------------------------------------
 ctok = login(phone)
 s, b, _ = call("POST", "/basket/items", {"kind": "thobe", "collarId": "classic-qatari", "cuffId": "double", "fabricId": "japanese-cotton", "metres": 3.75, "memberId": member, "measureMethod": "saved", "qty": 1}, ctok)
 it = next((i for i in b.get("items", []) if i["kind"] == "thobe"), {})
 check("app: a re-order is priced at the earlier order's length", s == 201 and it.get("unitPrice") == want and it["thobe"]["metres"] == 3.75, it)
+s, b, _ = call("POST", "/basket/items", {"kind": "thobe", "collarId": "classic-qatari", "cuffId": "double", "fabricId": "japanese-cotton", "metres": 3.75, "pocket": True, "memberId": member, "measureMethod": "saved", "qty": 1}, ctok)
+check("app: a re-order keeps the pocket", s == 201 and [i for i in b["items"] if i["kind"] == "thobe"][-1]["thobe"]["pocket"] is True)
 s, b, _ = call("POST", "/basket/items", {"kind": "thobe", "collarId": "classic-qatari", "fabricId": "japanese-cotton", "memberId": member, "measureMethod": "saved", "qty": 1}, ctok)
 it = [i for i in b.get("items", []) if i["kind"] == "thobe"][-1]
 check("app: without a length, the cloth's usual length", s == 201 and it["unitPrice"] == fab["price"] and it["thobe"]["metres"] == fab["metres"], it)

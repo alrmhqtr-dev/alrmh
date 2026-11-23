@@ -185,7 +185,7 @@ export default function OrderDetail() {
                 </div>
                 <div className="grid k4">
                   <div><div className="overline">{t('Type', 'النوع')}</div><div className="strong">{L(s.thobe?.collar)}</div></div>
-                  <div><div className="overline">{t('Cuff', 'الكبك')}</div><div className="strong">{s.thobe?.cuff ? L(s.thobe.cuff) : '—'}</div></div>
+                  <div><div className="overline">{t('Cuff', 'الكبك')}</div><div className="strong">{s.thobe?.cuff ? L(s.thobe.cuff) : '—'}{s.thobe?.pocket ? <span className="small secondary"> · {t('chest pocket', 'جيب صدر')}</span> : null}</div></div>
                   <div><div className="overline">{t('Cloth', 'القماش')}</div><div className="strong">{L(s.thobe?.fabric)}{s.thobe?.colour ? <span className="small secondary"> · {L(s.thobe.colour)}</span> : null}</div></div>
                   <div><div className="overline">{t('Length', 'الطول')}</div><div className="strong num">{s.thobe?.metres ? `${num(s.thobe.metres)} ${t('m', 'م')}` : '—'}</div></div>
                 </div>

@@ -101,7 +101,7 @@ export function cleanMetres(v: unknown, fallback: number) {
  * The options of one thobe as they are sold: collar, cuff (when the business has cuff styles) and
  * cloth, priced by the metre. Without a length the cloth's usual metres per thobe are used.
  */
-export async function thobeOptions(o: { collarId?: string | null; cuffId?: string | null; fabricId?: string | null; metres?: unknown }, client: Queryable, needCuff = false) {
+export async function thobeOptions(o: { collarId?: string | null; cuffId?: string | null; fabricId?: string | null; metres?: unknown; pocket?: unknown }, client: Queryable, needCuff = false) {
   const collar = await db.one('select id, name_en, name_ar, shape, image_url from collars where id = $1 and active', [o.collarId ?? null], client);
   const fabric = await db.one(
     'select id, sku, name_en, name_ar, price::float as price, cost::float as cost, metres_per_thobe::float as metres, tax_rate_id from fabrics where id = $1 and active',
@@ -115,15 +115,18 @@ export async function thobeOptions(o: { collarId?: string | null; cuffId?: strin
     if (!cuff) fail('invalid_thobe_options');
   } else if (needCuff && (await db.one('select 1 from cuffs where active limit 1', [], client))) fail('cuff_required');
   const metres = cleanMetres(o.metres, fabric.metres || 3.5);
+  /** A chest pocket, or none. */
+  const pocket = o.pocket === true;
   return {
     collar,
     cuff,
     fabric,
     metres,
+    pocket,
     /** One thobe: metres × the cloth's price per metre. */
     unit: round2(metres * fabric.price),
     unitCost: round2(fabric.cost * metres),
-    snapshot: { collar, cuff, fabric: { id: fabric.id, name_en: fabric.name_en, name_ar: fabric.name_ar, price: fabric.price, per: 'metre' }, metres, colour: null },
+    snapshot: { collar, cuff, fabric: { id: fabric.id, name_en: fabric.name_en, name_ar: fabric.name_ar, price: fabric.price, per: 'metre' }, metres, pocket, colour: null },
   };
 }
 
@@ -261,7 +264,7 @@ export async function registerTotals(registerId: string, client: Queryable = db.
 
 export type SaleLineInput =
   | { kind: 'product'; productId: string; size?: string | null; qty: number; price?: number | null; discount?: number | null }
-  | { kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
+  | { kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; pocket?: boolean; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
 
 export type SaleInput = {
   branchId?: string;

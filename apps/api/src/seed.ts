@@ -5,11 +5,11 @@ import { db } from './db.js';
 import { migrate } from './migrate.js';
 import { DEFAULT_SETTINGS, qatarDateString } from './lib.js';
 
+/** The shop's collar styles; migration 011 adds their pictures. */
 const collars = [
-  ['classic-qatari', 'Classic Qatari', 'قطرية كلاسيكية'],
-  ['mandarin-band', 'Mandarin band', 'ياقة صينية'],
-  ['round-neck', 'Round neck', 'رقبة دائرية'],
-  ['wide-collar', 'Wide collar', 'ياقة عريضة'],
+  ['wide-collar', 'Pointed collar', 'ياقة مدببة'],
+  ['classic-qatari', 'Band collar, two buttons', 'ياقة بزرين'],
+  ['mandarin-band', 'Band collar, one button', 'ياقة بزر واحد'],
 ];
 
 /** Prices are per metre of cloth; a thobe takes about 3.5 m. */

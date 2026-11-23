@@ -97,7 +97,7 @@ export class BusinessController {
       .map((i: any) => {
         const label =
           i.kind === 'thobe'
-            ? `${t('Thobe', 'ثوب')} · ${esc(name(i.snapshot.thobe?.collar))}${i.snapshot.thobe?.cuff ? ` · ${esc(name(i.snapshot.thobe.cuff))}` : ''} · ${esc(name(i.snapshot.thobe?.fabric))}${i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}<br><small>${esc(i.snapshot.member?.name ?? '')}</small>`
+            ? `${t('Thobe', 'ثوب')} · ${esc(name(i.snapshot.thobe?.collar))}${i.snapshot.thobe?.cuff ? ` · ${esc(name(i.snapshot.thobe.cuff))}` : ''} · ${esc(name(i.snapshot.thobe?.fabric))}${i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}${i.snapshot.thobe?.pocket ? ` · ${t('pocket', 'جيب')}` : ''}<br><small>${esc(i.snapshot.member?.name ?? '')}</small>`
             : i.kind === 'product'
               ? `${esc(name(i.snapshot.product))}${i.snapshot.size ? ` · ${esc(i.snapshot.size)}` : ''}`
               : t('Sale', 'مبيعات');

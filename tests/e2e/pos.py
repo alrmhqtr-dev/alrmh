@@ -110,29 +110,36 @@ def counter(browser, lang, email, password):
 
     # ---- a new customer at the counter: name, mobile and measurements together; thobes; deposit ----
     phone = f"6{run[-4:]}{'1' if lang == 'ar' else '2'}00"[:8]
-    check(f"{tag} the counter asks: existing customer or new customer", page.locator('[data-testid="pos-customer-old"]').count() == 1 and page.locator('[data-testid="pos-add-customer"]').count() == 1)
-    page.click('[data-testid="pos-add-customer"]')
-    page.fill('[data-testid="pos-new-name"]', "سالم المري" if lang == "ar" else "Salem Al-Marri")
-    page.fill('[data-testid="pos-new-phone"]', phone)
-    save_off = page.locator('[data-testid="pos-new-save"]').is_disabled()
-    for k, v in {"length_cm": 148, "shoulder_cm": 46, "chest_cm": 108, "waist_cm": 98, "sleeve_cm": 60, "neck_cm": 40, "cuff_cm": 24}.items():
-        page.fill(f'[data-testid="pos-new-{k}"]', str(v))
-    page.screenshot(path=f"{SHOTS}/pos-new-customer-{lang}.png")
-    check(f"{tag} a new customer can't be saved without their measurements", save_off and not page.locator('[data-testid="pos-new-save"]').is_disabled())
-    page.click('[data-testid="pos-new-save"]')
-    page.wait_for_selector('[data-testid="pos-customer"]', timeout=15000)
+    # Thobes start with two cards; a new customer's name, mobile, measurements and thobe are on one page with a live preview.
     page.click('[data-testid="pos-tab-thobes"]')
+    page.wait_for_selector('[data-testid="thobe-choose"]', timeout=15000)
+    page.screenshot(path=f"{SHOTS}/pos-thobe-choose-{lang}.png")
+    check(f"{tag} thobes start with two cards: new customer or existing customer",
+          page.locator('[data-testid="thobe-choose"] .choice-card').count() == 2)
+    page.click('[data-testid="thobe-new"]')
+    page.fill('[data-testid="thobe-new-name"]', "سالم المري" if lang == "ar" else "Salem Al-Marri")
+    page.fill('[data-testid="thobe-new-phone"]', phone)
     page.locator('[data-testid^="thobe-collar-"]').first.click()
     page.locator('[data-testid^="thobe-cuff-"]').first.click()
     page.select_option('[data-testid="thobe-fabric"]', index=1)
+    add_off = page.locator('[data-testid="thobe-add"]').is_disabled()
+    for k, v in {"length_cm": 148, "shoulder_cm": 46, "chest_cm": 108, "waist_cm": 98, "sleeve_cm": 60, "neck_cm": 40, "cuff_cm": 24}.items():
+        page.fill(f'[data-testid="thobe-m-{k}"]', str(v))
+    page.click('[data-testid="thobe-pocket-yes"]')
     metres = page.input_value('[data-testid="thobe-metres"]')
     page.click('[data-testid="thobe-metres-more"]')
     page.fill('[data-testid="thobe-qty"]', "2")
     page.fill('[data-testid="thobe-remarks"]', "Pocket on the left\nLooser sleeves")
     page.screenshot(path=f"{SHOTS}/pos-thobe-{lang}.png", full_page=True)
-    check(f"{tag} collar and cuff are picked by picture; the cloth length starts at the usual metres and + adds 0.5 m",
-          page.locator('.style-tile.on').count() == 2 and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)
+    prev = page.locator('[data-testid="thobe-preview"]')
+    check(f"{tag} thobes can't be added until the measurements are in", add_off and not page.locator('[data-testid="thobe-add"]').is_disabled())
+    check(f"{tag} the preview shows the chosen collar, cuff and pocket, with no measurements written on it",
+          all(prev.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket"))
+          and prev.locator('[data-testid="preview-chest_cm"]').count() == 0)
+    check(f"{tag} collar, cuff and pocket are picked by picture; the cloth length starts at the usual metres and + adds 0.5 m",
+          page.locator('.style-tile.on').count() == 3 and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)
     page.click('[data-testid="thobe-add"]')
+    page.wait_for_selector('[data-testid="pos-customer"]', timeout=15000)
     page.wait_for_timeout(1200)
     total = float("".join(ch for ch in page.locator('[data-testid="cart-total"]').inner_text() if ch.isdigit() or ch == "."))
     page.click('[data-testid="pay"]')
@@ -149,9 +156,9 @@ def counter(browser, lang, email, password):
           sql(f"select stage from orders where id = '{order}'") == "measured" and sql(f"select phone from customers where id = '{cust}'") == f"+974{phone}"
           and sql(f"select count(*) from measurements m join family_members f on f.id = m.member_id where f.customer_id = '{cust}'") == "1"
           and sql(f"select sum(amount)::int from payments where order_id = '{order}'") == "100", sql(f"select stage, total from orders where id = '{order}'"))
-    line = sql(f"select (snapshot->'thobe'->>'metres') || ':' || (snapshot->'thobe'->'cuff' is not null) || ':' || (snapshot->>'remarks') from order_items where order_id = '{order}'")
-    m_, cuff_, notes_ = line.split(":", 2)
-    check(f"{tag} the thobes keep their metres, cuff and the long notes", float(m_) == float(metres) + 0.5 and cuff_ == "true" and notes_ == "Pocket on the left\nLooser sleeves", line)
+    line = sql(f"select (snapshot->'thobe'->>'metres') || ':' || (snapshot->'thobe'->'cuff' is not null) || ':' || (snapshot->'thobe'->>'pocket') || ':' || (snapshot->>'remarks') from order_items where order_id = '{order}'")
+    m_, cuff_, pocket_, notes_ = line.split(":", 3)
+    check(f"{tag} the thobes keep their metres, cuff, pocket and the long notes", float(m_) == float(metres) + 0.5 and cuff_ == "true" and pocket_ == "true" and notes_ == "Pocket on the left\nLooser sleeves", line)
 
     # ---- the balance, taken later on the order ----
     page.goto(f"{ADMIN}/orders/{order}")
@@ -295,6 +302,24 @@ def workshop(browser, lang):
     check(f"{tag} the bell shows alerts, including thobes due tomorrow that are not ready", int(count) >= 1 and f"#{b['number']}" in panel, panel[:300])
     page.keyboard.press("Escape"); page.mouse.click(5, 880)
 
+    # An existing customer: found by mobile, last measurements filled in, a change saved as new measurements
+    page.goto(ADMIN + "/pos"); page.wait_for_selector('[data-testid="pos-tab-thobes"]', timeout=15000)
+    page.click('[data-testid="pos-tab-thobes"]'); page.click('[data-testid="thobe-existing"]')
+    mob = sql(f"select substr(phone, 5) from customers where id = '{cust['id']}'")
+    page.fill('[data-testid="thobe-find"]', mob); page.click(f'[data-testid="thobe-pick-+974{mob}"]')
+    page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(600)
+    filled = page.input_value('[data-testid="thobe-m-chest_cm"]')
+    page.fill('[data-testid="thobe-m-sleeve_cm"]', "62")
+    said = page.locator('[data-testid="thobe-measured-on"]').inner_text()
+    page.locator('[data-testid^="thobe-collar-"]').first.click(); page.locator('[data-testid^="thobe-cuff-"]').first.click()
+    page.select_option('[data-testid="thobe-fabric"]', index=1)
+    page.screenshot(path=f"{SHOTS}/pos-thobe-existing-{lang}.png", full_page=True)
+    page.click('[data-testid="thobe-add"]'); page.wait_for_selector('.cart-line', timeout=15000); page.wait_for_timeout(800)
+    check(f"{tag} an existing customer's last measurements fill the page; a change is saved as new measurements",
+          float(filled) == 110 and ("Changed" in said or "معدّلة" in said)
+          and sql(f"select count(*) || ':' || max(sleeve_cm)::float from measurements where member_id = '{member}'") == "2:62"
+          and page.locator('.cart-line').count() >= 1, f"{filled} {said}")
+
     # Asking before saving an edit
     page.goto(ADMIN + "/products"); page.wait_for_selector('table tbody tr', timeout=15000)
     page.locator('table tbody tr.click').first.click()
@@ -313,7 +338,7 @@ def workshop(browser, lang):
     page.fill('[data-testid="m-sleeve_cm"]', "63.5")
     page.click('[data-testid="measure-save"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
     check(f"{tag} measurements are edited from the customer measurements page (after asking)",
-          sql(f"select sleeve_cm::float || ':' || count(*) over () from measurements where member_id = '{member}'") == "63.5:1")
+          sql(f"select sleeve_cm::float || ':' || count(*) over () from measurements where member_id = '{member}' order by taken_at desc limit 1") == "63.5:2")
 
     # Stock: cloth in metres, products by quantity, and new stock received
     page.goto(ADMIN + "/stock"); page.wait_for_selector('[data-testid="receive-new"]', timeout=15000)

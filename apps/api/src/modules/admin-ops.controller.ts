@@ -434,7 +434,7 @@ export class AdminOpsController {
   async placeOrder(
     @CurrentStaff() me: StaffUser,
     @Param('id') id: string,
-    @Body() body: { memberId: string; lines: { collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; qty: number; remarks?: string | null }[]; branchId?: string; appointmentId?: string; paidByCard?: boolean },
+    @Body() body: { memberId: string; lines: { collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; pocket?: boolean; qty: number; remarks?: string | null }[]; branchId?: string; appointmentId?: string; paidByCard?: boolean },
   ) {
     if (body?.paidByCard !== true) fail('payment_not_confirmed');
     const lines = Array.isArray(body?.lines) ? body.lines : [];
@@ -511,7 +511,7 @@ export class AdminOpsController {
         `/orders/${order!.id}`,
         c,
       );
-      await audit(me, 'place_order', 'order', order!.id, { customer: id, total, lines: items.map((i) => ({ collar: i.th.collar.id, cuff: i.th.cuff?.id ?? null, fabric: i.th.fabric.id, metres: i.th.metres, qty: i.qty })) }, c);
+      await audit(me, 'place_order', 'order', order!.id, { customer: id, total, lines: items.map((i) => ({ collar: i.th.collar.id, cuff: i.th.cuff?.id ?? null, fabric: i.th.fabric.id, metres: i.th.metres, pocket: i.th.pocket, qty: i.qty })) }, c);
       return { orderId: order!.id, number: order!.number, total: order!.total, pointsToEarn };
     });
   }

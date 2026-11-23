@@ -320,3 +320,22 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 /* The small + beside a stock figure: add stock that has arrived. */
 .icon-add { width: 26px; height: 26px; padding: 0; margin-inline-start: 8px; display: inline-grid; place-items: center; vertical-align: middle; }
 .linklike { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+
+/* The thobe preview: back and front with the measurements written on. */
+.thobe-preview { margin: 0; background: var(--subtle); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.thobe-preview svg { width: 100%; height: auto; display: block; direction: ltr; }
+.thobe-preview figcaption { text-align: center; }
+
+/* Thobes at the counter: two starting cards, then one page with a live preview. */
+.choice-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.choice-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 230px; padding: 24px; border: 1.5px solid var(--border); border-radius: var(--r-lg); background: var(--canvas); color: var(--text); font: inherit; cursor: pointer; text-align: center; }
+.choice-card:hover { border-color: var(--inverse); box-shadow: 0 6px 20px rgba(11,11,11,.08); }
+.choice-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.thobe-desk { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 14px; align-items: start; }
+/* While making thobes the sale on the side is narrower, so the form and the preview have room. */
+.pos.thobes { grid-template-columns: minmax(0, 1fr) 360px; }
+.thobe-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.thobe-row > :first-child { flex: 1 1 180px; min-width: 0; }
+.thobe-desk-preview { position: sticky; top: 70px; }
+@media (max-width: 1240px) { .thobe-desk { grid-template-columns: 1fr; } .thobe-desk-preview { position: static; max-width: 420px; justify-self: center; width: 100%; } }
+.measure-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px 10px; }

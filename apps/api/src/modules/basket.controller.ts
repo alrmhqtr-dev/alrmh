@@ -16,6 +16,8 @@ type AddBody =
       fabricId: string;
       /** Metres of cloth per thobe; a re-order sends the earlier order's length. */
       metres?: number | string | null;
+      /** A chest pocket; a re-order keeps the earlier order's choice. */
+      pocket?: boolean;
       memberId: string;
       measureMethod: 'saved' | 'branch' | 'home';
       appointmentId?: string;
@@ -56,7 +58,7 @@ export class BasketController {
     if (body?.kind !== 'thobe') fail('invalid_kind');
     // Type (collar), cuff and cloth. The length is the earlier order's on a re-order, otherwise the cloth's usual length;
     // staff set the exact metres at the visit.
-    const th = await thobeOptions({ collarId: need(body.collarId, 'collarId'), cuffId: body.cuffId || null, fabricId: need(body.fabricId, 'fabricId'), metres: body.metres }, db.pool);
+    const th = await thobeOptions({ collarId: need(body.collarId, 'collarId'), cuffId: body.cuffId || null, fabricId: need(body.fabricId, 'fabricId'), metres: body.metres, pocket: body.pocket }, db.pool);
     await memberFor(me.id, need(body.memberId, 'memberId'));
     const method = body.measureMethod;
     if (method === 'saved') {
@@ -72,7 +74,7 @@ export class BasketController {
     await db.pool.query(
       `insert into basket_items (customer_id, kind, qty, thobe, member_id, measure_method, appointment_id, remarks)
        values ($1,'thobe',$2,$3,$4,$5,$6,$7)`,
-      [me.id, qty, { collarId: th.collar.id, cuffId: th.cuff?.id ?? null, fabricId: th.fabric.id, metres: body.metres == null || body.metres === '' ? null : th.metres }, body.memberId, method, method === 'saved' ? null : body.appointmentId, remarks],
+      [me.id, qty, { collarId: th.collar.id, cuffId: th.cuff?.id ?? null, fabricId: th.fabric.id, metres: body.metres == null || body.metres === '' ? null : th.metres, pocket: th.pocket }, body.memberId, method, method === 'saved' ? null : body.appointmentId, remarks],
     );
     return this.get(me);
   }

@@ -644,6 +644,7 @@ export const ar: Record<StringKey, string> = {
   'again.cloth': "القماش",
   'again.cuff': "الكبك",
   'again.metres': "م",
+  'again.pocket': "جيب صدر",
   'book.windowNote': "يصل الخيّاط خلال الفترة التي تختارها.",
   'track.discount': "خصم",
   'track.pickup': "الاستلام من {branch}",

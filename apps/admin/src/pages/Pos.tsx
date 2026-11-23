@@ -10,7 +10,8 @@ import { fill, receiptUrl, waLink, type Templates } from '../lib/whatsapp';
 import { Empty, Field, Input, Loading, Modal, Select, TextArea, openPrint, useToast } from '../ui';
 import { OpenRegisterForm, useRegister } from '../register';
 import { MeasureModal, type Measurement } from '../measure';
-import { ClothSelect, MetresInput, StylePicker, thobePrice, validMetres, type Cloth, type Style } from '../thobe-options';
+import { type Cloth, type Style } from '../thobe-options';
+import { ThobeDesk } from '../pos-thobe';
 
 type Items = {
   branchId: string;
@@ -23,7 +24,7 @@ type Items = {
 };
 type Line =
   | { key: string; kind: 'product'; productId: string; size?: string | null; qty: number; price?: number | null; discount?: number | null }
-  | { key: string; kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres: number; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
+  | { key: string; kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres: number; pocket?: boolean; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
 type Cust = { id: string; name: string | null; phone: string };
 type CustomerFull = {
   id: string;
@@ -458,7 +459,7 @@ export default function Pos() {
     const c = data.collars.find((x) => x.id === l.collarId);
     const cuff = data.cuffs.find((x) => x.id === l.cuffId);
     const m = family.find((x) => x.id === l.memberId);
-    return `${t('Thobe', 'ثوب')} · ${L(c)}${cuff ? ` · ${L(cuff)}` : ''} · ${L(f)} · ${num(l.metres)} ${t('m', 'م')}${m ? ` · ${m.name}` : ''}`;
+    return `${t('Thobe', 'ثوب')} · ${L(c)}${cuff ? ` · ${L(cuff)}` : ''}${l.pocket ? ` · ${t('pocket', 'جيب')}` : ''} · ${L(f)} · ${num(l.metres)} ${t('m', 'م')}${m ? ` · ${m.name}` : ''}`;
   };
   const q = quote;
 
@@ -475,7 +476,7 @@ export default function Pos() {
           </select>
         </div>
       </div>
-      <div className="pos">
+      <div className={`pos ${tab === 'thobes' ? 'thobes' : ''}`}>
         <div className="stack">
           <div className="row wrap">
             <div className="tabs" role="tablist">
@@ -512,72 +513,13 @@ export default function Pos() {
                 <Empty>{t('No products match.', 'لا منتجات مطابقة.')}</Empty>
               )}
             </>
-          ) : !customer ? (
-            <div className="note">{t('Choose or add the customer first: thobes are made to their measurements.', 'اختر العميل أو أضفه أولًا: الثياب تُفصّل على مقاساته.')}</div>
-          ) : !cust.data ? (
-            <Loading />
           ) : (
-            <div className="card pad stack">
-              <div className="grid k2">
-                <Field label={t('For', 'لـ')}>
-                  <div className="row" style={{ gap: 6 }}>
-                    <Select data-testid="thobe-member" value={thobe.memberId || family[0]?.id || ''} onChange={(e) => setThobe({ ...thobe, memberId: e.target.value })}>
-                      {family.map((m) => <option key={m.id} value={m.id}>{m.name} · {RELATION[m.relation]}</option>)}
-                    </Select>
-                    <button className="btn sm secondary" onClick={() => setAddMember({ name: '', relation: 'son', size: 'adult' })} aria-label={t('Add person', 'إضافة شخص')}><Plus size={15} /></button>
-                  </div>
-                </Field>
-                <Field label={t('Measurements', 'المقاسات')}>
-                  <div className="row" style={{ gap: 6 }}>
-                    <span className={`small ${member?.latest ? 'secondary' : 'tone-error'}`} style={{ flex: 1 }}>{member?.latest ? `${t('Taken', 'أُخذت')} ${date(member.latest.taken_at)}` : t('No measurements yet', 'لا توجد مقاسات')}</span>
-                    {member ? <button className="btn sm secondary" data-testid="thobe-measure" onClick={() => setMeasure({ id: member.id, name: member.name, latest: member.latest })}><Ruler size={14} /> {member.latest ? t('Update', 'تحديث') : t('Measure', 'قياس')}</button> : null}
-                  </div>
-                </Field>
-              </div>
-              {addMember ? (
-                <div className="row wrap" style={{ gap: 8 }}>
-                  <Input placeholder={t('Name', 'الاسم')} value={addMember.name} onChange={(e) => setAddMember({ ...addMember, name: e.target.value })} style={{ maxWidth: 200 }} autoFocus />
-                  <Select value={addMember.relation} onChange={(e) => setAddMember({ ...addMember, relation: e.target.value })} style={{ maxWidth: 140 }}>
-                    {['father', 'son', 'brother', 'friend', 'other'].map((r) => <option key={r} value={r}>{RELATION[r]}</option>)}
-                  </Select>
-                  <Select value={addMember.size} onChange={(e) => setAddMember({ ...addMember, size: e.target.value })} style={{ maxWidth: 120 }}>
-                    <option value="adult">{t('Adult', 'بالغ')}</option>
-                    <option value="child">{t('Child', 'طفل')}</option>
-                  </Select>
-                  <button className="btn sm" disabled={!addMember.name.trim() || newMember.isPending} onClick={() => newMember.mutate()}>{t('Add', 'إضافة')}</button>
-                  <button className="btn sm ghost" onClick={() => setAddMember(null)}>{t('Cancel', 'إلغاء')}</button>
-                </div>
-              ) : null}
-              <StylePicker label={t('Type (collar)', 'النوع (الياقة)')} items={data.collars} value={thobe.collarId} onChange={(id) => setThobe({ ...thobe, collarId: id })} testid="thobe-collar" />
-              {data.cuffs.length ? <StylePicker label={t('Cuff', 'الكبك')} items={data.cuffs} value={thobe.cuffId} onChange={(id) => setThobe({ ...thobe, cuffId: id })} testid="thobe-cuff" /> : null}
-              <div className="grid" style={{ gridTemplateColumns: 'minmax(180px, 2fr) auto 110px', alignItems: 'start' }}>
-                <ClothSelect cloths={data.fabrics} value={thobe.fabricId} testid="thobe-fabric" onChange={(f) => setThobe({ ...thobe, fabricId: f?.id ?? '', metres: f ? Number(f.metres_per_thobe || 3.5).toFixed(2) : '' })} />
-                <MetresInput value={thobe.metres} onChange={(v) => setThobe({ ...thobe, metres: v })} testid="thobe-metres" />
-                <Field label={t('Thobes', 'عدد الثياب')}><Input data-testid="thobe-qty" type="number" min={1} max={50} value={thobe.qty} onChange={(e) => setThobe({ ...thobe, qty: e.target.value })} /></Field>
-              </div>
-              {fabric && validMetres(thobe.metres) ? (
-                <div className="small secondary" data-testid="thobe-price">
-                  {num(Number(thobe.metres))} {t('m', 'م')} × {money(fabric.price)} = <b className="num">{money(thobePrice(fabric, thobe.metres))}</b> {t('a thobe', 'للثوب')}
-                </div>
-              ) : null}
-              <Field label={t('Notes for the tailor', 'ملاحظات للخياط')}>
-                <TextArea className="input notes" data-testid="thobe-remarks" maxLength={1000} value={thobe.remarks} onChange={(e) => setThobe({ ...thobe, remarks: e.target.value })} placeholder={t('e.g. pocket on the left, looser sleeves', 'مثال: جيب على اليسار، أكمام أوسع')} />
-              </Field>
-              <div className="row" style={{ justifyContent: 'flex-end' }}>
-                <button
-                  className="btn"
-                  data-testid="thobe-add"
-                  disabled={!thobe.collarId || (data.cuffs.length > 0 && !thobe.cuffId) || !thobe.fabricId || !validMetres(thobe.metres) || !(Number(thobe.qty) >= 1) || !member}
-                  onClick={() => {
-                    setLines((ls) => [...ls, { key: key(), kind: 'thobe', memberId: member!.id, collarId: thobe.collarId, cuffId: thobe.cuffId || null, fabricId: thobe.fabricId, metres: Number(thobe.metres), qty: Math.trunc(Number(thobe.qty)), remarks: thobe.remarks.trim() || null }]);
-                    setThobe({ ...thobe, qty: '1', remarks: '' });
-                  }}
-                >
-                  <Plus size={16} /> {t('Add thobes', 'إضافة الثياب')}
-                </button>
-              </div>
-              {member && !member.latest ? <div className="note gold">{t('Take the measurements before the order goes to the workshop.', 'خذ المقاسات قبل إرسال الطلب إلى الورشة.')}</div> : null}
-            </div>
+            <ThobeDesk
+              items={data}
+              customer={customer}
+              onCustomer={(c) => { setCustomer(c); setPoints(''); setDeliver(''); }}
+              onAdd={(l) => setLines((ls) => [...ls, { key: key(), kind: 'thobe', ...l }])}
+            />
           )}
         </div>
 

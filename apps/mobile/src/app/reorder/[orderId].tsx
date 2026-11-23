@@ -12,7 +12,7 @@ import { BottomBar, Header, Screen } from '@/ui/layout';
 import { ThobeArt } from '@/ui/art';
 import { colors } from '@/theme/tokens';
 
-type Line = { key: string; memberId: string; memberName: string; collarId: string; cuffId: string | null; fabricId: string; metres: number | null; qty: number; editing: boolean };
+type Line = { key: string; memberId: string; memberName: string; collarId: string; cuffId: string | null; fabricId: string; metres: number | null; pocket: boolean; qty: number; editing: boolean };
 
 /**
  * Repeat a past order. Each thobe keeps the person's saved measurements; the
@@ -44,6 +44,7 @@ export default function Reorder() {
             fabricId: i.snapshot.thobe.fabric?.id,
             cuffId: i.snapshot.thobe.cuff?.id ?? null,
             metres: Number(i.snapshot.thobe.metres) || null,
+            pocket: i.snapshot.thobe.pocket === true,
             qty: i.qty,
             editing: false,
           })),
@@ -75,7 +76,7 @@ export default function Reorder() {
     try {
       for (const l of chosen) {
         await api('/basket/items', {
-          body: { kind: 'thobe', collarId: l.collarId, cuffId: cuffOf(l)?.id ?? null, fabricId: l.fabricId, metres: l.metres, memberId: l.memberId, measureMethod: 'saved', qty: l.qty },
+          body: { kind: 'thobe', collarId: l.collarId, cuffId: cuffOf(l)?.id ?? null, fabricId: l.fabricId, metres: l.metres, pocket: l.pocket, memberId: l.memberId, measureMethod: 'saved', qty: l.qty },
         });
       }
       await Promise.all([qc.invalidateQueries({ queryKey: ['basket'] }), qc.invalidateQueries({ queryKey: ['me'] })]);

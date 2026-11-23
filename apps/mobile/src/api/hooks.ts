@@ -92,7 +92,7 @@ export type BasketLine = {
   points: number;
   product?: Bi & { id: string; category: string; image_url?: string | null };
   size?: string | null;
-  thobe?: { collar: Collar; cuff?: Cuff | null; fabric: Fabric; metres?: number; colour?: Colour | null };
+  thobe?: { collar: Collar; cuff?: Cuff | null; fabric: Fabric; metres?: number; pocket?: boolean; colour?: Colour | null };
   member?: { id: string; name: string; relation: string; size: string };
   measureMethod?: 'saved' | 'branch' | 'home';
   remarks?: string | null;
@@ -128,7 +128,7 @@ export type OrderSummary = {
   thobes: ThobeLine[] | null;
 };
 /** One thobe line of a past order, as re-order shows it. */
-export type ThobeLine = { collar: Collar; cuff?: Cuff | null; fabric: Bi & { id: string; price: number }; metres?: number | null; colour: Colour | null; member: { id: string; name: string }; qty: number };
+export type ThobeLine = { collar: Collar; cuff?: Cuff | null; fabric: Bi & { id: string; price: number }; metres?: number | null; pocket?: boolean; colour: Colour | null; member: { id: string; name: string }; qty: number };
 export type OrderItem = { id: string; kind: 'thobe' | 'product' | 'reward'; snapshot: any; qty: number; unit_price: number; line_total: number; discount?: number };
 export type OrderDetail = OrderSummary & {
   subtotal: number;

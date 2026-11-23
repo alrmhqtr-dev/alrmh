@@ -77,6 +77,7 @@ export async function basketLines(customerId: string, client: Queryable = db.poo
         cuff: r.thobe.cuffId ? byId(cuffs, r.thobe.cuffId) ?? null : null,
         fabric,
         metres,
+        pocket: r.thobe.pocket === true,
         colour: null,
       },
       member: { id: r.member_id, name: r.member_name, relation: r.member_relation, size: r.member_size },

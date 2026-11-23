@@ -48,7 +48,7 @@ function Head({ biz, compact }: { biz: Biz; compact?: boolean }) {
 
 const itemName = (i: any) =>
   i.kind === 'thobe'
-    ? `${t('Thobe', 'ثوب')} · ${L(i.snapshot.thobe?.collar)}${i.snapshot.thobe?.cuff ? ` · ${L(i.snapshot.thobe.cuff)}` : ''} · ${L(i.snapshot.thobe?.fabric)}${i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}`
+    ? `${t('Thobe', 'ثوب')} · ${L(i.snapshot.thobe?.collar)}${i.snapshot.thobe?.cuff ? ` · ${L(i.snapshot.thobe.cuff)}` : ''} · ${L(i.snapshot.thobe?.fabric)}${i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}${i.snapshot.thobe?.pocket ? ` · ${t('pocket', 'جيب')}` : ''}`
     : i.kind === 'product'
       ? `${L(i.snapshot.product)}${i.snapshot.size ? ` · ${i.snapshot.size}` : ''}`
       : t('Sale', 'مبيعات');
@@ -192,7 +192,7 @@ function Ticket({ r, biz }: { r: any; biz: Biz }) {
             <div className="strong" style={{ fontSize: '1.15em' }}>{m?.name} · {RELATION[m?.relation] ?? ''}</div>
             {thobes.filter((i: any) => i.snapshot.member?.id === m?.id).map((i: any) => (
               <div key={i.id}>
-                <b>{i.qty} ×</b> {L(i.snapshot.thobe?.collar)}{i.snapshot.thobe?.cuff ? ` · ${t('cuff', 'كبك')} ${L(i.snapshot.thobe.cuff)}` : ''} · {L(i.snapshot.thobe?.fabric)}{i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}
+                <b>{i.qty} ×</b> {L(i.snapshot.thobe?.collar)}{i.snapshot.thobe?.cuff ? ` · ${t('cuff', 'كبك')} ${L(i.snapshot.thobe.cuff)}` : ''} · {L(i.snapshot.thobe?.fabric)}{i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}{i.snapshot.thobe?.pocket ? ` · ${t('chest pocket', 'جيب صدر')}` : ''}
                 {i.snapshot.remarks ? <div>{t('Note', 'ملاحظة')}: {i.snapshot.remarks}</div> : null}
               </div>
             ))}
