@@ -32,7 +32,7 @@ export function ThobePreview({ m, collar, cuff, pocket, className }: { m?: Previ
   const parts = [collar ? L(collar) : null, cuff ? L(cuff) : null, pocket ? t('chest pocket', 'جيب صدر') : null].filter(Boolean).join(' · ');
   return (
     <figure className={`thobe-preview ${className ?? ''}`} data-testid="thobe-preview">
-      <svg viewBox="-14 -20 572 652" role="img" aria-label={`${t('Thobe preview', 'معاينة الثوب')}${parts ? `: ${parts}` : ''}`}>
+      <svg viewBox="-14 -20 572 572" role="img" aria-label={`${t('Thobe preview', 'معاينة الثوب')}${parts ? `: ${parts}` : ''}`}>
         {/* Back */}
         <image href="/thobe/back.png" x={0} y={0} width={250} height={630} />
         {/* Front, then what is chosen for it */}

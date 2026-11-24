@@ -267,21 +267,33 @@ def workshop(browser, lang):
     tomorrow = sql("select ((now() at time zone 'Asia/Qatar')::date + 1)::text")
     sql(f"update orders set expected_delivery = '{tomorrow}' where id = '{b['orderId']}'")
 
-    page.goto(ADMIN + "/orders"); page.wait_for_selector('[data-testid="col-measured"]', timeout=15000); page.wait_for_timeout(800)
-    col = page.locator('[data-testid="col-measured"] .ticket')
-    numbers = [x.get_attribute("data-testid").replace("ticket-", "") for x in col.all()]
-    tk = page.locator(f'[data-testid="ticket-{a["number"]}"]')
-    box = tk.bounding_box()
-    check(f"{tag} order cards are one row, oldest at the top, with no price",
-          numbers.index(a["number"]) < numbers.index(b["number"]) and box["height"] < 52 and "QAR" not in tk.inner_text() and "ر.ق" not in tk.inner_text(), f"{numbers} {box}")
-    page.screenshot(path=f"{SHOTS}/board-{lang}.png", full_page=True)
+    # The stage list (the default view): every stage as a pill, done ones ticked green, oldest first.
+    page.goto(ADMIN + "/orders"); page.wait_for_selector('[data-testid="stage-list"]', timeout=15000); page.wait_for_timeout(800)
+    rows = [x.get_attribute("data-testid").replace("row-", "") for x in page.locator('[data-testid="stage-list"] tr[data-testid^="row-"]').all()]
+    states = [page.locator(f'[data-testid="stage-{a["number"]}-{x}"]').get_attribute("data-state") for x in ("measured", "cutting", "delivered")]
+    page.screenshot(path=f"{SHOTS}/stages-{lang}.png", full_page=True)
+    check(f"{tag} workshop orders are a list of all stages from Measurements to Done, oldest first, with no price",
+          rows.index(a["number"]) < rows.index(b["number"]) and states == ["now", "todo", "todo"]
+          and page.locator(f'[data-testid="row-{a["number"]}"] .stage-pill').count() == 6
+          and "QAR" not in page.locator(f'[data-testid="row-{a["number"]}"]').inner_text(), f"{rows} {states}")
     page.click(f'[data-testid="advance-{a["number"]}"]')
     asked = page.locator('[data-testid="confirm-dialog"]').inner_text()
     page.click('[data-testid="confirm-cancel"]'); page.wait_for_timeout(600)
     kept = sql(f"select stage from orders where id = '{a['orderId']}'") == "measured"
-    page.click(f'[data-testid="advance-{a["number"]}"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
-    check(f"{tag} the arrow asks before moving (Cancel keeps the stage), then moves the card to the next stage",
-          f"#{a['number']}" in asked and kept and sql(f"select stage from orders where id = '{a['orderId']}'") == "cutting", asked)
+    page.click(f'[data-testid="advance-{a["number"]}"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1500)
+    pill = page.locator(f'[data-testid="stage-{a["number"]}-measured"]')
+    green = pill.evaluate("e => getComputedStyle(e).backgroundColor")
+    check(f"{tag} moving asks first (Cancel keeps the stage); then Measurements is ticked green and Cutting is the current stage",
+          f"#{a['number']}" in asked and kept and sql(f"select stage from orders where id = '{a['orderId']}'") == "cutting"
+          and pill.get_attribute("data-state") == "done" and pill.locator("svg").count() == 1 and green == "rgb(227, 244, 232)"
+          and page.locator(f'[data-testid="stage-{a["number"]}-cutting"]').get_attribute("data-state") == "now", f"{asked} {green}")
+    page.screenshot(path=f"{SHOTS}/stages-moved-{lang}.png", full_page=True)
+
+    # The board is still there, one tab away: cards are one row with no price.
+    page.goto(ADMIN + "/orders?view=board"); page.wait_for_selector('[data-testid="col-measured"]', timeout=15000); page.wait_for_timeout(800)
+    tk = page.locator(f'[data-testid="ticket-{b["number"]}"]')
+    box = tk.bounding_box()
+    check(f"{tag} the board's order cards are one row with no price", box["height"] < 52 and "QAR" not in tk.inner_text() and "ر.ق" not in tk.inner_text(), f"{box}")
     # Drag a card two columns on: it asks, says which stage it passes through, and records both.
     page.reload(); page.wait_for_selector(f'[data-testid="ticket-{b["number"]}"]', timeout=15000)
     page.locator(f'[data-testid="ticket-{b["number"]}"]').drag_to(page.locator('[data-testid="col-stitching"]'))
@@ -298,13 +310,13 @@ def workshop(browser, lang):
           page.locator('[data-testid="confirm-dialog"]').count() == 0 and sql(f"select stage from orders where id = '{b['orderId']}'") == "stitching")
     for st in ["stitching", "quality", "ready"]:
         call("POST", f"/admin/orders/{a['orderId']}/stage", {"stage": st}, owner)
-    page.reload(); page.wait_for_selector(f'[data-testid="advance-{a["number"]}"]', timeout=15000)
+    page.goto(ADMIN + "/orders"); page.wait_for_selector(f'[data-testid="advance-{a["number"]}"]', timeout=15000)
     label = page.locator(f'[data-testid="advance-{a["number"]}"]').get_attribute("aria-label")
     page.click(f'[data-testid="advance-{a["number"]}"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
     page.click('[data-testid="done-section"] button[aria-expanded]'); page.wait_for_timeout(400)
     check(f"{tag} the last stage is Done (تم الاستلام); done orders move to the Completed section",
           ("Done" in label or "تم الاستلام" in label) and sql(f"select stage from orders where id = '{a['orderId']}'") == "delivered"
-          and page.locator(f'[data-testid="ticket-{a["number"]}"]').count() == 0 and page.locator(f'[data-testid="done-{a["number"]}"]').count() == 1, label)
+          and page.locator(f'[data-testid="row-{a["number"]}"]').count() == 0 and page.locator(f'[data-testid="done-{a["number"]}"]').count() == 1, label)
     page.screenshot(path=f"{SHOTS}/board-done-{lang}.png", full_page=True)
 
     # Alerts

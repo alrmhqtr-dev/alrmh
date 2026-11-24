@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronRight, CircleCheck, Download } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleCheck, Download } from 'lucide-react';
 import { api, downloadCsv, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { SHOP_FLOW, STAGES, STAGE_LABEL, THOBE_FLOW, channelLabel, date, stageLabel, dateTime, money, phone, todayQatar } from '../lib/format';
@@ -35,9 +35,34 @@ export const nextStage = (stage: string, hasThobes: boolean) => {
   return i >= 0 && i < flow.length - 1 ? flow[i + 1] : null;
 };
 
+/** Short names for the stage pills. */
+const pillLabel = (s: string, thobes: boolean) =>
+  s === 'measured' ? t('Measurements', 'المقاسات') : s === 'quality' ? t('Quality', 'الجودة') : s === 'confirmed' ? t('Confirmed', 'مؤكد') : stageLabel(s, thobes);
+
+/** Every stage of the order's flow: done ones green with a tick, the current one dark, the rest to come. */
+function StageTrack({ o }: { o: OrderRow }) {
+  const thobes = o.thobe_count > 0;
+  const flow = thobes ? THOBE_FLOW : SHOP_FLOW;
+  const at = o.stage === 'delivered' ? flow.length : flow.indexOf(o.stage);
+  return (
+    <ol className="stage-track" aria-label={t('Stages', 'المراحل')}>
+      {flow.map((s, i) => {
+        const state = i < at ? 'done' : i === at ? 'now' : 'todo';
+        return (
+          <li key={s} className={`stage-pill ${state}`} data-testid={`stage-${o.number}-${s}`} data-state={state} aria-current={state === 'now' ? 'step' : undefined}>
+            {state === 'done' ? <Check size={13} strokeWidth={3} aria-hidden /> : null}
+            {pillLabel(s, thobes)}
+            {state === 'done' ? <span className="sr-only"> ({t('done', 'تم')})</span> : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export default function Orders() {
   const [params, setParams] = useSearchParams();
-  const [view, setView] = useState<'board' | 'list'>(params.get('stage') ? 'list' : 'board');
+  const [view, setView] = useState<'stages' | 'board' | 'list'>(params.get('view') === 'board' ? 'board' : ['cancelled', 'delivered'].includes(params.get('stage') ?? '') ? 'list' : 'stages');
   const [q, setQ] = useState('');
   const stage = params.get('stage') ?? '';
   const nav = useNavigate();
@@ -45,8 +70,8 @@ export default function Orders() {
   const toast = useToast();
   const { can } = useAuth();
   const orders = useQuery({
-    queryKey: ['orders', view === 'list' ? stage : '', q],
-    queryFn: () => api<OrderRow[]>(`/orders?${new URLSearchParams({ ...(view === 'list' && stage ? { stage } : {}), ...(q ? { q } : {}), ...(view === 'board' ? { board: '1' } : {}) })}`),
+    queryKey: ['orders', view === 'list' ? stage : '', view === 'list' ? 'all' : 'open', q],
+    queryFn: () => api<OrderRow[]>(`/orders?${new URLSearchParams({ ...(view === 'list' && stage ? { stage } : {}), ...(q ? { q } : {}), ...(view !== 'list' ? { board: '1' } : {}) })}`),
     refetchInterval: 30_000,
   });
   const move = useMutation({
@@ -111,7 +136,40 @@ export default function Orders() {
       : {};
   const dropClass = (to: string) => (dragging ? (canDrop(to) ? `drop-ok${over === to ? ' drop-over' : ''}` : 'drop-no') : '');
   const today = todayQatar();
+
   const [showDone, setShowDone] = useState(false);
+  const doneSection = () => {
+    const done = (orders.data ?? []).filter((o) => o.stage === 'delivered').sort((a, b) => (b.done_at ?? b.created_at).localeCompare(a.done_at ?? a.created_at));
+    return (
+      <div className={`card pad stack ${dropClass('delivered')}`} style={{ gap: 8 }} data-testid="done-section" {...dropZone('delivered')}>
+        <button className="row spread" style={{ background: 'none', border: 0, padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }} aria-expanded={showDone} onClick={() => setShowDone(!showDone)}>
+          <span className="row" style={{ gap: 8 }}>
+            <CircleCheck size={18} className="tone-ok" />
+            <span className="strong">{t('Completed', 'المكتملة')} · {t('Done', 'تم الاستلام')}</span>
+            <span className="badge outline">{done.length}</span>
+          </span>
+          <span className="row small muted" style={{ gap: 4 }}>{t('Last 30 days', 'آخر 30 يومًا')} <ChevronDown size={16} style={{ transform: showDone ? 'rotate(180deg)' : undefined }} /></span>
+        </button>
+        {showDone ? (
+          done.length ? (
+            <div className="done-list">
+              {done.map((o) => (
+                <Link key={o.id} to={`/orders/${o.id}`} className="ticket row1 done" data-testid={`done-${o.number}`}>
+                  <span className="ticket-main">
+                    <span className="strong num">#{o.number}</span>
+                    <span className="ticket-name" dir="auto">{o.customer_name ?? t('Walk-in', 'زبون')}</span>
+                    {(o.thobe_count || o.item_count) > 1 ? <span className="small muted num ltr">×{o.thobe_count || o.item_count}</span> : null}
+                    <span className="small muted num">{shortDate(new Date(new Date(o.done_at ?? o.created_at).getTime() + 3 * 3600_000).toISOString().slice(0, 10))}</span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          ) : <div className="small muted">{t('Nothing finished in the last 30 days.', 'لا طلبات مكتملة في آخر 30 يومًا.')}</div>
+        ) : null}
+      </div>
+    );
+  };
+
   const [exportOpen, setExportOpen] = useState(false);
   const [range, setRange] = useState({ from: `${today.slice(0, 8)}01`, to: today });
   const [exporting, setExporting] = useState(false);
@@ -131,7 +189,7 @@ export default function Orders() {
     <div className="stack lg">
       <PageHead title={t('Workshop orders', 'طلبات الورشة')} sub={t('Move orders through the workshop. Each move notifies the customer.', 'انقل الطلبات بين مراحل الورشة. كل نقل يُبلّغ العميل.')}>
         <SearchBox value={q} onChange={setQ} placeholder={t('Order #, name or phone', 'رقم الطلب أو الاسم أو الجوال')} width={240} testid="orders-search" />
-        <Tabs value={view} onChange={setView} options={[['board', t('Board', 'اللوحة')], ['list', t('List', 'القائمة')]]} />
+        <Tabs value={view} onChange={setView} options={[['stages', t('Stages', 'المراحل')], ['board', t('Board', 'اللوحة')], ['list', t('All orders', 'كل الطلبات')]]} />
         {can('reports') ? (
           <button className="btn secondary" data-testid="export-orders" onClick={() => setExportOpen(true)}>
             <Download size={16} /> {t('Export', 'تصدير')}
@@ -159,6 +217,78 @@ export default function Orders() {
 
       {!orders.data ? (
         <Loading />
+      ) : view === 'stages' ? (
+        (() => {
+          // Oldest first: the order waiting longest is at the top.
+          const open = orders.data
+            .filter((o) => o.stage !== 'delivered' && o.stage !== 'cancelled' && (!stage || o.stage === stage))
+            .sort((a, b) => a.created_at.localeCompare(b.created_at));
+          return (
+            <div className="stack">
+              <div className="chips">
+                {['', ...BOARD].map((s) => (
+                  <button key={s || 'all'} className={`chip ${stage === s ? 'on' : ''}`} data-testid={`stage-filter-${s || 'all'}`} onClick={() => setParams(s ? { stage: s } : {})}>
+                    {s ? pillLabel(s, true) : t('All open', 'كل المفتوحة')} <span className="num muted">{orders.data.filter((o) => (s ? o.stage === s : o.stage !== 'delivered' && o.stage !== 'cancelled')).length}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="card table-wrap" data-testid="stage-list">
+                {open.length ? (
+                  <table className="stage-table">
+                    <thead>
+                      <tr>
+                        <th>{t('Order', 'الطلب')}</th>
+                        <th>{t('Customer', 'العميل')}</th>
+                        <th>{t('Due', 'التسليم')}</th>
+                        <th>{t('Stages', 'المراحل')}</th>
+                        <th><span className="sr-only">{t('Next stage', 'المرحلة التالية')}</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {open.map((o) => {
+                        const thobes = o.thobe_count > 0;
+                        const next = nextStage(o.stage, thobes) ?? (thobes && o.stage === 'confirmed' ? 'measured' : null);
+                        const late = o.expected_delivery && o.expected_delivery < today && o.stage !== 'ready';
+                        return (
+                          <tr key={o.id} className={`click ${late ? 'late' : ''}`} data-testid={`row-${o.number}`} onClick={() => nav(`/orders/${o.id}`)}>
+                            <td>
+                              <Link to={`/orders/${o.id}`} className="strong num" onClick={(e) => e.stopPropagation()}>#{o.number}</Link>
+                              <div className="small muted">{date(o.created_at)}</div>
+                            </td>
+                            <td>
+                              <div dir="auto">{o.customer_name ?? t('Walk-in', 'زبون')}{(thobes ? o.thobe_count : o.item_count) > 1 ? <span className="small muted num ltr"> ×{thobes ? o.thobe_count : o.item_count}</span> : null}</div>
+                              <div className="small muted">{o.phone ? phone(o.phone) : ''}</div>
+                            </td>
+                            <td className={`small num ${late ? 'error-text strong' : ''}`}>{o.expected_delivery ? date(o.expected_delivery) : '—'}</td>
+                            <td><StageTrack o={o} /></td>
+                            <td className="right" onClick={(e) => e.stopPropagation()}>
+                              {next && can('workshop') ? (
+                                <button
+                                  className="btn sm secondary nowrap"
+                                  data-testid={`advance-${o.number}`}
+                                  disabled={move.isPending}
+                                  aria-label={`${t('Move to', 'نقل إلى')} ${stageLabel(next, thobes)}`}
+                                  onClick={() => askMove(o, next)}
+                                >
+                                  {next === 'delivered' ? <CircleCheck size={15} /> : null}
+                                  {pillLabel(next, thobes)}
+                                  {next === 'delivered' ? null : <ChevronRight size={15} className="flip-rtl" />}
+                                </button>
+                              ) : null}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ) : (
+                  <Empty>{t('No open orders here.', 'لا طلبات مفتوحة هنا.')}</Empty>
+                )}
+              </div>
+              {stage ? null : doneSection()}
+            </div>
+          );
+        })()
       ) : view === 'board' ? (
         <>
           <div className="board">
@@ -217,37 +347,7 @@ export default function Orders() {
               );
             })}
           </div>
-          {(() => {
-            const done = orders.data.filter((o) => o.stage === 'delivered').sort((a, b) => (b.done_at ?? b.created_at).localeCompare(a.done_at ?? a.created_at));
-            return (
-              <div className={`card pad stack ${dropClass('delivered')}`} style={{ gap: 8 }} data-testid="done-section" {...dropZone('delivered')}>
-                <button className="row spread" style={{ background: 'none', border: 0, padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }} aria-expanded={showDone} onClick={() => setShowDone(!showDone)}>
-                  <span className="row" style={{ gap: 8 }}>
-                    <CircleCheck size={18} className="tone-ok" />
-                    <span className="strong">{t('Completed', 'المكتملة')} · {t('Done', 'تم الاستلام')}</span>
-                    <span className="badge outline">{done.length}</span>
-                  </span>
-                  <span className="row small muted" style={{ gap: 4 }}>{t('Last 30 days', 'آخر 30 يومًا')} <ChevronDown size={16} style={{ transform: showDone ? 'rotate(180deg)' : undefined }} /></span>
-                </button>
-                {showDone ? (
-                  done.length ? (
-                    <div className="done-list">
-                      {done.map((o) => (
-                        <Link key={o.id} to={`/orders/${o.id}`} className="ticket row1 done" data-testid={`done-${o.number}`}>
-                          <span className="ticket-main">
-                            <span className="strong num">#{o.number}</span>
-                            <span className="ticket-name" dir="auto">{o.customer_name ?? t('Walk-in', 'زبون')}</span>
-                            {(o.thobe_count || o.item_count) > 1 ? <span className="small muted num ltr">×{o.thobe_count || o.item_count}</span> : null}
-                            <span className="small muted num">{shortDate(new Date(new Date(o.done_at ?? o.created_at).getTime() + 3 * 3600_000).toISOString().slice(0, 10))}</span>
-                          </span>
-                        </Link>
-                      ))}
-                    </div>
-                  ) : <div className="small muted">{t('Nothing finished in the last 30 days.', 'لا طلبات مكتملة في آخر 30 يومًا.')}</div>
-                ) : null}
-              </div>
-            );
-          })()}
+          {doneSection()}
         </>
       ) : (
         <div className="stack">
