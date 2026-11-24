@@ -274,7 +274,7 @@ export function ThobeDesk({
         </div>
       </div>
       <aside className="thobe-desk-preview">
-        <ThobePreview collar={collar} cuff={cuff} pocket={opt.pocket === 'yes'} />
+        <ThobePreview m={meas} collar={collar} cuff={cuff} pocket={opt.pocket === 'yes'} />
       </aside>
     </div>
   );

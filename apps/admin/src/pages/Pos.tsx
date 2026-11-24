@@ -250,6 +250,7 @@ function Done({ result, customer, phoneHint, hasThobes, onNew }: { result: SaleR
       <div className="grid k2">
         <button className="btn secondary" data-testid="print-receipt" onClick={() => openPrint(`receipt/${result.orderId}`)}><Printer size={16} /> {t('Print receipt', 'طباعة الإيصال')}</button>
         <button className="btn secondary" onClick={() => openPrint(`invoice/${result.orderId}`)}><Printer size={16} /> {t('A4 invoice', 'فاتورة A4')}</button>
+        {hasThobes ? <button className="btn secondary" data-testid="print-order" onClick={() => openPrint(`order/${result.orderId}`)}><Printer size={16} /> {t('Print order', 'طباعة الطلب')}</button> : null}
         {hasThobes ? <button className="btn secondary" onClick={() => openPrint(`ticket/${result.orderId}`)}><Ruler size={16} /> {t('Tailor ticket', 'ورقة الخياط')}</button> : null}
         {tel ? (
           <a className="btn secondary" data-testid="send-whatsapp" href={waLink(tel, text)} target="_blank" rel="noreferrer"><Send size={16} /> WhatsApp</a>
@@ -476,7 +477,8 @@ export default function Pos() {
           </select>
         </div>
       </div>
-      <div className={`pos ${tab === 'thobes' ? 'thobes' : ''}`}>
+      {/* While making thobes the sale stays out of the way until something is in it. */}
+      <div className={`pos ${tab === 'thobes' ? 'thobes' : ''} ${tab === 'thobes' && lines.length === 0 ? 'solo' : ''}`}>
         <div className="stack">
           <div className="row wrap">
             <div className="tabs" role="tablist">

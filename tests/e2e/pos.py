@@ -114,8 +114,8 @@ def counter(browser, lang, email, password):
     page.click('[data-testid="pos-tab-thobes"]')
     page.wait_for_selector('[data-testid="thobe-choose"]', timeout=15000)
     page.screenshot(path=f"{SHOTS}/pos-thobe-choose-{lang}.png")
-    check(f"{tag} thobes start with two cards: new customer or existing customer",
-          page.locator('[data-testid="thobe-choose"] .choice-card').count() == 2)
+    check(f"{tag} thobes start with two cards: new customer or existing customer, with the sale out of the way",
+          page.locator('[data-testid="thobe-choose"] .choice-card').count() == 2 and not page.locator('[data-testid="pos-customer-search"]').is_visible())
     page.click('[data-testid="thobe-new"]')
     page.fill('[data-testid="thobe-new-name"]', "سالم المري" if lang == "ar" else "Salem Al-Marri")
     page.fill('[data-testid="thobe-new-phone"]', phone)
@@ -133,9 +133,13 @@ def counter(browser, lang, email, password):
     page.screenshot(path=f"{SHOTS}/pos-thobe-{lang}.png", full_page=True)
     prev = page.locator('[data-testid="thobe-preview"]')
     check(f"{tag} thobes can't be added until the measurements are in", add_off and not page.locator('[data-testid="thobe-add"]').is_disabled())
-    check(f"{tag} the preview shows the chosen collar, cuff and pocket, with no measurements written on it",
-          all(prev.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket"))
-          and prev.locator('[data-testid="preview-chest_cm"]').count() == 0)
+    page.fill('[data-testid="thobe-m-waist_cm"]', "97")
+    live = prev.locator('[data-testid="preview-waist_cm"]').text_content()
+    page.fill('[data-testid="thobe-m-waist_cm"]', "98")
+    check(f"{tag} the preview marks the measurements as they're typed and shows the chosen collar, cuff and pocket",
+          live == "97" and prev.locator('[data-testid="preview-waist_cm"]').text_content() == "98"
+          and prev.locator('[data-testid="preview-chest_cm"]').text_content() == "108" and prev.locator('[data-testid="preview-length_cm"]').text_content() == "148"
+          and all(prev.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket")))
     check(f"{tag} collar, cuff and pocket are picked by picture; the cloth length starts at the usual metres and + adds 0.5 m",
           page.locator('.style-tile.on').count() == 3 and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)
     page.click('[data-testid="thobe-add"]')
@@ -159,6 +163,16 @@ def counter(browser, lang, email, password):
     line = sql(f"select (snapshot->'thobe'->>'metres') || ':' || (snapshot->'thobe'->'cuff' is not null) || ':' || (snapshot->'thobe'->>'pocket') || ':' || (snapshot->>'remarks') from order_items where order_id = '{order}'")
     m_, cuff_, pocket_, notes_ = line.split(":", 3)
     check(f"{tag} the thobes keep their metres, cuff, pocket and the long notes", float(m_) == float(metres) + 0.5 and cuff_ == "true" and pocket_ == "true" and notes_ == "Pocket on the left\nLooser sleeves", line)
+    sheet = page.context.new_page()
+    sheet.add_init_script("window.print = () => {}")
+    sheet.goto(ADMIN + f"/print/order/{order}"); sheet.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); sheet.wait_for_timeout(1500)
+    sheet.screenshot(path=f"{SHOTS}/print-order-{lang}.png", full_page=True)
+    th = sheet.locator('[data-testid="order-thobe-0"]')
+    check(f"{tag} the printed order draws the thobe with its collar, cuff, pocket and the measurements marked, then the bill",
+          th.locator('[data-testid="preview-chest_cm"]').text_content() == "108" and th.locator('[data-testid="preview-sleeve_cm"]').text_content() == "60"
+          and all(th.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket"))
+          and sheet.locator('.order-bill').count() == 1)
+    sheet.close()
 
     # ---- the balance, taken later on the order ----
     page.goto(f"{ADMIN}/orders/{order}")

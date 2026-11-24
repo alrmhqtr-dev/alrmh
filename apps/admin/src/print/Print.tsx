@@ -8,6 +8,7 @@ import { MEASURE_KEYS, RELATION, date, dateTime, measureLabel, methodLabel, mone
 import { code128Svg, qrSvg } from '../lib/barcode';
 import { receiptUrl } from '../lib/whatsapp';
 import { LABELS_KEY } from '../pages/Labels';
+import { ThobePreview } from '../thobe-preview';
 
 type Biz = { company: any; invoice: any; barcode: any; printing: any };
 
@@ -16,8 +17,15 @@ function useAutoPrint(ready: boolean) {
   useEffect(() => {
     if (ready && !done.current) {
       done.current = true;
-      // Let fonts and the logo settle first.
-      setTimeout(() => window.print(), 450);
+      // Let fonts, the logo and any thobe pictures load first (at most a few seconds).
+      setTimeout(() => {
+        const srcs = [
+          ...Array.from(document.images).map((i) => i.src),
+          ...Array.from(document.querySelectorAll('svg image')).map((i) => i.getAttribute('href') ?? ''),
+        ].filter(Boolean);
+        const loads = srcs.map((src) => new Promise<void>((res) => { const im = new Image(); im.onload = () => res(); im.onerror = () => res(); im.src = src; }));
+        Promise.race([Promise.all(loads), new Promise((r) => setTimeout(r, 4000))]).then(() => setTimeout(() => window.print(), 250));
+      }, 200);
     }
   }, [ready]);
 }
@@ -210,6 +218,87 @@ function Ticket({ r, biz }: { r: any; biz: Biz }) {
   );
 }
 
+/** The complete order on A4: each thobe drawn with its collar, cuff, pocket and the measurements marked, then the bill. */
+function OrderSheet({ r, biz }: { r: any; biz: Biz }) {
+  const thobes = r.items.filter((i: any) => i.kind === 'thobe');
+  const others = r.items.filter((i: any) => i.kind !== 'thobe');
+  const count = thobes.reduce((n: number, i: any) => n + i.qty, 0);
+  return (
+    <div className="print-page pa4 order-sheet" data-testid="order-sheet">
+      <div className="row spread" style={{ alignItems: 'flex-start' }}>
+        <div style={{ textAlign: 'start' }}>
+          {biz.company.logo_url ? <img src={mediaUrl(biz.company.logo_url)} alt="" style={{ maxHeight: 56 }} /> : null}
+          <div className="strong" style={{ fontSize: 17 }}>{L(biz.company)}</div>
+          <div>{L({ name_en: r.branch_en, name_ar: r.branch_ar })}{biz.company.phone ? <> · <span className="ltr">{biz.company.phone}</span></> : null}</div>
+        </div>
+        <div style={{ textAlign: 'end' }}>
+          <div className="strong" style={{ fontSize: 22 }}>{t('Order', 'طلب')} #{r.number}</div>
+          <div>{t('Ordered', 'تاريخ الطلب')} {date(r.created_at)}</div>
+          {r.expected_delivery ? <div className="strong">{t('Ready by', 'التسليم')} {date(r.expected_delivery)}</div> : null}
+          <div dangerouslySetInnerHTML={{ __html: code128Svg(r.number, 36, 8) }} />
+        </div>
+      </div>
+      <div className="hr" />
+      <div className="row spread">
+        <div>{t('Customer', 'العميل')}: <b>{r.customer_name ?? t('Walk-in', 'زبون')}</b>{r.phone ? <> · <span className="ltr">{phone(r.phone)}</span></> : null}</div>
+        <div>{t('Thobes', 'الثياب')}: <b className="num">{count}</b></div>
+      </div>
+
+      {thobes.map((i: any, k: number) => {
+        const th = i.snapshot.thobe ?? {};
+        const meas = r.measurements?.find((x: any) => x.member_id === i.snapshot.member?.id);
+        const rows: [string, ReactNode][] = [
+          [t('Collar', 'الياقة'), L(th.collar)],
+          [t('Cuff', 'الكبك'), th.cuff ? L(th.cuff) : '—'],
+          [t('Pocket', 'الجيب'), th.pocket ? t('Chest pocket', 'جيب صدر') : t('No pocket', 'بدون جيب')],
+          [t('Cloth', 'القماش'), L(th.fabric)],
+          [t('Cloth length', 'طول القماش'), th.metres ? `${th.metres} ${t('m', 'م')}` : '—'],
+          [t('Thobes', 'عدد الثياب'), String(i.qty)],
+        ];
+        return (
+          <section key={i.id} className="order-thobe" data-testid={`order-thobe-${k}`}>
+            <div className="strong" style={{ fontSize: 15 }}>
+              {thobes.length > 1 ? `${k + 1}. ` : ''}{i.snapshot.member?.name ?? r.customer_name}{i.snapshot.member?.relation && i.snapshot.member.relation !== 'self' ? ` · ${RELATION[i.snapshot.member.relation] ?? ''}` : ''}
+            </div>
+            <div className="order-thobe-body">
+              <ThobePreview m={meas ?? {}} collar={th.collar} cuff={th.cuff} pocket={th.pocket === true} className="print" />
+              <div>
+                <table>
+                  <tbody>{rows.map(([a, b]) => <tr key={a}><td>{a}</td><td className="e strong">{b}</td></tr>)}</tbody>
+                </table>
+                {i.snapshot.remarks ? <div style={{ marginTop: 8, whiteSpace: 'pre-line' }}><b>{t('Notes for the tailor', 'ملاحظات للخياط')}:</b> {i.snapshot.remarks}</div> : null}
+                {meas ? (
+                  <div style={{ marginTop: 8 }}>
+                    {t('Measured', 'المقاسات')} {date(meas.taken_at)}{meas.tailor_name ? ` · ${meas.tailor_name}` : ''}
+                    {meas.remarks ? <div style={{ whiteSpace: 'pre-line' }}>{meas.remarks}</div> : null}
+                  </div>
+                ) : <div className="strong" style={{ marginTop: 8 }}>{t('No measurements yet', 'لا توجد مقاسات بعد')}</div>}
+              </div>
+            </div>
+          </section>
+        );
+      })}
+
+      <section className="order-bill">
+        <table>
+          <thead><tr><th>{t('Item', 'الصنف')}</th><th className="e">{t('Qty', 'الكمية')}</th><th className="e">{t('Amount', 'المبلغ')}</th></tr></thead>
+          <tbody>
+            {[...thobes, ...others].map((i: any) => (
+              <tr key={i.id}>
+                <td>{itemName(i)}{i.kind === 'thobe' && i.snapshot.member ? ` · ${i.snapshot.member.name}` : ''}</td>
+                <td className="e num">{i.qty}</td>
+                <td className="e num">{money2(i.line_total)}</td>
+              </tr>
+            ))}
+            <Totals r={r} biz={biz} />
+          </tbody>
+        </table>
+        {r.notes ? <div style={{ marginTop: 8 }}>{t('Notes', 'ملاحظات')}: {r.notes}</div> : null}
+      </section>
+    </div>
+  );
+}
+
 function Labels({ biz }: { biz: Biz }) {
   const b = biz.barcode;
   let items: { sku: string; name: string; price: number; size: string; count: number }[] = [];
@@ -291,7 +380,7 @@ export default function Print() {
   const loc = useLocation();
   const [kind, id] = loc.pathname.replace(/^.*\/print\//, '').split('/');
   const biz = useQuery({ queryKey: ['business'], queryFn: () => api<Biz>('/business') });
-  const order = useQuery({ queryKey: ['receipt', id], queryFn: () => api<any>(`/orders/${id}/receipt`), enabled: ['receipt', 'invoice', 'ticket'].includes(kind) });
+  const order = useQuery({ queryKey: ['receipt', id], queryFn: () => api<any>(`/orders/${id}/receipt`), enabled: ['receipt', 'invoice', 'ticket', 'order'].includes(kind) });
   const draft = useQuery({ queryKey: ['draft', id], queryFn: () => api<any>(`/drafts/${id}`), enabled: kind === 'quotation' });
   const member = useQuery({ queryKey: ['member', id], queryFn: () => api<any>(`/members/${id}`), enabled: kind === 'measure' });
   const reg = useQuery({ queryKey: ['register-print', id], queryFn: () => api<any>(`/registers/${id}`), enabled: kind === 'register' });
@@ -306,6 +395,9 @@ export default function Print() {
     } else if (kind === 'invoice' && order.data) {
       ready = true;
       body = <Invoice r={order.data} biz={b} title={t('Invoice', 'فاتورة')} number={order.data.number} dateText={dateTime(order.data.created_at)} />;
+    } else if (kind === 'order' && order.data) {
+      ready = true;
+      body = <OrderSheet r={order.data} biz={b} />;
     } else if (kind === 'ticket' && order.data) {
       ready = true;
       body = Array.from({ length: b.printing.ticket_copies || 1 }, (_, i) => <div key={i} style={{ breakAfter: 'page' }}><Ticket r={order.data} biz={b} /></div>);
