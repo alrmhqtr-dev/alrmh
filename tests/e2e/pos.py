@@ -63,7 +63,7 @@ PAGES = ["/", "/pos", "/sales", "/sales?payment=due", "/drafts", "/quotations", 
          "/stock/transfers", "/suggestions", "/catalogue", "/brands", "/units", "/variations", "/warranties", "/purchases", "/purchases/new", "/suppliers", "/customers", "/customer-groups",
          "/expenses", "/expense-categories", "/tailor", "/tailor/measurements", "/factory", "/factory/photos", "/orders", "/appointments", "/import", "/m/products", "/m/sales",
          "/settings/company", "/settings/invoice", "/settings/barcode", "/settings/pos", "/printing", "/whatsapp", "/tax-rates"]
-OWNER_ONLY = ["/reports", "/reports?r=products", "/roles", "/staff", "/audit"]
+OWNER_ONLY = ["/reports", "/reports/sales", "/reports?r=products", "/roles", "/staff", "/audit"]
 
 
 def login(page, email, password):
@@ -341,14 +341,22 @@ def workshop(browser, lang):
     mob = sql(f"select substr(phone, 5) from customers where id = '{cust['id']}'")
     page.fill('[data-testid="thobe-find"]', mob); page.click(f'[data-testid="thobe-pick-+974{mob}"]')
     page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(600)
+    viewed = page.locator('[data-testid="thobe-m-view-chest_cm"]').inner_text()
+    inputs = page.locator('[data-testid="thobe-m-chest_cm"]').count()
+    last_collar = sql(f"select oi.snapshot->'thobe'->'collar'->>'id' from order_items oi join orders o on o.id = oi.order_id where oi.snapshot->'member'->>'id' = '{member}' order by o.created_at desc limit 1")
+    picked = page.locator(f'[data-testid="thobe-collar-{last_collar}"]').get_attribute("class") or ""
+    page.screenshot(path=f"{SHOTS}/pos-thobe-existing-view-{lang}.png", full_page=True)
+    check(f"{tag} an existing customer's measurements show as a table, not a form, and their last collar is already picked",
+          viewed == "110" and inputs == 0 and page.locator('[data-testid="preview-chest_cm"]').text_content() == "110" and " on" in f" {picked}", f"{viewed} {inputs} {last_collar} {picked}")
+    page.click('[data-testid="thobe-m-edit"]')
     filled = page.input_value('[data-testid="thobe-m-chest_cm"]')
     page.fill('[data-testid="thobe-m-sleeve_cm"]', "62")
     said = page.locator('[data-testid="thobe-measured-on"]').inner_text()
-    page.locator('[data-testid^="thobe-collar-"]').first.click(); page.locator('[data-testid^="thobe-cuff-"]').first.click()
+    page.locator('[data-testid^="thobe-cuff-"]').first.click()
     page.select_option('[data-testid="thobe-fabric"]', index=1)
     page.screenshot(path=f"{SHOTS}/pos-thobe-existing-{lang}.png", full_page=True)
     page.click('[data-testid="thobe-add"]'); page.wait_for_selector('.cart-line', timeout=15000); page.wait_for_timeout(800)
-    check(f"{tag} an existing customer's last measurements fill the page; a change is saved as new measurements",
+    check(f"{tag} Edit opens their measurements for changing; a change is saved as new measurements",
           float(filled) == 110 and ("Changed" in said or "معدّلة" in said)
           and sql(f"select count(*) || ':' || max(sleeve_cm)::float from measurements where member_id = '{member}'") == "2:62"
           and page.locator('.cart-line').count() >= 1, f"{filled} {said}")
@@ -425,12 +433,42 @@ def workshop(browser, lang):
     ctx.close()
 
 
+def sales_report(browser, lang):
+    """The sales report: this month by default, and its totals match what was sold."""
+    tag = f"[{lang} sales report]"
+    sql(f"update staff_users set language = '{lang}' where email = '{ADMIN_EMAIL}'")
+    ctx = browser.new_context(viewport={"width": 1366, "height": 900})
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: errors.append(f"{tag} {e}"))
+    login(page, ADMIN_EMAIL, ADMIN_PASSWORD)
+    page.goto(ADMIN + "/reports/sales"); page.wait_for_selector('[data-testid="sales-totals"]', timeout=20000); page.wait_for_timeout(800)
+    month = sql("select to_char(date_trunc('month', now() at time zone 'Asia/Qatar'), 'YYYY-MM-DD') || '|' || to_char(date_trunc('month', now() at time zone 'Asia/Qatar') + interval '1 month - 1 day', 'YYYY-MM-DD')")
+    shown = f"{page.input_value('[data-testid=sales-from]')}|{page.input_value('[data-testid=sales-to]')}"
+    W = "o.stage not in ('pending_payment','payment_failed','cancelled') and date_trunc('month', o.created_at at time zone 'Asia/Qatar') = date_trunc('month', now() at time zone 'Asia/Qatar')"
+    disc = float(sql(f"select coalesce(sum(o.discount),0) + coalesce((select sum(i.discount) from order_items i join orders o on o.id = i.order_id where {W}),0) from orders o where {W}"))
+    metres = float(sql(f"select coalesce(sum((i.snapshot->'thobe'->>'metres')::numeric * i.qty),0) from order_items i join orders o on o.id = i.order_id where {W} and i.kind = 'thobe'"))
+    prods = int(sql(f"select coalesce(sum(i.qty),0) from order_items i join orders o on o.id = i.order_id where {W} and i.kind = 'product'"))
+    digits = lambda x: float("".join(ch for ch in x if ch.isdigit() or ch == ".") or 0)
+    page.screenshot(path=f"{SHOTS}/sales-report-{lang}.png", full_page=True)
+    got = (digits(page.locator('[data-testid="sales-discount"]').inner_text()), digits(page.locator('[data-testid="sales-metres"]').inner_text()), int(digits(page.locator('[data-testid="sales-products"]').inner_text())))
+    check(f"{tag} opens on this month, from the 1st to the last day", shown == month, f"{shown} {month}")
+    check(f"{tag} the discounts given, cloth sold and products sold match the sales", got == (round(disc, 2), round(metres, 2), prods) and prods > 0 and metres > 0, f"{got} {(disc, metres, prods)}")
+    page.select_option('[data-testid="sales-channel"]', "app"); page.wait_for_timeout(1500)
+    app_prods = int(sql(f"select coalesce(sum(i.qty),0) from order_items i join orders o on o.id = i.order_id where {W} and o.channel = 'app' and i.kind = 'product'"))
+    check(f"{tag} the channel filter narrows the figures", int(digits(page.locator('[data-testid="sales-products"]').inner_text())) == app_prods, app_prods)
+    check(f"{tag} the cloth, products and discounts tables are there",
+          all(page.locator(f'[data-testid="{x}"]').count() == 1 for x in ("sales-cloth", "sales-products-table", "sales-discounts", "sales-channels")))
+    ctx.close()
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=CHROME, args=["--no-sandbox"])
     counter(browser, "ar", CASHIER, "cashier-pass-2026")
     counter(browser, "en", ADMIN_EMAIL, ADMIN_PASSWORD)
     workshop(browser, "en")
     workshop(browser, "ar")
+    sales_report(browser, "en")
+    sales_report(browser, "ar")
     browser.close()
 
 print("page errors:", errors or "none")

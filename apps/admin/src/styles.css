@@ -364,3 +364,14 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 .stage-table tr.late td:first-child { box-shadow: inset 3px 0 0 var(--error); }
 .nowrap { white-space: nowrap; }
 .strike { text-decoration: line-through; }
+
+/* An existing customer's measurements, shown until staff press Edit. */
+.measure-view { width: 100%; border-collapse: collapse; }
+.measure-view td { padding: 7px 4px; border-bottom: 1px solid var(--border); font-size: 15px; }
+.measure-view td:last-child { text-align: end; font-size: 17px; }
+
+/* Sales report */
+.pad-h { padding: 14px 16px 6px; }
+.print-only { display: none; }
+@media print { .print-only { display: block; } .sales-report .card { break-inside: avoid; } }
+.sales-report tfoot td { font-weight: 700; border-top: 2px solid var(--border); }

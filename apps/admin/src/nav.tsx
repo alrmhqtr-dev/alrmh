@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  TrendingUp,
   Barcode,
   Boxes,
   ClipboardList,
@@ -165,7 +166,10 @@ export const groups = (): NavGroup[] => [
     label: t('Reports', 'التقارير'),
     icon: BarChart3,
     perms: ['reports'],
-    items: [{ to: '/reports', label: t('Reports', 'التقارير'), icon: BarChart3, perms: ['reports'] }],
+    items: [
+      { to: '/reports/sales', label: t('Sales report', 'تقرير المبيعات'), icon: TrendingUp, perms: ['reports'] },
+      { to: '/reports', label: t('Reports', 'التقارير'), icon: BarChart3, perms: ['reports'] },
+    ],
   },
   {
     key: 'printing',

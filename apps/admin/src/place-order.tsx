@@ -6,7 +6,7 @@ import { api, errorMessage } from './lib/api';
 import { RELATION, money, num } from './lib/format';
 import { L, t } from './lib/i18n';
 import { Field, Input, Modal, Select, TextArea, useToast } from './ui';
-import { ClothSelect, MetresInput, StylePicker, thobePrice, validMetres, type Cloth, type Style } from './thobe-options';
+import { ClothSelect, MetresInput, StyleWithNote, thobePrice, validMetres, type Cloth, type Style } from './thobe-options';
 
 type Catalogue = {
   collars: (Style & { active: boolean })[];
@@ -20,8 +20,13 @@ type Customer = {
   addresses: { id: string; label: string; line1: string; area: string; is_default: boolean }[];
   tier: { tier: { name_en: string; name_ar: string; points_per_thobe: number } };
 };
-type Line = { collarId: string; cuffId: string; pocket: string; fabricId: string; metres: string; qty: number; remarks: string };
-const blank = (): Line => ({ collarId: '', cuffId: '', pocket: 'no', fabricId: '', metres: '', qty: 1, remarks: '' });
+type Line = { collarId: string; cuffId: string; pocket: string; fabricId: string; metres: string; qty: number; remarks: string; collarNote: string; cuffNote: string; pocketNote: string };
+const blank = (): Line => ({ collarId: '', cuffId: '', pocket: 'no', fabricId: '', metres: '', qty: 1, remarks: '', collarNote: '', cuffNote: '', pocketNote: '' });
+/** The remarks against the collar, cuff and pocket, empty ones left out. */
+const styleNotes = (l: Line) => {
+  const n = Object.fromEntries(([['collar', l.collarNote], ['cuff', l.cuffNote], ['pocket', l.pocketNote]] as const).filter(([, v]) => v.trim()).map(([k, v]) => [k, v.trim()]));
+  return Object.keys(n).length ? n : null;
+};
 const POCKET: Style[] = [
   { id: 'no', name_en: 'No pocket', name_ar: 'بدون جيب', image_url: null },
   { id: 'yes', name_en: 'Chest pocket', name_ar: 'جيب صدر', image_url: `${window.location.origin}/thobe/pocket.png` },
@@ -75,7 +80,7 @@ export function PlaceOrderModal({
       api<{ orderId: string; number: string; total: number; pointsToEarn: number }>(`/customers/${customerId}/orders`, {
         body: {
           memberId: memberId_,
-          lines: lines.map((l) => ({ collarId: l.collarId, cuffId: l.cuffId || null, fabricId: l.fabricId, metres: Number(l.metres), pocket: l.pocket === 'yes', qty: Number(l.qty), remarks: l.remarks.trim() || null })),
+          lines: lines.map((l) => ({ collarId: l.collarId, cuffId: l.cuffId || null, fabricId: l.fabricId, metres: Number(l.metres), pocket: l.pocket === 'yes', styleNotes: styleNotes(l), qty: Number(l.qty), remarks: l.remarks.trim() || null })),
           branchId: branchId_,
           appointmentId,
           paidByCard: paid,
@@ -133,9 +138,9 @@ export function PlaceOrderModal({
                   </button>
                 ) : null}
               </div>
-              <StylePicker label={t('Type (collar)', 'النوع (الياقة)')} items={collars} value={l.collarId} onChange={(id) => set(i, { collarId: id })} testid={`po-type-${i}`} />
-              {cuffs.length ? <StylePicker label={t('Cuff', 'الكبك')} items={cuffs} value={l.cuffId} onChange={(id) => set(i, { cuffId: id })} testid={`po-cuff-${i}`} /> : null}
-              <StylePicker label={t('Pocket', 'الجيب')} items={POCKET} value={l.pocket} onChange={(id) => set(i, { pocket: id })} testid={`po-pocket-${i}`} />
+              <StyleWithNote label={t('Collar', 'الياقة')} items={collars} value={l.collarId} onChange={(id) => set(i, { collarId: id })} testid={`po-type-${i}`} note={l.collarNote} onNote={(v) => set(i, { collarNote: v })} />
+              {cuffs.length ? <StyleWithNote label={t('Cuff', 'الكبك')} items={cuffs} value={l.cuffId} onChange={(id) => set(i, { cuffId: id })} testid={`po-cuff-${i}`} note={l.cuffNote} onNote={(v) => set(i, { cuffNote: v })} /> : null}
+              <StyleWithNote label={t('Pocket', 'الجيب')} items={POCKET} value={l.pocket} onChange={(id) => set(i, { pocket: id })} testid={`po-pocket-${i}`} note={l.pocketNote} onNote={(v) => set(i, { pocketNote: v })} />
               <div className="grid" style={{ gridTemplateColumns: 'minmax(180px, 2fr) auto 90px', alignItems: 'start' }}>
                 <ClothSelect cloths={fabrics} value={l.fabricId} testid={`po-cloth-${i}`} onChange={(f) => set(i, { fabricId: f?.id ?? '', metres: f ? Number(f.metres_per_thobe || 3.5).toFixed(2) : '' })} />
                 <MetresInput value={l.metres} onChange={(v) => set(i, { metres: v })} testid={`po-metres-${i}`} />

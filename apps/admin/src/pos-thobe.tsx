@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, Search, UserPlus } from 'lucide-react';
+import { ArrowLeft, Pencil, Plus, Search, UserPlus } from 'lucide-react';
 import { api, errorMessage } from './lib/api';
 import { MEASURE_KEYS, date, measureLabel, money, num, phone, RELATION } from './lib/format';
 import { t } from './lib/i18n';
 import { Field, Input, Loading, Select, TextArea, useToast } from './ui';
-import { ClothSelect, MetresInput, StylePicker, thobePrice, validMetres, type Cloth, type Style } from './thobe-options';
+import { ClothSelect, MetresInput, StyleWithNote, thobePrice, validMetres, type Cloth, type Style } from './thobe-options';
 import { ThobePreview } from './thobe-preview';
 
 type Cust = { id: string; name: string | null; phone: string };
-type Member = { id: string; name: string; relation: string; size: string; latest: (Record<string, number> & { id?: string; taken_at: string; remarks: string | null }) | null };
+type Member = {
+  id: string; name: string; relation: string; size: string;
+  latest: (Record<string, number> & { id?: string; taken_at: string; tailor_name?: string | null; remarks: string | null }) | null;
+  /** The styles of the person's last thobe, to start from the same again. */
+  last_thobe?: { collar?: { id: string } | null; cuff?: { id: string } | null; pocket?: boolean } | null;
+};
 type CustomerFull = { family: Member[] };
 export type StyleNotes = { collar?: string; cuff?: string; pocket?: string };
 export type ThobeLineIn = { memberId: string; collarId: string; cuffId: string | null; fabricId: string; metres: number; pocket: boolean; styleNotes: StyleNotes | null; qty: number; remarks: string | null };
@@ -44,6 +49,8 @@ export function ThobeDesk({
   const [addMember, setAddMember] = useState<{ name: string; relation: string; size: string } | null>(null);
   const [meas, setMeas] = useState<Record<string, string>>(blankMeasures());
   const [measRemarks, setMeasRemarks] = useState('');
+  // An existing person's measurements are shown, not opened for editing, until staff press Edit.
+  const [editing, setEditing] = useState(false);
   const [loadedFor, setLoadedFor] = useState('');
   const [opt, setOpt] = useState({ collarId: '', cuffId: '', pocket: 'no', fabricId: '', metres: '', qty: '1', remarks: '', collarNote: '', cuffNote: '', pocketNote: '' });
   const [busy, setBusy] = useState(false);
@@ -59,8 +66,19 @@ export function ThobeDesk({
     if (!member || key === loadedFor) return;
     setMeas(member.latest ? Object.fromEntries(MEASURE_KEYS.map((k) => [k, String(Number(member.latest![k]))])) : blankMeasures());
     setMeasRemarks(member.latest?.remarks ?? '');
+    setEditing(false);
+    // Start from the styles of their last thobe, if those styles are still offered.
+    const last = member.last_thobe;
+    if (last) {
+      setOpt((o) => ({
+        ...o,
+        collarId: last.collar && items.collars.some((c) => c.id === last.collar!.id) ? last.collar.id : o.collarId,
+        cuffId: last.cuff && items.cuffs.some((c) => c.id === last.cuff!.id) ? last.cuff.id : o.cuffId,
+        pocket: last.pocket ? 'yes' : 'no',
+      }));
+    }
     setLoadedFor(key);
-  }, [member, loadedFor]);
+  }, [member, loadedFor, items]);
   // Back to the two cards when the customer is removed from the sale.
   useEffect(() => {
     if (!customer) {
@@ -243,16 +261,51 @@ export function ThobeDesk({
               {member?.latest ? (changed ? t('Changed: saved as new measurements', 'معدّلة: تُحفظ مقاسات جديدة') : `${t('Taken', 'أُخذت')} ${date(member.latest.taken_at)}`) : t('New measurements', 'مقاسات جديدة')}
             </span>
           </div>
-          <div className="measure-grid">
-            {MEASURE_KEYS.map((k) => (
-              <Field key={k} label={measureLabel(k)}>
-                <Input data-testid={`thobe-m-${k}`} type="number" inputMode="decimal" step="any" min={0} value={meas[k]} onChange={(e) => setMeas({ ...meas, [k]: e.target.value })} />
+          {member?.latest && !editing ? (
+            <>
+              <table className="measure-view" data-testid="thobe-m-view">
+                <tbody>
+                  {MEASURE_KEYS.map((k) => (
+                    <tr key={k}><td className="secondary">{measureLabel(k)}</td><td className="num strong" data-testid={`thobe-m-view-${k}`}>{num(Number(meas[k]))}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+              {measRemarks ? <div className="small" style={{ whiteSpace: 'pre-line' }}><span className="secondary">{t('Notes', 'ملاحظات')}:</span> {measRemarks}</div> : null}
+              <div className="row spread">
+                <span className="small secondary">{member.latest.tailor_name ?? ''}</span>
+                <button type="button" className="btn sm secondary" data-testid="thobe-m-edit" onClick={() => setEditing(true)}><Pencil size={14} /> {t('Edit', 'تعديل')}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="measure-grid">
+                {MEASURE_KEYS.map((k) => (
+                  <Field key={k} label={measureLabel(k)}>
+                    <Input data-testid={`thobe-m-${k}`} type="number" inputMode="decimal" step="any" min={0} value={meas[k]} onChange={(e) => setMeas({ ...meas, [k]: e.target.value })} />
+                  </Field>
+                ))}
+              </div>
+              <Field label={t('Measurement notes', 'ملاحظات المقاسات')}>
+                <TextArea className="input notes" maxLength={300} value={measRemarks} onChange={(e) => setMeasRemarks(e.target.value)} />
               </Field>
-            ))}
-          </div>
-          <Field label={t('Measurement notes', 'ملاحظات المقاسات')}>
-            <TextArea className="input notes" maxLength={300} value={measRemarks} onChange={(e) => setMeasRemarks(e.target.value)} />
-          </Field>
+              {member?.latest ? (
+                <div className="row" style={{ justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="btn sm ghost"
+                    data-testid="thobe-m-cancel"
+                    onClick={() => {
+                      setMeas(Object.fromEntries(MEASURE_KEYS.map((k) => [k, String(Number(member.latest![k]))])));
+                      setMeasRemarks(member.latest!.remarks ?? '');
+                      setEditing(false);
+                    }}
+                  >
+                    {t('Cancel changes', 'إلغاء التعديل')}
+                  </button>
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
 
         <div className="card pad stack">
@@ -292,25 +345,6 @@ export function ThobeDesk({
             note={opt.pocketNote} onNote={(v) => setOpt({ ...opt, pocketNote: v })} />
         </div>
       </aside>
-    </div>
-  );
-}
-
-/** A style chosen by picture, with a remarks box for the tailor about it. */
-function StyleWithNote({ label, items, value, onChange, testid, note, onNote }: { label: string; items: Style[]; value: string; onChange: (id: string) => void; testid: string; note: string; onNote: (v: string) => void }) {
-  return (
-    <div className="style-with-note">
-      <StylePicker label={label} items={items} value={value} onChange={onChange} testid={testid} />
-      <TextArea
-        className="input"
-        rows={2}
-        maxLength={300}
-        data-testid={`${testid}-note`}
-        aria-label={t(`${label} remarks`, `ملاحظات ${label}`)}
-        placeholder={t(`${label} remarks`, `ملاحظات ${label}`)}
-        value={note}
-        onChange={(e) => onNote(e.target.value)}
-      />
     </div>
   );
 }

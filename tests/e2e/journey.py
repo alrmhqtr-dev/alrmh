@@ -137,6 +137,8 @@ def journey(browser, lang, method, phone, name, reorder):
     check(f"{tag}: the cloth length starts at the usual {fabric['metres']} m and the buttons move 0.5 m",
           float(start) == fabric["metres"] and float(stepped) == fabric["metres"] - 0.5, f"{start} {stepped}")
     admin.fill('[data-testid="po-qty-0"]', "2")
+    admin.fill('[data-testid="po-type-0-note"]', "Stiffer collar")
+    admin.click('[data-testid="po-pocket-0-yes"]'); admin.fill('[data-testid="po-pocket-0-note"]', "Pen slot inside")
     total = round(fabric["price_per_metre"] * 3.75, 2) * 2
     po_total = admin.locator('[data-testid="po-total"]').inner_text().replace(",", "")
     admin.check('[data-testid="po-paid"]'); admin.click('[data-testid="place-order"]')
@@ -145,7 +147,8 @@ def journey(browser, lang, method, phone, name, reorder):
     number = sql(f"select number from orders where id = '{order_id}'")
     check(f"{tag}: staff place the order at the visit (2 thobes of 3.75 m, QAR {total:.2f}, card machine, to collect from the branch); it starts at Taking measurements",
           float("".join(ch for ch in po_total if ch.isdigit() or ch == ".")) == total and sql(f"select stage || ':' || total::numeric(10,2) from orders where id = '{order_id}'") == f"measured:{total:.2f}"
-          and sql(f"select provider from payments where order_id = '{order_id}'") == "card_machine", f"{po_total} {sql(f'select stage, total from orders where id = {chr(39)}{order_id}{chr(39)}')}")
+          and sql(f"select provider from payments where order_id = '{order_id}'") == "card_machine"
+          and sql(f"select (snapshot->'thobe'->'style_notes'->>'collar') || '|' || (snapshot->'thobe'->'style_notes'->>'pocket') from order_items where order_id = '{order_id}'") == "Stiffer collar|Pen slot inside", f"{po_total} {sql(f'select stage, total from orders where id = {chr(39)}{order_id}{chr(39)}')}")
 
     page.goto(APP + "/orders"); page.wait_for_timeout(2500)
     check(f"{tag}: the order shows in the customer's app", number in text(page), text(page)[:300])

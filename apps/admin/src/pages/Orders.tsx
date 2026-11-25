@@ -212,7 +212,7 @@ export default function Orders() {
           const open = orders.data
             .filter((o) => o.stage !== 'delivered' && o.stage !== 'cancelled' && (!stage || o.stage === stage))
             .sort((a, b) => a.created_at.localeCompare(b.created_at));
-          const done = orders.data.filter((o) => o.stage === 'delivered').sort((a, b) => (b.done_at ?? b.created_at).localeCompare(a.done_at ?? a.created_at));
+          const done = orders.data.filter((o) => o.stage === 'delivered').sort((a, b) => a.created_at.localeCompare(b.created_at));
           return (
             <div className="stack lg">
               <div className="stack">

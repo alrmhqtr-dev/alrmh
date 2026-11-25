@@ -456,6 +456,99 @@ export class ReportsController {
     return REPORTS;
   }
 
+  /**
+   * The sales report: what sold in the period (default this month), the discounts given and the cloth used,
+   * for one branch or all, and one channel or all. Cancelled and unpaid app orders don't count.
+   */
+  @Get('sales-summary')
+  @UseGuards(ReportsGuard)
+  async salesSummary(@Query('from') from?: string, @Query('to') to?: string, @Query('branch') branch?: string, @Query('channel') channel?: string) {
+    const today = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+    const ok = (d?: string) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null);
+    const start = ok(from) ?? `${today.slice(0, 8)}01`;
+    const monthEnd = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).toISOString().slice(0, 10);
+    const end = ok(to) ?? monthEnd;
+    const ch = ['pos', 'app', 'staff', 'import'].includes(channel ?? '') ? channel! : null;
+    const p = [start, end, uuidOrNull(branch), ch];
+    const W = `${SALES} and ($4::text is null or o.channel = $4)`;
+    const lineDiscount = `(select coalesce(sum(x.discount),0) from order_items x where x.order_id = o.id)`;
+    const [orders, items, received, returns, days, products, cloth, discounts, channels] = await Promise.all([
+      db.one(`select count(*)::int as orders, coalesce(sum(o.total),0)::float as net, coalesce(sum(o.discount),0)::float as order_discount from orders o where ${W}`, p),
+      db.one(
+        `select coalesce(sum(i.unit_price * i.qty),0)::float as original, coalesce(sum(i.discount),0)::float as line_discount,
+                coalesce(sum(i.qty) filter (where i.kind = 'product'),0)::int as products,
+                coalesce(sum(i.qty) filter (where i.kind = 'thobe'),0)::int as thobes,
+                coalesce(sum(coalesce((i.snapshot->'thobe'->>'metres')::numeric, 0) * i.qty) filter (where i.kind = 'thobe'),0)::float as metres
+           from order_items i join orders o on o.id = i.order_id where ${W}`,
+        p,
+      ),
+      db.one(
+        `select coalesce(sum(pm.amount),0)::float as v from payments pm join orders o on o.id = pm.order_id
+          where pm.status = 'paid' and ${qDate('pm.completed_at')} between $1::date and $2::date and ($3::uuid is null or o.branch_id = $3) and ($4::text is null or o.channel = $4)`,
+        p,
+      ),
+      db.one(
+        `select coalesce(sum(r.amount),0)::float as v from sales_returns r join orders o on o.id = r.order_id
+          where ${qDate('r.created_at')} between $1::date and $2::date and ($3::uuid is null or r.branch_id = $3) and ($4::text is null or o.channel = $4)`,
+        p,
+      ),
+      db.many(
+        `select ${qDate('o.created_at')}::text as day, coalesce(sum(o.total),0)::float as net, count(*)::int as orders,
+                coalesce(sum(o.discount + ${lineDiscount}),0)::float as discount
+           from orders o where ${W} group by 1 order by 1`,
+        p,
+      ),
+      db.many(
+        `select coalesce(i.snapshot->'product'->>'name_en', '—') as name_en, coalesce(i.snapshot->'product'->>'name_ar', '—') as name_ar,
+                coalesce(i.snapshot->'product'->>'sku', '') as sku,
+                sum(i.qty)::int as qty, coalesce(sum(i.unit_price * i.qty),0)::float as original,
+                coalesce(sum(i.discount),0)::float as discount, coalesce(sum(i.line_total),0)::float as net
+           from order_items i join orders o on o.id = i.order_id where ${W} and i.kind = 'product'
+          group by 1,2,3 order by net desc limit 300`,
+        p,
+      ),
+      db.many(
+        `select coalesce(i.snapshot->'thobe'->'fabric'->>'name_en', '—') as name_en, coalesce(i.snapshot->'thobe'->'fabric'->>'name_ar', '—') as name_ar,
+                sum(i.qty)::int as thobes, coalesce(sum(coalesce((i.snapshot->'thobe'->>'metres')::numeric, 0) * i.qty),0)::float as metres,
+                coalesce(sum(i.discount),0)::float as discount, coalesce(sum(i.line_total),0)::float as net
+           from order_items i join orders o on o.id = i.order_id where ${W} and i.kind = 'thobe'
+          group by 1,2 order by metres desc`,
+        p,
+      ),
+      db.many(
+        `select o.id, o.number, o.created_at, o.channel, coalesce(c.name, o.walk_in_name) as customer, u.name as staff,
+                (select coalesce(sum(x.unit_price * x.qty),0) from order_items x where x.order_id = o.id)::float as original,
+                (o.discount + ${lineDiscount})::float as discount, o.discount_label, o.total::float as total
+           from orders o left join customers c on c.id = o.customer_id left join staff_users u on u.id = o.placed_by_staff_id
+          where ${W} and (o.discount > 0 or ${lineDiscount} > 0)
+          order by o.created_at desc limit 300`,
+        p,
+      ),
+      db.many(`select o.channel, count(*)::int as orders, coalesce(sum(o.total),0)::float as net from orders o where ${W} group by 1 order by net desc`, p),
+    ]);
+    const discount = round2(orders!.order_discount + items!.line_discount);
+    return {
+      range: { from: start, to: end },
+      totals: {
+        orders: orders!.orders,
+        net: round2(orders!.net),
+        average: orders!.orders ? round2(orders!.net / orders!.orders) : 0,
+        original: round2(items!.original),
+        discount,
+        products: items!.products,
+        thobes: items!.thobes,
+        metres: round2(items!.metres),
+        received: round2(received!.v),
+        returns: round2(returns!.v),
+      },
+      days,
+      products,
+      cloth,
+      discounts,
+      channels,
+    };
+  }
+
   @Get('reports/:name')
   @UseGuards(ReportsGuard)
   async report(@CurrentStaff() me: StaffUser, @Param('name') name: string, @Query('from') from: string | undefined, @Query('to') to: string | undefined, @Query('branch') branch: string | undefined, @Query('format') format: string | undefined, @Query('lang') lang: string | undefined, @Res({ passthrough: true }) res: Response) {

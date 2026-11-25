@@ -2,7 +2,7 @@ import { Minus, Plus, Shirt } from 'lucide-react';
 import { mediaUrl } from './lib/api';
 import { money, num } from './lib/format';
 import { L, t } from './lib/i18n';
-import { Field } from './ui';
+import { Field, TextArea } from './ui';
 
 export type Style = { id: string; name_en: string; name_ar: string; image_url?: string | null };
 export type Cloth = { id: string; name_en: string; name_ar: string; price: number; metres_per_thobe: number; stock?: number | null };
@@ -85,5 +85,24 @@ export function ClothSelect({ cloths, value, onChange, testid }: { cloths: Cloth
         ))}
       </select>
     </Field>
+  );
+}
+
+/** A style chosen by picture, with a remarks box for the tailor about it. */
+export function StyleWithNote({ label, items, value, onChange, testid, note, onNote }: { label: string; items: Style[]; value: string; onChange: (id: string) => void; testid: string; note: string; onNote: (v: string) => void }) {
+  return (
+    <div className="style-with-note">
+      <StylePicker label={label} items={items} value={value} onChange={onChange} testid={testid} />
+      <TextArea
+        className="input"
+        rows={2}
+        maxLength={300}
+        data-testid={`${testid}-note`}
+        aria-label={t(`${label} remarks`, `ملاحظات ${label}`)}
+        placeholder={t(`${label} remarks`, `ملاحظات ${label}`)}
+        value={note}
+        onChange={(e) => onNote(e.target.value)}
+      />
+    </div>
   );
 }

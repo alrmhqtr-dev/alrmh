@@ -402,7 +402,10 @@ export class AdminOpsController {
       db.many(
         `select f.id, f.name, f.relation, f.size,
                 (select row_to_json(m) from (select id, taken_at, tailor_name, method, ${FIELDS.join(', ')}, remarks from measurements where member_id = f.id order by taken_at desc limit 1) m) as latest,
-                (select count(*)::int from measurements where member_id = f.id) as measurement_count
+                (select count(*)::int from measurements where member_id = f.id) as measurement_count,
+                (select oi.snapshot->'thobe' from order_items oi join orders o on o.id = oi.order_id
+                  where oi.kind = 'thobe' and oi.snapshot->'member'->>'id' = f.id::text and o.stage <> 'cancelled'
+                  order by o.created_at desc limit 1) as last_thobe
            from family_members f where f.customer_id = $1 order by (f.relation = 'self') desc, f.created_at`,
         [id],
       ),
@@ -434,7 +437,7 @@ export class AdminOpsController {
   async placeOrder(
     @CurrentStaff() me: StaffUser,
     @Param('id') id: string,
-    @Body() body: { memberId: string; lines: { collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; pocket?: boolean; qty: number; remarks?: string | null }[]; branchId?: string; appointmentId?: string; paidByCard?: boolean },
+    @Body() body: { memberId: string; lines: { collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; pocket?: boolean; styleNotes?: { collar?: string; cuff?: string; pocket?: string } | null; qty: number; remarks?: string | null }[]; branchId?: string; appointmentId?: string; paidByCard?: boolean },
   ) {
     if (body?.paidByCard !== true) fail('payment_not_confirmed');
     const lines = Array.isArray(body?.lines) ? body.lines : [];
