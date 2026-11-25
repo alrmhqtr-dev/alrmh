@@ -101,7 +101,18 @@ export function cleanMetres(v: unknown, fallback: number) {
  * The options of one thobe as they are sold: collar, cuff (when the business has cuff styles) and
  * cloth, priced by the metre. Without a length the cloth's usual metres per thobe are used.
  */
-export async function thobeOptions(o: { collarId?: string | null; cuffId?: string | null; fabricId?: string | null; metres?: unknown; pocket?: unknown }, client: Queryable, needCuff = false) {
+/** Remarks against the collar, the cuff and the pocket: short text each, empty ones dropped. */
+export function cleanStyleNotes(v: unknown) {
+  if (!v || typeof v !== 'object') return null;
+  const out: Record<string, string> = {};
+  for (const k of ['collar', 'cuff', 'pocket'] as const) {
+    const x = (v as Record<string, unknown>)[k];
+    if (typeof x === 'string' && x.trim()) out[k] = x.trim().slice(0, 300);
+  }
+  return Object.keys(out).length ? (out as { collar?: string; cuff?: string; pocket?: string }) : null;
+}
+
+export async function thobeOptions(o: { collarId?: string | null; cuffId?: string | null; fabricId?: string | null; metres?: unknown; pocket?: unknown; styleNotes?: unknown }, client: Queryable, needCuff = false) {
   const collar = await db.one('select id, name_en, name_ar, shape, image_url from collars where id = $1 and active', [o.collarId ?? null], client);
   const fabric = await db.one(
     'select id, sku, name_en, name_ar, price::float as price, cost::float as cost, metres_per_thobe::float as metres, tax_rate_id from fabrics where id = $1 and active',
@@ -117,6 +128,7 @@ export async function thobeOptions(o: { collarId?: string | null; cuffId?: strin
   const metres = cleanMetres(o.metres, fabric.metres || 3.5);
   /** A chest pocket, or none. */
   const pocket = o.pocket === true;
+  const styleNotes = cleanStyleNotes(o.styleNotes);
   return {
     collar,
     cuff,
@@ -126,7 +138,7 @@ export async function thobeOptions(o: { collarId?: string | null; cuffId?: strin
     /** One thobe: metres × the cloth's price per metre. */
     unit: round2(metres * fabric.price),
     unitCost: round2(fabric.cost * metres),
-    snapshot: { collar, cuff, fabric: { id: fabric.id, name_en: fabric.name_en, name_ar: fabric.name_ar, price: fabric.price, per: 'metre' }, metres, pocket, colour: null },
+    snapshot: { collar, cuff, fabric: { id: fabric.id, name_en: fabric.name_en, name_ar: fabric.name_ar, price: fabric.price, per: 'metre' }, metres, pocket, style_notes: styleNotes, colour: null },
   };
 }
 
@@ -264,7 +276,7 @@ export async function registerTotals(registerId: string, client: Queryable = db.
 
 export type SaleLineInput =
   | { kind: 'product'; productId: string; size?: string | null; qty: number; price?: number | null; discount?: number | null }
-  | { kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; pocket?: boolean; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
+  | { kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres?: number | null; pocket?: boolean; styleNotes?: { collar?: string; cuff?: string; pocket?: string } | null; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
 
 export type SaleInput = {
   branchId?: string;

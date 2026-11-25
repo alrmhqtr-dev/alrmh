@@ -101,9 +101,12 @@ export class BusinessController {
             : i.kind === 'product'
               ? `${esc(name(i.snapshot.product))}${i.snapshot.size ? ` · ${esc(i.snapshot.size)}` : ''}`
               : t('Sale', 'مبيعات');
-        return `<tr><td>${label}${i.discount > 0 ? `<br><small>${t('Discount', 'خصم')} −${qar(i.discount)}</small>` : ''}</td><td class="n">${i.qty}</td><td class="n">${qar(i.line_total)}</td></tr>`;
+        return `<tr><td>${label}${i.discount > 0 ? `<br><small>${t('Discount', 'خصم')} −${qar(i.discount)}</small>` : ''}</td><td class="n">${i.qty}</td><td class="n">${qar(Number(i.unit_price) * i.qty)}</td></tr>`;
       })
       .join('');
+    // With a discount: the original price, the discount (on items and on the sale together), then the total.
+    const original = r.items.reduce((a: number, i: any) => a + Number(i.unit_price) * i.qty, 0);
+    const discount = r.items.reduce((a: number, i: any) => a + Number(i.discount || 0), 0) + Number(r.discount || 0);
     const row = (label: string, v: number, strong = false) => `<tr class="${strong ? 'b' : ''}"><td colspan="2">${label}</td><td class="n">${qar(v)}</td></tr>`;
     const METHODS: Record<string, [string, string]> = { cash: ['Cash', 'نقدًا'], card_machine: ['Card', 'بطاقة'], sadad: ['SADAD', 'سداد'], bank_transfer: ['Bank transfer', 'تحويل بنكي'], cheque: ['Cheque', 'شيك'] };
     const branch = ar ? r.branch_ar : r.branch_en;
@@ -126,7 +129,8 @@ ${company.tax_number ? `<div class="c">${t('Tax number', 'الرقم الضري�
 ${r.customer_name ? `<div class="meta"><span>${esc(r.customer_name)}</span><span>${esc(r.phone ?? '')}</span></div>` : ''}
 ${r.stage === 'cancelled' ? `<p class="c"><span class="badge">${t('Cancelled', 'ملغاة')}</span></p>` : ''}
 <table><tr><td><small>${t('Item', 'الصنف')}</small></td><td class="n"><small>${t('Qty', 'الكمية')}</small></td><td class="n"><small>${t('QAR', 'ر.ق')}</small></td></tr>${lines}
-${r.discount > 0 ? row(t('Discount', 'الخصم'), -r.discount) : ''}
+${discount > 0 ? row(t('Original price', 'السعر الأصلي'), original) : ''}
+${discount > 0 ? row(t('Discount', 'الخصم'), -discount) : ''}
 ${r.service_charge > 0 ? row(t('Service', 'الخدمة'), r.service_charge) : ''}
 ${r.delivery_fee > 0 ? row(t('Delivery', 'التوصيل'), r.delivery_fee) : ''}
 ${r.points_used > 0 ? row(t('Points used', 'النقاط المستخدمة'), -r.points_used) : ''}

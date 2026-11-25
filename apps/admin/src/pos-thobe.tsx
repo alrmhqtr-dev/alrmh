@@ -11,7 +11,8 @@ import { ThobePreview } from './thobe-preview';
 type Cust = { id: string; name: string | null; phone: string };
 type Member = { id: string; name: string; relation: string; size: string; latest: (Record<string, number> & { id?: string; taken_at: string; remarks: string | null }) | null };
 type CustomerFull = { family: Member[] };
-export type ThobeLineIn = { memberId: string; collarId: string; cuffId: string | null; fabricId: string; metres: number; pocket: boolean; qty: number; remarks: string | null };
+export type StyleNotes = { collar?: string; cuff?: string; pocket?: string };
+export type ThobeLineIn = { memberId: string; collarId: string; cuffId: string | null; fabricId: string; metres: number; pocket: boolean; styleNotes: StyleNotes | null; qty: number; remarks: string | null };
 
 const blankMeasures = () => Object.fromEntries(MEASURE_KEYS.map((k) => [k, ''])) as Record<string, string>;
 const POCKET: Style[] = [
@@ -44,7 +45,7 @@ export function ThobeDesk({
   const [meas, setMeas] = useState<Record<string, string>>(blankMeasures());
   const [measRemarks, setMeasRemarks] = useState('');
   const [loadedFor, setLoadedFor] = useState('');
-  const [opt, setOpt] = useState({ collarId: '', cuffId: '', pocket: 'no', fabricId: '', metres: '', qty: '1', remarks: '' });
+  const [opt, setOpt] = useState({ collarId: '', cuffId: '', pocket: 'no', fabricId: '', metres: '', qty: '1', remarks: '', collarNote: '', cuffNote: '', pocketNote: '' });
   const [busy, setBusy] = useState(false);
 
   const found = useQuery({ queryKey: ['pos-customers', q], queryFn: () => api<Cust[]>(`/customers?q=${encodeURIComponent(q)}`), enabled: mode === 'existing' && !customer && q.trim().length >= 2 });
@@ -87,6 +88,13 @@ export function ThobeDesk({
     [who, measured, opt, items.cuffs.length, customer],
   );
 
+  const styleNotes = (): StyleNotes | null => {
+    const n: StyleNotes = {};
+    if (opt.collarNote.trim()) n.collar = opt.collarNote.trim();
+    if (opt.cuffNote.trim()) n.cuff = opt.cuffNote.trim();
+    if (opt.pocketNote.trim()) n.pocket = opt.pocketNote.trim();
+    return Object.keys(n).length ? n : null;
+  };
   const values = () => ({ ...Object.fromEntries(MEASURE_KEYS.map((k) => [k, Number(meas[k])])), remarks: measRemarks.trim() || null });
   const add = async () => {
     setBusy(true);
@@ -112,9 +120,9 @@ export function ThobeDesk({
       }
       if (!target) throw new Error(t('Choose who the thobes are for.', 'اختر لمن الثياب.'));
       qc.invalidateQueries({ queryKey: ['customer'] });
-      onAdd({ memberId: target.id, collarId: opt.collarId, cuffId: opt.cuffId || null, fabricId: opt.fabricId, metres: Number(opt.metres), pocket: opt.pocket === 'yes', qty: Math.trunc(Number(opt.qty)), remarks: opt.remarks.trim() || null });
+      onAdd({ memberId: target.id, collarId: opt.collarId, cuffId: opt.cuffId || null, fabricId: opt.fabricId, metres: Number(opt.metres), pocket: opt.pocket === 'yes', styleNotes: styleNotes(), qty: Math.trunc(Number(opt.qty)), remarks: opt.remarks.trim() || null });
       toast(t(`${opt.qty} thobe(s) added to the sale.`, `أضيف ${opt.qty} ثوب إلى الفاتورة.`));
-      setOpt((o) => ({ ...o, qty: '1', remarks: '' }));
+      setOpt((o) => ({ ...o, qty: '1', remarks: '', collarNote: '', cuffNote: '', pocketNote: '' }));
     } catch (e) {
       toast(errorMessage(e), 'error');
     }
@@ -248,10 +256,7 @@ export function ThobeDesk({
         </div>
 
         <div className="card pad stack">
-          <h2>{t('Thobe', 'الثوب')}</h2>
-          <StylePicker label={t('Collar', 'الياقة')} items={items.collars} value={opt.collarId} onChange={(id) => setOpt({ ...opt, collarId: id })} testid="thobe-collar" />
-          {items.cuffs.length ? <StylePicker label={t('Cuff', 'الكبك')} items={items.cuffs} value={opt.cuffId} onChange={(id) => setOpt({ ...opt, cuffId: id })} testid="thobe-cuff" /> : null}
-          <StylePicker label={t('Pocket', 'الجيب')} items={POCKET} value={opt.pocket} onChange={(id) => setOpt({ ...opt, pocket: id })} testid="thobe-pocket" />
+          <h2>{t('Cloth', 'القماش')}</h2>
           <div className="thobe-row">
             <ClothSelect cloths={items.fabrics} value={opt.fabricId} testid="thobe-fabric" onChange={(f) => setOpt({ ...opt, fabricId: f?.id ?? '', metres: f ? Number(f.metres_per_thobe || 3.5).toFixed(2) : '' })} />
             <MetresInput value={opt.metres} onChange={(v) => setOpt({ ...opt, metres: v })} testid="thobe-metres" />
@@ -273,9 +278,39 @@ export function ThobeDesk({
           </div>
         </div>
       </div>
-      <aside className="thobe-desk-preview">
+      {/* The preview, and under it the collar, cuff and pocket, each with its own remarks. */}
+      <aside className="thobe-desk-preview stack">
         <ThobePreview m={meas} collar={collar} cuff={cuff} pocket={opt.pocket === 'yes'} />
+        <div className="card pad stack" data-testid="thobe-styles">
+          <StyleWithNote label={t('Collar', 'الياقة')} items={items.collars} value={opt.collarId} onChange={(id) => setOpt({ ...opt, collarId: id })} testid="thobe-collar"
+            note={opt.collarNote} onNote={(v) => setOpt({ ...opt, collarNote: v })} />
+          {items.cuffs.length ? (
+            <StyleWithNote label={t('Cuff', 'الكبك')} items={items.cuffs} value={opt.cuffId} onChange={(id) => setOpt({ ...opt, cuffId: id })} testid="thobe-cuff"
+              note={opt.cuffNote} onNote={(v) => setOpt({ ...opt, cuffNote: v })} />
+          ) : null}
+          <StyleWithNote label={t('Pocket', 'الجيب')} items={POCKET} value={opt.pocket} onChange={(id) => setOpt({ ...opt, pocket: id })} testid="thobe-pocket"
+            note={opt.pocketNote} onNote={(v) => setOpt({ ...opt, pocketNote: v })} />
+        </div>
       </aside>
+    </div>
+  );
+}
+
+/** A style chosen by picture, with a remarks box for the tailor about it. */
+function StyleWithNote({ label, items, value, onChange, testid, note, onNote }: { label: string; items: Style[]; value: string; onChange: (id: string) => void; testid: string; note: string; onNote: (v: string) => void }) {
+  return (
+    <div className="style-with-note">
+      <StylePicker label={label} items={items} value={value} onChange={onChange} testid={testid} />
+      <TextArea
+        className="input"
+        rows={2}
+        maxLength={300}
+        data-testid={`${testid}-note`}
+        aria-label={t(`${label} remarks`, `ملاحظات ${label}`)}
+        placeholder={t(`${label} remarks`, `ملاحظات ${label}`)}
+        value={note}
+        onChange={(e) => onNote(e.target.value)}
+      />
     </div>
   );
 }

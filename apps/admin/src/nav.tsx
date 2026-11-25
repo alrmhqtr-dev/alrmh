@@ -86,7 +86,7 @@ export const groups = (): NavGroup[] => [
     items: [
       { to: '/factory', label: t('Invoices', 'الفواتير'), icon: FileText },
       { to: '/factory/photos', label: t('Thobe photos', 'صور الأثواب'), icon: Image },
-      { to: '/orders', label: t('Workshop board', 'لوحة الورشة'), icon: ClipboardList },
+      { to: '/orders', label: t('Workshop orders', 'طلبات الورشة'), icon: ClipboardList },
     ],
   },
   {

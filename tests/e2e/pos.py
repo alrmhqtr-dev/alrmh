@@ -38,6 +38,10 @@ def call(method, path, body=None, token=None):
         return {"error": e.code, **json.loads(e.read() or b"{}")}
 
 
+def prev_box(page):
+    return page.locator('[data-testid="thobe-preview"]').bounding_box()
+
+
 def check(name, ok, detail=""):
     results.append((name, ok))
     print(("ok   " if ok else "FAIL ") + name + (f"   [{detail}]" if detail and not ok else ""), flush=True)
@@ -90,6 +94,17 @@ def counter(browser, lang, email, password):
     before = level()
     page.fill('[data-testid="pos-search"]', SKU); page.press('[data-testid="pos-search"]', "Enter")
     page.wait_for_function("document.querySelector('[data-testid=cart-total]')?.textContent?.includes('120')", timeout=15000)
+    if page.locator('[data-testid="line-discount-0"]').count():
+        page.fill('[data-testid="line-discount-0"]', "20")
+        page.wait_for_function("document.querySelector('[data-testid=cart-total]')?.textContent?.includes('100')", timeout=15000)
+        shown = [page.locator(f'[data-testid="{x}"]').inner_text() for x in ("line-original-0", "line-total-0", "cart-original", "cart-discount", "cart-total")]
+        page.screenshot(path=f"{SHOTS}/pos-discount-{lang}.png")
+        digits = lambda x: "".join(ch for ch in x if ch.isdigit() or ch == ".")
+        check(f"{tag} a discount shows the original price, the discount and then the total; there's no field to change the price",
+              [digits(x).split(".")[0] for x in shown] == ["120", "100", "120", "20", "100"]
+              and page.locator('input[aria-label="Unit price"], input[aria-label="سعر الوحدة"]').count() == 0, shown)
+        page.fill('[data-testid="line-discount-0"]', "")
+        page.wait_for_function("document.querySelector('[data-testid=cart-total]')?.textContent?.includes('120')", timeout=15000)
     page.click('[data-testid="pay"]')
     page.fill('[data-testid="pay-cash"]', "200")
     change = page.locator('[data-testid="pay-change"]').inner_text()
@@ -126,12 +141,16 @@ def counter(browser, lang, email, password):
     for k, v in {"length_cm": 148, "shoulder_cm": 46, "chest_cm": 108, "waist_cm": 98, "sleeve_cm": 60, "neck_cm": 40, "cuff_cm": 24}.items():
         page.fill(f'[data-testid="thobe-m-{k}"]', str(v))
     page.click('[data-testid="thobe-pocket-yes"]')
+    page.fill('[data-testid="thobe-collar-note"]', "Collar a little higher")
+    page.fill('[data-testid="thobe-cuff-note"]', "Cufflinks provided")
+    styles_under = page.locator('[data-testid="thobe-styles"]').bounding_box()["y"] > prev_box(page)["y"]
     metres = page.input_value('[data-testid="thobe-metres"]')
     page.click('[data-testid="thobe-metres-more"]')
     page.fill('[data-testid="thobe-qty"]', "2")
     page.fill('[data-testid="thobe-remarks"]', "Pocket on the left\nLooser sleeves")
     page.screenshot(path=f"{SHOTS}/pos-thobe-{lang}.png", full_page=True)
     prev = page.locator('[data-testid="thobe-preview"]')
+    check(f"{tag} collar, cuff and pocket are under the preview, each with its own remarks", styles_under and page.locator('[data-testid="thobe-pocket-note"]').count() == 1)
     check(f"{tag} thobes can't be added until the measurements are in", add_off and not page.locator('[data-testid="thobe-add"]').is_disabled())
     page.fill('[data-testid="thobe-m-waist_cm"]', "97")
     live = prev.locator('[data-testid="preview-waist_cm"]').text_content()
@@ -162,16 +181,19 @@ def counter(browser, lang, email, password):
           and sql(f"select sum(amount)::int from payments where order_id = '{order}'") == "100", sql(f"select stage, total from orders where id = '{order}'"))
     line = sql(f"select (snapshot->'thobe'->>'metres') || ':' || (snapshot->'thobe'->'cuff' is not null) || ':' || (snapshot->'thobe'->>'pocket') || ':' || (snapshot->>'remarks') from order_items where order_id = '{order}'")
     m_, cuff_, pocket_, notes_ = line.split(":", 3)
+    check(f"{tag} the remarks against the collar and the cuff are kept on the thobes",
+          sql(f"select (snapshot->'thobe'->'style_notes'->>'collar') || '|' || (snapshot->'thobe'->'style_notes'->>'cuff') from order_items where order_id = '{order}'") == "Collar a little higher|Cufflinks provided")
     check(f"{tag} the thobes keep their metres, cuff, pocket and the long notes", float(m_) == float(metres) + 0.5 and cuff_ == "true" and pocket_ == "true" and notes_ == "Pocket on the left\nLooser sleeves", line)
     sheet = page.context.new_page()
     sheet.add_init_script("window.print = () => {}")
     sheet.goto(ADMIN + f"/print/order/{order}"); sheet.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); sheet.wait_for_timeout(1500)
     sheet.screenshot(path=f"{SHOTS}/print-order-{lang}.png", full_page=True)
     th = sheet.locator('[data-testid="order-thobe-0"]')
-    check(f"{tag} the printed order draws the thobe with its collar, cuff, pocket and the measurements marked, then the bill",
+    text = sheet.locator('[data-testid="order-sheet"]').inner_text()
+    check(f"{tag} the A4 thobe sheet draws the thobe with its collar, cuff, pocket and measurements marked, with the style remarks and no prices",
           th.locator('[data-testid="preview-chest_cm"]').text_content() == "108" and th.locator('[data-testid="preview-sleeve_cm"]').text_content() == "60"
           and all(th.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket"))
-          and sheet.locator('.order-bill').count() == 1)
+          and "Collar a little higher" in text and "Cufflinks provided" in text and "QAR" not in text and "ر.ق" not in text, text[:200])
     sheet.close()
 
     # ---- the balance, taken later on the order ----
@@ -289,34 +311,19 @@ def workshop(browser, lang):
           and page.locator(f'[data-testid="stage-{a["number"]}-cutting"]').get_attribute("data-state") == "now", f"{asked} {green}")
     page.screenshot(path=f"{SHOTS}/stages-moved-{lang}.png", full_page=True)
 
-    # The board is still there, one tab away: cards are one row with no price.
-    page.goto(ADMIN + "/orders?view=board"); page.wait_for_selector('[data-testid="col-measured"]', timeout=15000); page.wait_for_timeout(800)
-    tk = page.locator(f'[data-testid="ticket-{b["number"]}"]')
-    box = tk.bounding_box()
-    check(f"{tag} the board's order cards are one row with no price", box["height"] < 52 and "QAR" not in tk.inner_text() and "ر.ق" not in tk.inner_text(), f"{box}")
-    # Drag a card two columns on: it asks, says which stage it passes through, and records both.
-    page.reload(); page.wait_for_selector(f'[data-testid="ticket-{b["number"]}"]', timeout=15000)
-    page.locator(f'[data-testid="ticket-{b["number"]}"]').drag_to(page.locator('[data-testid="col-stitching"]'))
-    page.wait_for_selector('[data-testid="confirm-dialog"]', timeout=5000)
-    asked = page.locator('[data-testid="confirm-dialog"]').inner_text()
-    page.screenshot(path=f"{SHOTS}/drag-confirm-{lang}.png")
-    page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
-    check(f"{tag} dragging a card to a later column asks first, then moves it through the stages in between",
-          sql(f"select stage from orders where id = '{b['orderId']}'") == "stitching"
-          and sql(f"select string_agg(stage, ',' order by at) from order_events where order_id = '{b['orderId']}' and stage in ('cutting','stitching')") == "cutting,stitching", asked)
-    page.locator(f'[data-testid="ticket-{b["number"]}"]').drag_to(page.locator('[data-testid="col-measured"]'))
-    page.wait_for_timeout(600)
-    check(f"{tag} a card can't be dragged back to an earlier stage",
-          page.locator('[data-testid="confirm-dialog"]').count() == 0 and sql(f"select stage from orders where id = '{b['orderId']}'") == "stitching")
+    check(f"{tag} there's no board any more: Stages and All orders only",
+          page.locator('[role="tab"]').count() == 2 and page.locator('[data-testid^="col-"]').count() == 0)
     for st in ["stitching", "quality", "ready"]:
         call("POST", f"/admin/orders/{a['orderId']}/stage", {"stage": st}, owner)
     page.goto(ADMIN + "/orders"); page.wait_for_selector(f'[data-testid="advance-{a["number"]}"]', timeout=15000)
     label = page.locator(f'[data-testid="advance-{a["number"]}"]').get_attribute("aria-label")
     page.click(f'[data-testid="advance-{a["number"]}"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
-    page.click('[data-testid="done-section"] button[aria-expanded]'); page.wait_for_timeout(400)
+    page.wait_for_selector(f'[data-testid="done-{a["number"]}"]', timeout=15000)
+    page.screenshot(path=f"{SHOTS}/stages-done-{lang}.png", full_page=True)
     check(f"{tag} the last stage is Done (تم الاستلام); done orders move to the Completed section",
           ("Done" in label or "تم الاستلام" in label) and sql(f"select stage from orders where id = '{a['orderId']}'") == "delivered"
-          and page.locator(f'[data-testid="row-{a["number"]}"]').count() == 0 and page.locator(f'[data-testid="done-{a["number"]}"]').count() == 1, label)
+          and page.locator(f'[data-testid="row-{a["number"]}"]').count() == 0 and page.locator(f'[data-testid="done-{a["number"]}"]').count() == 1
+          and page.locator(f'[data-testid="done-section"] [data-testid="stage-{a["number"]}-ready"]').get_attribute("data-state") == "done", label)
     page.screenshot(path=f"{SHOTS}/board-done-{lang}.png", full_page=True)
 
     # Alerts

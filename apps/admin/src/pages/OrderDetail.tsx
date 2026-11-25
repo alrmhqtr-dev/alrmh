@@ -149,7 +149,7 @@ export default function OrderDetail() {
       >
         <button className="btn secondary" onClick={() => openPrint(`receipt/${o.id}`)}><Receipt size={16} /> {t('Receipt', 'إيصال')}</button>
         <button className="btn secondary" onClick={() => openPrint(`invoice/${o.id}`)}><Printer size={16} /> {t('Invoice', 'فاتورة')}</button>
-        {isThobe && !invoice ? <button className="btn secondary" data-testid="print-order" onClick={() => openPrint(`order/${o.id}`)}><Printer size={16} /> {t('Print order', 'طباعة الطلب')}</button> : null}
+        {isThobe && !invoice ? <button className="btn secondary" data-testid="print-thobe-sheet" onClick={() => openPrint(`order/${o.id}`)}><Ruler size={16} /> {t('Thobe sheet (A4)', 'ورقة الثوب A4')}</button> : null}
         {isThobe && !invoice ? <button className="btn secondary" onClick={() => openPrint(`ticket/${o.id}`)}><Ruler size={16} /> {t('Tailor ticket', 'ورقة الخياط')}</button> : null}
         {invoice ? <Link className="btn ghost" to={`/orders/${o.id}`}>{t('Open the order', 'فتح الطلب')}</Link> : null}
         {next && can('workshop') && !invoice ? (
@@ -185,8 +185,12 @@ export default function OrderDetail() {
                   <span className="num strong">{money(it.line_total)}</span>
                 </div>
                 <div className="grid k4">
-                  <div><div className="overline">{t('Type', 'النوع')}</div><div className="strong">{L(s.thobe?.collar)}</div></div>
-                  <div><div className="overline">{t('Cuff', 'الكبك')}</div><div className="strong">{s.thobe?.cuff ? L(s.thobe.cuff) : '—'}{s.thobe?.pocket ? <span className="small secondary"> · {t('chest pocket', 'جيب صدر')}</span> : null}</div></div>
+                  <div><div className="overline">{t('Collar', 'الياقة')}</div><div className="strong">{L(s.thobe?.collar)}</div>{s.thobe?.style_notes?.collar ? <div className="small secondary" dir="auto">{s.thobe.style_notes.collar}</div> : null}</div>
+                  <div>
+                    <div className="overline">{t('Cuff', 'الكبك')}</div><div className="strong">{s.thobe?.cuff ? L(s.thobe.cuff) : '—'}{s.thobe?.pocket ? <span className="small secondary"> · {t('chest pocket', 'جيب صدر')}</span> : null}</div>
+                    {s.thobe?.style_notes?.cuff ? <div className="small secondary" dir="auto">{s.thobe.style_notes.cuff}</div> : null}
+                    {s.thobe?.style_notes?.pocket ? <div className="small secondary" dir="auto">{t('Pocket', 'الجيب')}: {s.thobe.style_notes.pocket}</div> : null}
+                  </div>
                   <div><div className="overline">{t('Cloth', 'القماش')}</div><div className="strong">{L(s.thobe?.fabric)}{s.thobe?.colour ? <span className="small secondary"> · {L(s.thobe.colour)}</span> : null}</div></div>
                   <div><div className="overline">{t('Length', 'الطول')}</div><div className="strong num">{s.thobe?.metres ? `${num(s.thobe.metres)} ${t('m', 'م')}` : '—'}</div></div>
                 </div>

@@ -339,7 +339,9 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 .pos.solo > .pos-cart { display: none; }
 .thobe-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
 .thobe-row > :first-child { flex: 1 1 180px; min-width: 0; }
-.thobe-desk-preview { position: sticky; top: 70px; }
+.thobe-desk-preview { gap: 12px; }
+.style-with-note { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.style-with-note:last-child { border-bottom: 0; padding-bottom: 0; }
 /* With the sale showing on the side there isn't room for both, so the preview goes under the form. */
 .pos.thobes:not(.solo) .thobe-desk { grid-template-columns: 1fr; }
 .pos.thobes:not(.solo) .thobe-desk-preview { position: static; max-width: 760px; justify-self: center; width: 100%; }
@@ -361,3 +363,4 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 .stage-table td { vertical-align: middle; }
 .stage-table tr.late td:first-child { box-shadow: inset 3px 0 0 var(--error); }
 .nowrap { white-space: nowrap; }
+.strike { text-decoration: line-through; }

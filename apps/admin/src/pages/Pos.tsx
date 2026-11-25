@@ -24,7 +24,7 @@ type Items = {
 };
 type Line =
   | { key: string; kind: 'product'; productId: string; size?: string | null; qty: number; price?: number | null; discount?: number | null }
-  | { key: string; kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres: number; pocket?: boolean; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
+  | { key: string; kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres: number; pocket?: boolean; styleNotes?: { collar?: string; cuff?: string; pocket?: string } | null; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
 type Cust = { id: string; name: string | null; phone: string };
 type CustomerFull = {
   id: string;
@@ -250,7 +250,7 @@ function Done({ result, customer, phoneHint, hasThobes, onNew }: { result: SaleR
       <div className="grid k2">
         <button className="btn secondary" data-testid="print-receipt" onClick={() => openPrint(`receipt/${result.orderId}`)}><Printer size={16} /> {t('Print receipt', 'طباعة الإيصال')}</button>
         <button className="btn secondary" onClick={() => openPrint(`invoice/${result.orderId}`)}><Printer size={16} /> {t('A4 invoice', 'فاتورة A4')}</button>
-        {hasThobes ? <button className="btn secondary" data-testid="print-order" onClick={() => openPrint(`order/${result.orderId}`)}><Printer size={16} /> {t('Print order', 'طباعة الطلب')}</button> : null}
+        {hasThobes ? <button className="btn secondary" data-testid="print-thobe-sheet" onClick={() => openPrint(`order/${result.orderId}`)}><Ruler size={16} /> {t('Thobe sheet (A4)', 'ورقة الثوب A4')}</button> : null}
         {hasThobes ? <button className="btn secondary" onClick={() => openPrint(`ticket/${result.orderId}`)}><Ruler size={16} /> {t('Tailor ticket', 'ورقة الخياط')}</button> : null}
         {tel ? (
           <a className="btn secondary" data-testid="send-whatsapp" href={waLink(tel, text)} target="_blank" rel="noreferrer"><Send size={16} /> WhatsApp</a>
@@ -548,16 +548,15 @@ export default function Pos() {
                             <button onClick={() => setLine(l.key, { qty: l.qty + 1 })} aria-label={t('One more', 'زد واحدًا')}><Plus size={14} /></button>
                           </span>
                           {canDiscount ? (
-                            <>
-                              <input className="input" style={{ width: 84, height: 30 }} type="number" placeholder={t('Price', 'السعر')} aria-label={t('Unit price', 'سعر الوحدة')} value={l.price ?? ''} onChange={(e) => setLine(l.key, { price: e.target.value === '' ? null : Number(e.target.value) })} />
-                              <input className="input" style={{ width: 84, height: 30 }} type="number" placeholder={t('Discount', 'خصم')} aria-label={t('Line discount', 'خصم السطر')} value={l.discount ?? ''} onChange={(e) => setLine(l.key, { discount: e.target.value === '' ? null : Number(e.target.value) })} />
-                            </>
+                            <input className="input" style={{ width: 96, height: 30 }} type="number" min={0} data-testid={`line-discount-${i}`} placeholder={t('Discount', 'خصم')} aria-label={t('Discount on this item (QAR)', 'خصم على هذا الصنف (ر.ق)')} value={l.discount ?? ''} onChange={(e) => setLine(l.key, { discount: e.target.value === '' ? null : Number(e.target.value) })} />
                           ) : null}
                         </div>
                         {ql?.discount > 0 ? <span className="small tone-ok">{t('Discount', 'خصم')} −{money(ql.discount)}{ql.discountLabel && ql.discountLabel !== 'group' ? ` · ${ql.discountLabel}` : ql.discountLabel === 'group' ? ` · ${t('customer group', 'مجموعة العميل')}` : ''}</span> : null}
                       </div>
                       <div className="stack" style={{ gap: 4, alignItems: 'flex-end' }}>
-                        <span className="num strong">{ql ? money(ql.lineTotal) : '…'}</span>
+                        {/* With a discount the original price stays in view, then the discount, then what's due. */}
+                        {ql?.discount > 0 ? <span className="num small muted strike" data-testid={`line-original-${i}`}>{money(ql.unitPrice * ql.qty)}</span> : null}
+                        <span className="num strong" data-testid={`line-total-${i}`}>{ql ? money(ql.lineTotal) : '…'}</span>
                         <button className="btn sm ghost" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label={t('Remove', 'حذف')}><Trash2 size={14} /></button>
                       </div>
                     </div>
@@ -592,8 +591,17 @@ export default function Pos() {
             {q?.stockError ? <div className="note error">{errorMessage(new ApiError(q.stockError.code, 400, q.stockError))}</div> : null}
             {q ? (
               <div className="stack" style={{ gap: 4 }}>
-                <div className="sum-row"><span className="secondary">{t('Subtotal', 'المجموع')}</span><span>{money(q.subtotal)}</span></div>
-                {q.orderDiscount ? <div className="sum-row"><span className="secondary">{t('Discount', 'الخصم')}</span><span>−{money(q.orderDiscount)}</span></div> : null}
+                {(() => {
+                  // The original price, every discount (on items and on the sale) together, then the total below.
+                  const original = q.lines.reduce((a: number, l: any) => a + l.unitPrice * l.qty, 0);
+                  const discount = q.lines.reduce((a: number, l: any) => a + (l.discount || 0), 0) + (q.orderDiscount || 0);
+                  return (
+                    <>
+                      <div className="sum-row"><span className="secondary">{t('Original price', 'السعر الأصلي')}</span><span data-testid="cart-original">{money(original)}</span></div>
+                      {discount > 0 ? <div className="sum-row tone-ok"><span>{t('Discount', 'الخصم')}</span><span data-testid="cart-discount">−{money(discount)}</span></div> : null}
+                    </>
+                  );
+                })()}
                 {q.deliveryFee ? <div className="sum-row"><span className="secondary">{t('Delivery', 'التوصيل')}</span><span>{money(q.deliveryFee)}</span></div> : null}
                 {q.pointsUsed ? <div className="sum-row"><span className="secondary">{t('Points', 'النقاط')}</span><span>−{money(q.pointsUsed)}</span></div> : null}
                 <div className="sum-row total"><span>{t('Total', 'الإجمالي')}</span><span data-testid="cart-total">{money(q.total)}</span></div>
@@ -613,7 +621,7 @@ export default function Pos() {
             ) : null}
             {lines.length ? <button className="btn ghost sm" onClick={reset}>{t('Clear', 'مسح الفاتورة')}</button> : null}
           </div>
-          {staff && !can('pos.discount') ? <div className="small muted">{t('Prices and discounts can be changed by a manager.', 'يمكن للمدير تغيير الأسعار والخصومات.')}</div> : null}
+          {staff && !can('pos.discount') ? <div className="small muted">{t('Discounts can be given by a manager.', 'يمكن للمدير إعطاء الخصومات.')}</div> : null}
         </div>
       </div>
 

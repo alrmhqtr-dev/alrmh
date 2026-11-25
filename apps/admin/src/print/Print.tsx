@@ -65,9 +65,13 @@ function Totals({ r, biz }: { r: any; biz: Biz }) {
   const row = (label: string, v: number, strong = false) => (
     <tr style={strong ? { fontWeight: 700, fontSize: '1.15em' } : undefined}><td colSpan={2}>{label}</td><td className="e num">{money2(v)}</td></tr>
   );
+  // With a discount: the original price, the discount (on items and on the sale together), then the total.
+  const original = r.items.reduce((a: number, i: any) => a + Number(i.unit_price) * i.qty, 0);
+  const discount = r.items.reduce((a: number, i: any) => a + Number(i.discount || 0), 0) + Number(r.discount || 0);
   return (
     <>
-      {r.discount > 0 ? row(t('Discount', 'الخصم'), -r.discount) : null}
+      {discount > 0 ? row(t('Original price', 'السعر الأصلي'), original) : null}
+      {discount > 0 ? row(t('Discount', 'الخصم'), -discount) : null}
       {r.service_charge > 0 ? row(`${t('Service', 'الخدمة')}${r.service_en ? ` · ${L({ name_en: r.service_en, name_ar: r.service_ar })}` : ''}`, r.service_charge) : null}
       {r.delivery_fee > 0 ? row(t('Delivery', 'التوصيل'), r.delivery_fee) : null}
       {r.points_used > 0 ? row(t('Points used', 'النقاط المستخدمة'), -r.points_used) : null}
@@ -98,7 +102,7 @@ function Receipt({ r, biz }: { r: any; biz: Biz }) {
             <tr key={i.id}>
               <td>{itemName(i)}{i.kind === 'thobe' ? <div>{i.snapshot.member?.name}</div> : null}{i.discount > 0 ? <div>{t('Discount', 'خصم')} −{money2(i.discount)}</div> : null}{i.returned_qty ? <div>{t('Returned', 'مرتجع')} {i.returned_qty}</div> : null}</td>
               <td className="e num">{i.qty}</td>
-              <td className="e num">{money2(i.line_total)}</td>
+              <td className="e num">{money2(Number(i.unit_price) * i.qty)}</td>
             </tr>
           ))}
           <Totals r={r} biz={biz} />
@@ -156,7 +160,7 @@ function Invoice({ r, biz, title, number, dateText, valid }: { r: any; biz: Biz;
       </table>
       <table style={{ width: '50%', marginInlineStart: 'auto' }}>
         <tbody>
-          <tr><td colSpan={2}>{t('Subtotal', 'المجموع')}</td><td className="e num">{money2(r.subtotal)}</td></tr>
+          {r.discount > 0 || r.items.some((i: any) => Number(i.discount) > 0) ? null : <tr><td colSpan={2}>{t('Subtotal', 'المجموع')}</td><td className="e num">{money2(r.subtotal)}</td></tr>}
           <Totals r={r} biz={biz} />
         </tbody>
       </table>
@@ -177,6 +181,13 @@ function MeasureTable({ m }: { m: any }) {
       </tbody>
     </table>
   );
+}
+
+/** Remarks the counter wrote against the collar, cuff and pocket. */
+function StyleNotesLine({ n }: { n?: { collar?: string; cuff?: string; pocket?: string } | null }) {
+  if (!n) return null;
+  const parts: [string, string | undefined][] = [[t('Collar', 'الياقة'), n.collar], [t('Cuff', 'الكبك'), n.cuff], [t('Pocket', 'الجيب'), n.pocket]];
+  return <>{parts.filter(([, v]) => v).map(([k, v]) => <div key={k}>{k}: {v}</div>)}</>;
 }
 
 /** The ticket that travels with the cloth: who, what, measurements, when. */
@@ -201,6 +212,7 @@ function Ticket({ r, biz }: { r: any; biz: Biz }) {
             {thobes.filter((i: any) => i.snapshot.member?.id === m?.id).map((i: any) => (
               <div key={i.id}>
                 <b>{i.qty} ×</b> {L(i.snapshot.thobe?.collar)}{i.snapshot.thobe?.cuff ? ` · ${t('cuff', 'كبك')} ${L(i.snapshot.thobe.cuff)}` : ''} · {L(i.snapshot.thobe?.fabric)}{i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}{i.snapshot.thobe?.pocket ? ` · ${t('chest pocket', 'جيب صدر')}` : ''}
+                <StyleNotesLine n={i.snapshot.thobe?.style_notes} />
                 {i.snapshot.remarks ? <div>{t('Note', 'ملاحظة')}: {i.snapshot.remarks}</div> : null}
               </div>
             ))}
@@ -218,10 +230,9 @@ function Ticket({ r, biz }: { r: any; biz: Biz }) {
   );
 }
 
-/** The complete order on A4: each thobe drawn with its collar, cuff, pocket and the measurements marked, then the bill. */
-function OrderSheet({ r, biz }: { r: any; biz: Biz }) {
+/** The thobe record on A4: each thobe drawn with its collar, cuff, pocket and the measurements marked, the styles with their remarks, and the measurements in full. No prices: that's the receipt and the invoice. */
+function ThobeSheet({ r, biz }: { r: any; biz: Biz }) {
   const thobes = r.items.filter((i: any) => i.kind === 'thobe');
-  const others = r.items.filter((i: any) => i.kind !== 'thobe');
   const count = thobes.reduce((n: number, i: any) => n + i.qty, 0);
   return (
     <div className="print-page pa4 order-sheet" data-testid="order-sheet">
@@ -232,7 +243,7 @@ function OrderSheet({ r, biz }: { r: any; biz: Biz }) {
           <div>{L({ name_en: r.branch_en, name_ar: r.branch_ar })}{biz.company.phone ? <> · <span className="ltr">{biz.company.phone}</span></> : null}</div>
         </div>
         <div style={{ textAlign: 'end' }}>
-          <div className="strong" style={{ fontSize: 22 }}>{t('Order', 'طلب')} #{r.number}</div>
+          <div className="strong" style={{ fontSize: 22 }}>{t('Thobe sheet', 'ورقة الثوب')} #{r.number}</div>
           <div>{t('Ordered', 'تاريخ الطلب')} {date(r.created_at)}</div>
           {r.expected_delivery ? <div className="strong">{t('Ready by', 'التسليم')} {date(r.expected_delivery)}</div> : null}
           <div dangerouslySetInnerHTML={{ __html: code128Svg(r.number, 36, 8) }} />
@@ -246,11 +257,12 @@ function OrderSheet({ r, biz }: { r: any; biz: Biz }) {
 
       {thobes.map((i: any, k: number) => {
         const th = i.snapshot.thobe ?? {};
+        const notes = th.style_notes ?? {};
         const meas = r.measurements?.find((x: any) => x.member_id === i.snapshot.member?.id);
-        const rows: [string, ReactNode][] = [
-          [t('Collar', 'الياقة'), L(th.collar)],
-          [t('Cuff', 'الكبك'), th.cuff ? L(th.cuff) : '—'],
-          [t('Pocket', 'الجيب'), th.pocket ? t('Chest pocket', 'جيب صدر') : t('No pocket', 'بدون جيب')],
+        const rows: [string, ReactNode, string?][] = [
+          [t('Collar', 'الياقة'), L(th.collar), notes.collar],
+          [t('Cuff', 'الكبك'), th.cuff ? L(th.cuff) : '—', notes.cuff],
+          [t('Pocket', 'الجيب'), th.pocket ? t('Chest pocket', 'جيب صدر') : t('No pocket', 'بدون جيب'), notes.pocket],
           [t('Cloth', 'القماش'), L(th.fabric)],
           [t('Cloth length', 'طول القماش'), th.metres ? `${th.metres} ${t('m', 'م')}` : '—'],
           [t('Thobes', 'عدد الثياب'), String(i.qty)],
@@ -262,39 +274,31 @@ function OrderSheet({ r, biz }: { r: any; biz: Biz }) {
             </div>
             <div className="order-thobe-body">
               <ThobePreview m={meas ?? {}} collar={th.collar} cuff={th.cuff} pocket={th.pocket === true} className="print" />
-              <div>
+              <div className="stack" style={{ gap: 8 }}>
                 <table>
-                  <tbody>{rows.map(([a, b]) => <tr key={a}><td>{a}</td><td className="e strong">{b}</td></tr>)}</tbody>
+                  <tbody>
+                    {rows.map(([a, b, note]) => (
+                      <tr key={a}>
+                        <td>{a}</td>
+                        <td className="e"><b>{b}</b>{note ? <div className="small" data-testid="sheet-style-note">{note}</div> : null}</td>
+                      </tr>
+                    ))}
+                  </tbody>
                 </table>
-                {i.snapshot.remarks ? <div style={{ marginTop: 8, whiteSpace: 'pre-line' }}><b>{t('Notes for the tailor', 'ملاحظات للخياط')}:</b> {i.snapshot.remarks}</div> : null}
+                {i.snapshot.remarks ? <div style={{ whiteSpace: 'pre-line' }}><b>{t('Notes for the tailor', 'ملاحظات للخياط')}:</b> {i.snapshot.remarks}</div> : null}
                 {meas ? (
-                  <div style={{ marginTop: 8 }}>
-                    {t('Measured', 'المقاسات')} {date(meas.taken_at)}{meas.tailor_name ? ` · ${meas.tailor_name}` : ''}
+                  <div>
+                    <MeasureTable m={meas} />
+                    <div>{t('Measured', 'المقاسات')} {date(meas.taken_at)}{meas.tailor_name ? ` · ${meas.tailor_name}` : ''}</div>
                     {meas.remarks ? <div style={{ whiteSpace: 'pre-line' }}>{meas.remarks}</div> : null}
                   </div>
-                ) : <div className="strong" style={{ marginTop: 8 }}>{t('No measurements yet', 'لا توجد مقاسات بعد')}</div>}
+                ) : <div className="strong">{t('No measurements yet', 'لا توجد مقاسات بعد')}</div>}
               </div>
             </div>
           </section>
         );
       })}
-
-      <section className="order-bill">
-        <table>
-          <thead><tr><th>{t('Item', 'الصنف')}</th><th className="e">{t('Qty', 'الكمية')}</th><th className="e">{t('Amount', 'المبلغ')}</th></tr></thead>
-          <tbody>
-            {[...thobes, ...others].map((i: any) => (
-              <tr key={i.id}>
-                <td>{itemName(i)}{i.kind === 'thobe' && i.snapshot.member ? ` · ${i.snapshot.member.name}` : ''}</td>
-                <td className="e num">{i.qty}</td>
-                <td className="e num">{money2(i.line_total)}</td>
-              </tr>
-            ))}
-            <Totals r={r} biz={biz} />
-          </tbody>
-        </table>
-        {r.notes ? <div style={{ marginTop: 8 }}>{t('Notes', 'ملاحظات')}: {r.notes}</div> : null}
-      </section>
+      {r.notes ? <div style={{ marginTop: 10 }}>{t('Notes', 'ملاحظات')}: {r.notes}</div> : null}
     </div>
   );
 }
@@ -397,7 +401,7 @@ export default function Print() {
       body = <Invoice r={order.data} biz={b} title={t('Invoice', 'فاتورة')} number={order.data.number} dateText={dateTime(order.data.created_at)} />;
     } else if (kind === 'order' && order.data) {
       ready = true;
-      body = <OrderSheet r={order.data} biz={b} />;
+      body = <ThobeSheet r={order.data} biz={b} />;
     } else if (kind === 'ticket' && order.data) {
       ready = true;
       body = Array.from({ length: b.printing.ticket_copies || 1 }, (_, i) => <div key={i} style={{ breakAfter: 'page' }}><Ticket r={order.data} biz={b} /></div>);
@@ -453,7 +457,7 @@ export default function Print() {
         body = (
           <Receipt
             biz={b}
-            r={{ number: 'TEST', created_at: new Date().toISOString(), branch_en: 'Branch', branch_ar: 'الفرع', customer_name: t('Test customer', 'عميل تجريبي'), phone: '+97455551234', staff_name: '—', items: [{ id: 1, kind: 'product', qty: 1, line_total: 95, snapshot: { product: { name_en: 'Test item', name_ar: 'صنف تجريبي' } } }], discount: 0, service_charge: 0, delivery_fee: 0, points_used: 0, total: 95, tax: 0, payments: [{ provider: 'cash', amount: 95 }], refunded: 0, balance: 0, receipt_token: '0'.repeat(32), points_to_earn: 0 }}
+            r={{ number: 'TEST', created_at: new Date().toISOString(), branch_en: 'Branch', branch_ar: 'الفرع', customer_name: t('Test customer', 'عميل تجريبي'), phone: '+97455551234', staff_name: '—', items: [{ id: 1, kind: 'product', qty: 1, unit_price: 95, discount: 0, line_total: 95, snapshot: { product: { name_en: 'Test item', name_ar: 'صنف تجريبي' } } }], discount: 0, service_charge: 0, delivery_fee: 0, points_used: 0, total: 95, tax: 0, payments: [{ provider: 'cash', amount: 95 }], refunded: 0, balance: 0, receipt_token: '0'.repeat(32), points_to_earn: 0 }}
           />
         );
     }
