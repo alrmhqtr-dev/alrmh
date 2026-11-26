@@ -248,8 +248,8 @@ export function ThobeDesk({
             </>
           ) : (
             <div className="grid k2">
-              <Field label={t('Name', 'الاسم')}><Input data-testid="thobe-new-name" value={newCust.name} onChange={(e) => setNewCust({ ...newCust, name: e.target.value })} autoFocus /></Field>
-              <Field label={t('Mobile (8 digits)', 'الجوال (8 أرقام)')}><Input data-testid="thobe-new-phone" dir="ltr" inputMode="tel" value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} /></Field>
+              <Field label={t('Mobile (8 digits)', 'الجوال (8 أرقام)')}><Input data-testid="thobe-new-phone" dir="ltr" inputMode="tel" value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} autoFocus /></Field>
+              <Field label={t('Name', 'الاسم')}><Input data-testid="thobe-new-name" value={newCust.name} onChange={(e) => setNewCust({ ...newCust, name: e.target.value })} /></Field>
             </div>
           )}
         </div>

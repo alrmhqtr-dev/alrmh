@@ -12,6 +12,8 @@ import { OpenRegisterForm, useRegister } from '../register';
 import { MeasureModal, type Measurement } from '../measure';
 import { type Cloth, type Style } from '../thobe-options';
 import { ThobeDesk } from '../pos-thobe';
+import { CustomerStart } from '../pos-start';
+import { CART_PRINT_KEY } from '../print/cart';
 
 type Items = {
   branchId: string;
@@ -54,111 +56,28 @@ type SaleResult = { orderId: string; number: string; total: number; paid: number
 
 const key = () => Math.random().toString(36).slice(2);
 
-/** A new customer at the counter: name, mobile and all seven measurements, saved together. */
-function NewCustomerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (c: Cust) => void }) {
-  const toast = useToast();
-  const [v, setV] = useState<Record<string, string>>({ name: '', phone: '', remarks: '', ...Object.fromEntries(MEASURE_KEYS.map((k) => [k, ''])) });
-  const set = (k: string, val: string) => setV((x) => ({ ...x, [k]: val }));
-  const save = useMutation({
-    mutationFn: () =>
-      api<Cust & { existing: boolean }>('/customers', {
-        body: { name: v.name.trim(), phone: v.phone, measurements: { ...Object.fromEntries(MEASURE_KEYS.map((k) => [k, Number(v[k])])), remarks: v.remarks.trim() || null } },
-      }),
-    onSuccess: (c) => {
-      toast(
-        c.existing
-          ? t('This mobile already has an account, so it was selected. Check their measurements before ordering.', 'لهذا الرقم حساب مسبق فتم اختياره. راجع مقاساته قبل الطلب.')
-          : t('Customer added with their measurements.', 'تمت إضافة العميل مع مقاساته.'),
-        c.existing ? 'error' : 'ok',
-      );
-      onSaved({ id: c.id, name: c.name, phone: c.phone });
-    },
-    onError: (e) => toast(errorMessage(e), 'error'),
-  });
-  const measured = MEASURE_KEYS.every((k) => v[k].trim() !== '' && Number(v[k]) >= 0);
-  const ok = v.name.trim().length > 0 && v.phone.replace(/\D/g, '').length >= 8 && measured;
-  return (
-    <Modal
-      wide
-      title={t('New customer', 'عميل جديد')}
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn secondary" onClick={onClose}>{t('Cancel', 'إلغاء')}</button>
-          <button className="btn" data-testid="pos-new-save" disabled={!ok || save.isPending} onClick={() => save.mutate()}>{t('Save customer', 'حفظ العميل')}</button>
-        </>
-      }
-    >
-      <div className="grid k2">
-        <Field label={t('Name', 'الاسم')}><Input data-testid="pos-new-name" value={v.name} onChange={(e) => set('name', e.target.value)} autoFocus /></Field>
-        <Field label={t('Mobile (8 digits)', 'الجوال (8 أرقام)')}><Input data-testid="pos-new-phone" dir="ltr" inputMode="tel" value={v.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
-      </div>
-      <div className="overline">{t('Measurements (cm)', 'المقاسات (سم)')}</div>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}>
-        {MEASURE_KEYS.map((k) => (
-          <Field key={k} label={measureLabel(k)}>
-            <Input data-testid={`pos-new-${k}`} type="number" inputMode="decimal" step="any" min={0} value={v[k]} onChange={(e) => set(k, e.target.value)} />
-          </Field>
-        ))}
-      </div>
-      <Field label={t('Remarks for the workshop', 'ملاحظات للورشة')}>
-        <TextArea className="input notes" value={v.remarks} maxLength={300} onChange={(e) => set('remarks', e.target.value)} />
-      </Field>
-    </Modal>
-  );
-}
-
-/** Existing or new customer: find an existing one by mobile or name, or add a new one with their measurements. */
-function CustomerPicker({ value, onPick, walkIn, setWalkIn }: { value: Cust | null; onPick: (c: Cust | null) => void; walkIn: { name: string; phone: string }; setWalkIn: (w: { name: string; phone: string }) => void }) {
-  const [q, setQ] = useState('');
-  const [adding, setAdding] = useState(false);
-  const found = useQuery({ queryKey: ['pos-customers', q], queryFn: () => api<Cust[]>(`/customers?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 });
-  if (value)
+/** Who the sale is for, in the sale panel: the customer with a way to change, or a sale without one. */
+function SaleCustomer({ customer, walkIn, setWalkIn, onChange }: { customer: Cust | null; walkIn: { name: string; phone: string }; setWalkIn: (w: { name: string; phone: string }) => void; onChange: () => void }) {
+  if (customer)
     return (
       <div className="row spread" data-testid="pos-customer">
         <div>
-          <div className="strong">{value.name ?? t('No name', 'بدون اسم')}</div>
-          <div className="small muted num">{phone(value.phone)}</div>
+          <bdi className="strong">{customer.name}</bdi>
+          <div className="small secondary num">{phone(customer.phone)}</div>
         </div>
-        <button className="btn sm ghost" onClick={() => onPick(null)} aria-label={t('Remove customer', 'إزالة العميل')}><X size={16} /></button>
+        <button className="btn sm ghost" data-testid="pos-change-customer" onClick={onChange}>{t('Change', 'تغيير')}</button>
       </div>
     );
   return (
-    <div className="stack" style={{ gap: 8 }}>
-      <div className="tabs" role="tablist" aria-label={t('Customer', 'العميل')}>
-        <button role="tab" aria-selected={!adding} className={!adding ? 'on' : ''} data-testid="pos-customer-old" onClick={() => setAdding(false)}>{t('Existing customer', 'عميل حالي')}</button>
-        <button role="tab" aria-selected={adding} className={adding ? 'on' : ''} data-testid="pos-add-customer" onClick={() => setAdding(true)}><UserPlus size={14} /> {t('New customer', 'عميل جديد')}</button>
+    <div className="stack" style={{ gap: 8 }} data-testid="pos-walk-in">
+      <div className="row spread">
+        <span className="strong">{t('Sale without a customer', 'بيع بدون عميل')}</span>
+        <button className="btn sm ghost" data-testid="pos-choose-customer" onClick={onChange}>{t('Add customer', 'إضافة عميل')}</button>
       </div>
-      <Input data-testid="pos-customer-search" placeholder={t('Customer mobile or name', 'جوال العميل أو اسمه')} value={q} onChange={(e) => setQ(e.target.value)} />
-      {q.trim().length >= 2 && found.data ? (
-        <div className="card" style={{ maxHeight: 180, overflowY: 'auto' }}>
-          {found.data.length ? (
-            found.data.slice(0, 8).map((c) => (
-              <button key={c.id} className="btn ghost" data-testid={`pos-pick-${c.phone}`} style={{ width: '100%', justifyContent: 'space-between' }} onClick={() => { onPick(c); setQ(''); }}>
-                <span>{c.name ?? '—'}</span>
-                <span className="small muted num">{phone(c.phone)}</span>
-              </button>
-            ))
-          ) : (
-            <div className="small muted" style={{ padding: 10 }}>{t('No customer found. Choose New customer.', 'لا يوجد عميل. اختر عميل جديد.')}</div>
-          )}
-        </div>
-      ) : (
-        <div className="grid k2" style={{ gap: 8 }}>
-          <Input placeholder={t('Walk-in name (optional)', 'اسم الزبون (اختياري)')} value={walkIn.name} onChange={(e) => setWalkIn({ ...walkIn, name: e.target.value })} />
-          <Input placeholder={t('Walk-in mobile (optional)', 'جوال الزبون (اختياري)')} dir="ltr" value={walkIn.phone} onChange={(e) => setWalkIn({ ...walkIn, phone: e.target.value })} />
-        </div>
-      )}
-      {adding ? (
-        <NewCustomerModal
-          onClose={() => setAdding(false)}
-          onSaved={(c) => {
-            setAdding(false);
-            setQ('');
-            onPick(c);
-          }}
-        />
-      ) : null}
+      <div className="grid k2" style={{ gap: 8 }}>
+        <Input placeholder={t('Name (optional)', 'الاسم (اختياري)')} value={walkIn.name} onChange={(e) => setWalkIn({ ...walkIn, name: e.target.value })} />
+        <Input placeholder={t('Mobile (optional)', 'الجوال (اختياري)')} dir="ltr" value={walkIn.phone} onChange={(e) => setWalkIn({ ...walkIn, phone: e.target.value })} />
+      </div>
     </div>
   );
 }
@@ -280,6 +199,8 @@ export default function Pos() {
   const [sizeFor, setSizeFor] = useState<Items['products'][number] | null>(null);
   const [customer, setCustomer] = useState<Cust | null>(null);
   const [walkIn, setWalkIn] = useState({ name: '', phone: '' });
+  // A sale starts by choosing a new or existing customer; this is set when staff choose to sell without one.
+  const [walkInMode, setWalkInMode] = useState(false);
   const [lines, setLines] = useState<Line[]>([]);
   const [orderDiscount, setOrderDiscount] = useState<{ kind: 'percent' | 'fixed'; amount: string }>({ kind: 'fixed', amount: '' });
   const [points, setPoints] = useState('');
@@ -323,6 +244,7 @@ export default function Pos() {
     const c = d.cart;
     setLines((c.lines ?? []).map((l: any) => ({ ...l, key: key() })));
     if (c.customerId) setCustomer({ id: c.customerId, name: d.customer_name, phone: d.phone });
+    else setWalkInMode(true);
     setWalkIn({ name: c.walkInName ?? '', phone: c.walkInPhone ?? '' });
     setNotes(c.notes ?? '');
     if (c.branchId) setBranchId(c.branchId);
@@ -365,6 +287,7 @@ export default function Pos() {
   const reset = () => {
     setLines([]);
     setCustomer(null);
+    setWalkInMode(false);
     setWalkIn({ name: '', phone: '' });
     setOrderDiscount({ kind: 'fixed', amount: '' });
     setPoints('');
@@ -463,6 +386,32 @@ export default function Pos() {
     return `${t('Thobe', 'ثوب')} · ${L(c)}${cuff ? ` · ${L(cuff)}` : ''}${l.pocket ? ` · ${t('pocket', 'جيب')}` : ''} · ${L(f)} · ${num(l.metres)} ${t('m', 'م')}${m ? ` · ${m.name}` : ''}`;
   };
   const q = quote;
+  /** Print the sale as it stands, before it's paid: the receipt, or the thobes drawn with their measurements. */
+  const printCart = (kind: 'receipt' | 'thobe') => {
+    if (!q) return;
+    const br = data.branches.find((b) => b.id === branchId);
+    const r = {
+      unpaid: true,
+      number: '',
+      created_at: new Date().toISOString(),
+      branch_en: br?.name_en, branch_ar: br?.name_ar,
+      customer_id: customer?.id ?? null,
+      customer_name: customer?.name ?? (walkIn.name || null),
+      phone: customer?.phone ?? (walkIn.phone || null),
+      staff_name: staff?.name ?? null,
+      items: q.lines.map((l: any, i: number) => ({
+        id: i, kind: l.kind, qty: l.qty, unit_price: l.unitPrice, discount: l.discount, line_total: l.lineTotal,
+        snapshot: { product: l.product, size: l.size, thobe: l.thobe, member: l.member, remarks: l.remarks },
+      })),
+      discount: q.orderDiscount, delivery_fee: q.deliveryFee, points_used: q.pointsUsed, total: q.total, tax: q.tax,
+      payments: [], refunded: 0, balance: 0,
+      expected_delivery: q.expectedDelivery, thobe_count: q.lines.filter((l: any) => l.kind === 'thobe').reduce((a: number, l: any) => a + l.qty, 0),
+      measurements: family.filter((m) => m.latest).map((m) => ({ ...m.latest, member_id: m.id })),
+      notes: notes || null,
+    };
+    localStorage.setItem(CART_PRINT_KEY, JSON.stringify(r));
+    openPrint(kind === 'receipt' ? 'cart-receipt' : 'cart-thobe');
+  };
 
   return (
     <div className="stack">
@@ -477,6 +426,10 @@ export default function Pos() {
           </select>
         </div>
       </div>
+      {!customer && !walkInMode && !fromParam && !draftId ? (
+        <CustomerStart onPick={(c) => { setCustomer(c); setPoints(''); setDeliver(''); }} onWalkIn={() => setWalkInMode(true)} />
+      ) : (
+      <>
       {/* While making thobes the sale stays out of the way until something is in it. */}
       <div className={`pos ${tab === 'thobes' ? 'thobes' : ''} ${tab === 'thobes' && lines.length === 0 ? 'solo' : ''}`}>
         <div className="stack">
@@ -527,7 +480,7 @@ export default function Pos() {
 
         <div className="pos-cart">
           <div className="card pad stack">
-            <CustomerPicker value={customer} onPick={(c) => { setCustomer(c); setPoints(''); setDeliver(''); }} walkIn={walkIn} setWalkIn={setWalkIn} />
+            <SaleCustomer customer={customer} walkIn={walkIn} setWalkIn={setWalkIn} onChange={() => { setCustomer(null); setWalkInMode(false); setPoints(''); setDeliver(''); }} />
             {cust.data ? (
               <div className="small secondary">{L(cust.data.tier.tier)} · {t('points', 'النقاط')} <b className="num">{num(cust.data.balance)}</b></div>
             ) : null}
@@ -610,6 +563,12 @@ export default function Pos() {
                 {customer && q.pointsToEarn ? <div className="small muted">{t(`Earns ${q.pointsToEarn} points`, `يكسب ${q.pointsToEarn} نقطة`)}</div> : null}
               </div>
             ) : null}
+            {q && lines.length ? (
+              <div className="grid k2" style={{ gap: 8 }} data-testid="cart-print">
+                <button className="btn secondary" data-testid="print-cart-receipt" onClick={() => printCart('receipt')}><Printer size={16} /> {t('Print receipt', 'طباعة الإيصال')}</button>
+                {q.hasThobes ? <button className="btn secondary" data-testid="print-cart-thobe" onClick={() => printCart('thobe')}><Ruler size={16} /> {t('Print thobe', 'طباعة الثوب')}</button> : null}
+              </div>
+            ) : null}
             <div className="grid k2" style={{ gap: 8 }}>
               <button className="btn secondary" data-testid="save-draft" disabled={!lines.length || save.isPending} onClick={() => save.mutate('draft')}>{t('Save draft', 'حفظ مسودة')}</button>
               <button className="btn secondary" data-testid="save-quotation" disabled={!lines.length || save.isPending} onClick={() => save.mutate('quotation')}>{t('Quotation', 'عرض سعر')}</button>
@@ -639,6 +598,8 @@ export default function Pos() {
           </div>
         </Modal>
       ) : null}
+      </>
+      )}
       {paying && q ? <PayModal total={q.total} allowPartial={Boolean(customer)} busy={sell.isPending} onClose={() => setPaying(false)} onPay={(p) => sell.mutate(p)} /> : null}
       {measure ? (
         <MeasureModal memberId={measure.id} memberName={measure.name} previous={measure.latest} onClose={() => setMeasure(null)} onSaved={() => qc.invalidateQueries({ queryKey: ['customer', customer?.id] })} />

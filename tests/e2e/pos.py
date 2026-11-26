@@ -86,9 +86,12 @@ def counter(browser, lang, email, password):
     page.wait_for_selector('[data-testid="register-gate"]', timeout=15000)
     page.fill('[data-testid="register-opening"]', "300")
     page.click('[data-testid="register-open"]')
-    page.wait_for_selector('[data-testid="pos-search"]', timeout=15000)
+    page.wait_for_selector('[data-testid="pos-start"]', timeout=15000)
     check(f"{tag} a closed register is opened with the cash in the drawer before selling", sql(f"select opening_cash::int from cash_registers r join staff_users u on u.id = r.staff_id where u.email = '{email}' and r.closed_at is null") == "300")
     page.screenshot(path=f"{SHOTS}/pos-empty-{lang}.png")
+    check(f"{tag} the POS opens on two cards, new customer or existing customer, before anything else",
+          page.locator('[data-testid="pos-start"] .choice-card').count() == 2 and page.locator('[data-testid="pos-search"]').count() == 0 and page.locator('[data-testid="pos-tab-thobes"]').count() == 0)
+    page.click('[data-testid="start-walk-in"]'); page.wait_for_selector('[data-testid="pos-search"]', timeout=15000)
 
     # ---- walk-in: scan, pay cash, change, receipt ----
     before = level()
@@ -125,15 +128,20 @@ def counter(browser, lang, email, password):
 
     # ---- a new customer at the counter: name, mobile and measurements together; thobes; deposit ----
     phone = f"6{run[-4:]}{'1' if lang == 'ar' else '2'}00"[:8]
-    # Thobes start with two cards; a new customer's name, mobile, measurements and thobe are on one page with a live preview.
+    # A new customer: the mobile first, then the name; then the sale, and thobes go straight to measurements and styles.
+    page.wait_for_selector('[data-testid="pos-start"]', timeout=15000)
+    page.click('[data-testid="start-new"]')
+    first = page.locator('[data-testid="start-new-form"] input').first.get_attribute("data-testid")
+    page.fill('[data-testid="start-phone"]', phone)
+    page.fill('[data-testid="start-name"]', "سالم المري" if lang == "ar" else "Salem Al-Marri")
+    page.screenshot(path=f"{SHOTS}/pos-start-new-{lang}.png")
+    page.click('[data-testid="start-continue"]')
+    page.wait_for_selector('[data-testid="pos-customer"]', timeout=15000)
+    check(f"{tag} a new customer is mobile first, then name, and the sale opens for them", first == "start-phone" and sql(f"select count(*) from customers where phone = '+974{phone}'") == "1")
     page.click('[data-testid="pos-tab-thobes"]')
-    page.wait_for_selector('[data-testid="thobe-choose"]', timeout=15000)
-    page.screenshot(path=f"{SHOTS}/pos-thobe-choose-{lang}.png")
-    check(f"{tag} thobes start with two cards: new customer or existing customer, with the sale out of the way",
-          page.locator('[data-testid="thobe-choose"] .choice-card').count() == 2 and not page.locator('[data-testid="pos-customer-search"]').is_visible())
-    page.click('[data-testid="thobe-new"]')
-    page.fill('[data-testid="thobe-new-name"]', "سالم المري" if lang == "ar" else "Salem Al-Marri")
-    page.fill('[data-testid="thobe-new-phone"]', phone)
+    page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(600)
+    check(f"{tag} thobes go straight to measurements and styles for them (open to fill in), with the sale out of the way",
+          page.locator('[data-testid="thobe-m-chest_cm"]').count() == 1 and page.locator('[data-testid="thobe-choose"]').count() == 0 and not page.locator('[data-testid="pay"]').is_visible())
     page.locator('[data-testid^="thobe-collar-"]').first.click()
     page.locator('[data-testid^="thobe-cuff-"]').first.click()
     page.select_option('[data-testid="thobe-fabric"]', index=1)
@@ -162,9 +170,24 @@ def counter(browser, lang, email, password):
     check(f"{tag} collar, cuff and pocket are picked by picture; the cloth length starts at the usual metres and + adds 0.5 m",
           page.locator('.style-tile.on').count() == 3 and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)
     page.click('[data-testid="thobe-add"]')
-    page.wait_for_selector('[data-testid="pos-customer"]', timeout=15000)
+    page.wait_for_selector('[data-testid="print-cart-thobe"]', timeout=15000)
     page.wait_for_timeout(1200)
     total = float("".join(ch for ch in page.locator('[data-testid="cart-total"]').inner_text() if ch.isdigit() or ch == "."))
+    # Printing from the sale screen, before payment: the thobe with its measurements, and the receipt.
+    with page.expect_popup(timeout=15000) as pop:
+        page.click('[data-testid="print-cart-thobe"]')
+    sheet = pop.value; sheet.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); sheet.wait_for_timeout(800)
+    stext = sheet.locator('[data-testid="order-sheet"]').inner_text()
+    sheet.screenshot(path=f"{SHOTS}/print-cart-thobe-{lang}.png", full_page=True)
+    ok_sheet = sheet.locator('[data-testid="preview-chest_cm"]').first.text_content() == "108" and "Collar a little higher" in stext and "QAR" not in stext
+    sheet.close()
+    with page.expect_popup(timeout=15000) as pop:
+        page.click('[data-testid="print-cart-receipt"]')
+    rec = pop.value; rec.wait_for_load_state(); rec.wait_for_timeout(1500)
+    rtext2 = rec.locator("body").inner_text()
+    rec.close()
+    check(f"{tag} the sale screen prints the thobe (drawn with its measurements) and the receipt before payment",
+          ok_sheet and ("not paid yet" in rtext2 or "لم تُدفع بعد" in rtext2) and f"{total:.2f}" in rtext2, stext[:120] + " | " + rtext2[:160])
     page.click('[data-testid="pay"]')
     page.fill('[data-testid="pay-cash"]', "100")
     page.screenshot(path=f"{SHOTS}/pos-deposit-{lang}.png")
@@ -336,10 +359,11 @@ def workshop(browser, lang):
     page.keyboard.press("Escape"); page.mouse.click(5, 880)
 
     # An existing customer: found by mobile, last measurements filled in, a change saved as new measurements
-    page.goto(ADMIN + "/pos"); page.wait_for_selector('[data-testid="pos-tab-thobes"]', timeout=15000)
-    page.click('[data-testid="pos-tab-thobes"]'); page.click('[data-testid="thobe-existing"]')
+    page.goto(ADMIN + "/pos"); page.wait_for_selector('[data-testid="pos-start"]', timeout=15000)
+    page.click('[data-testid="start-existing"]')
     mob = sql(f"select substr(phone, 5) from customers where id = '{cust['id']}'")
-    page.fill('[data-testid="thobe-find"]', mob); page.click(f'[data-testid="thobe-pick-+974{mob}"]')
+    page.fill('[data-testid="start-search"]', mob); page.click(f'[data-testid="start-pick-+974{mob}"]')
+    page.wait_for_selector('[data-testid="pos-tab-thobes"]', timeout=15000); page.click('[data-testid="pos-tab-thobes"]')
     page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(600)
     viewed = page.locator('[data-testid="thobe-m-view-chest_cm"]').inner_text()
     inputs = page.locator('[data-testid="thobe-m-chest_cm"]').count()

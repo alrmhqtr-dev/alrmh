@@ -8,6 +8,7 @@ import { MEASURE_KEYS, RELATION, date, dateTime, measureLabel, methodLabel, mone
 import { code128Svg, qrSvg } from '../lib/barcode';
 import { receiptUrl } from '../lib/whatsapp';
 import { LABELS_KEY } from '../pages/Labels';
+import { CART_PRINT_KEY } from './cart';
 import { ThobePreview } from '../thobe-preview';
 
 type Biz = { company: any; invoice: any; barcode: any; printing: any };
@@ -90,7 +91,7 @@ function Receipt({ r, biz }: { r: any; biz: Biz }) {
     <div className={`print-page ${paper}`}>
       <Head biz={biz} compact />
       <div className="hr" />
-      <div className="c strong">{t('Tax invoice', 'فاتورة')} #{r.number}</div>
+      <div className="c strong">{r.unpaid ? t('Bill · not paid yet', 'فاتورة · لم تُدفع بعد') : <>{t('Tax invoice', 'فاتورة')} #{r.number}</>}</div>
       <div className="c">{dateTime(r.created_at)} · {L({ name_en: r.branch_en, name_ar: r.branch_ar })}</div>
       {r.customer_name ? <div className="c">{r.customer_name}{r.phone ? ` · ${phone(r.phone)}` : ''}</div> : null}
       <div className="c">{t('Served by', 'الموظف')}: {r.staff_name ?? '—'}</div>
@@ -110,7 +111,7 @@ function Receipt({ r, biz }: { r: any; biz: Biz }) {
       </table>
       {r.expected_delivery && r.thobe_count > 0 ? <div className="c strong" style={{ marginTop: 6 }}>{t('Ready by', 'موعد الاستلام')} {date(r.expected_delivery)}</div> : null}
       {biz.invoice.show_points && r.customer_id && r.points_to_earn > 0 ? <div className="c">{t(`You earn ${r.points_to_earn} points`, `تكسب ${r.points_to_earn} نقطة`)}</div> : null}
-      {biz.invoice.show_qr ? <div className="c" style={{ marginTop: 6 }} dangerouslySetInnerHTML={{ __html: qrSvg(receiptUrl(r.receipt_token), 22) }} /> : null}
+      {biz.invoice.show_qr && !r.unpaid ? <div className="c" style={{ marginTop: 6 }} dangerouslySetInnerHTML={{ __html: qrSvg(receiptUrl(r.receipt_token), 22) }} /> : null}
       <div className="c" style={{ marginTop: 6, whiteSpace: 'pre-line' }}>{L(biz.invoice, 'footer')}</div>
       {L(biz.invoice, 'terms') ? <div style={{ marginTop: 4, whiteSpace: 'pre-line', fontSize: '0.9em' }}>{L(biz.invoice, 'terms')}</div> : null}
     </div>
@@ -243,10 +244,10 @@ function ThobeSheet({ r, biz }: { r: any; biz: Biz }) {
           <div>{L({ name_en: r.branch_en, name_ar: r.branch_ar })}{biz.company.phone ? <> · <span className="ltr">{biz.company.phone}</span></> : null}</div>
         </div>
         <div style={{ textAlign: 'end' }}>
-          <div className="strong" style={{ fontSize: 22 }}>{t('Thobe sheet', 'ورقة الثوب')} #{r.number}</div>
-          <div>{t('Ordered', 'تاريخ الطلب')} {date(r.created_at)}</div>
+          <div className="strong" style={{ fontSize: 22 }}>{t('Thobe sheet', 'ورقة الثوب')}{r.number ? ` #${r.number}` : ''}</div>
+          <div>{r.unpaid ? t('Before payment', 'قبل الدفع') : t('Ordered', 'تاريخ الطلب')} {date(r.created_at)}</div>
           {r.expected_delivery ? <div className="strong">{t('Ready by', 'التسليم')} {date(r.expected_delivery)}</div> : null}
-          <div dangerouslySetInnerHTML={{ __html: code128Svg(r.number, 36, 8) }} />
+          {r.number ? <div dangerouslySetInnerHTML={{ __html: code128Svg(r.number, 36, 8) }} /> : null}
         </div>
       </div>
       <div className="hr" />
@@ -445,6 +446,11 @@ export default function Print() {
     } else if (kind === 'purchase' && purchase.data) {
       ready = true;
       body = <PurchaseDoc p={purchase.data} biz={b} />;
+    } else if (kind === 'cart-receipt' || kind === 'cart-thobe') {
+      // A sale on the POS screen that isn't paid yet.
+      const r = JSON.parse(localStorage.getItem(CART_PRINT_KEY) ?? 'null');
+      ready = Boolean(r);
+      body = !r ? null : kind === 'cart-receipt' ? <Receipt r={r} biz={b} /> : <ThobeSheet r={r} biz={b} />;
     } else if (kind === 'labels') {
       ready = true;
       body = <Labels biz={b} />;
