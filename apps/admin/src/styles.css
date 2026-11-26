@@ -375,3 +375,10 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 .print-only { display: none; }
 @media print { .print-only { display: block; } .sales-report .card { break-inside: avoid; } }
 .sales-report tfoot td { font-weight: 700; border-top: 2px solid var(--border); }
+
+/* The thobe sheet: each chosen style with its picture and the remarks written against it. */
+.order-sheet .sheet-styles { display: grid; gap: 6px; }
+.order-sheet .sheet-style { display: grid; grid-template-columns: 52px 1fr; gap: 8px; align-items: start; border: 1px solid #999; border-radius: 6px; padding: 6px; break-inside: avoid; }
+.order-sheet .sheet-style-pic { width: 52px; height: 52px; display: grid; place-items: center; }
+.order-sheet .sheet-style-pic img { max-width: 52px; max-height: 52px; }
+.order-sheet .sheet-style-note { min-height: 1.3em; white-space: pre-line; border-bottom: 1px dotted #999; }

@@ -10,10 +10,10 @@ export type Cust = { id: string; name: string; phone: string };
 
 /**
  * The first screen of a sale: a new customer or an existing one, nothing else to get wrong.
- * A new customer needs a name and mobile; their measurements are taken when thobes are made.
- * A sale with no customer at all is a small link underneath, for quick product sales.
+ * A new customer needs a mobile and name; their measurements are taken when thobes are made.
+ * Every sale has a customer.
  */
-export function CustomerStart({ onPick, onWalkIn }: { onPick: (c: Cust) => void; onWalkIn: () => void }) {
+export function CustomerStart({ onPick }: { onPick: (c: Cust) => void }) {
   const toast = useToast();
   const [mode, setMode] = useState<'choose' | 'new' | 'existing'>('choose');
   const [q, setQ] = useState('');
@@ -47,9 +47,6 @@ export function CustomerStart({ onPick, onWalkIn }: { onPick: (c: Cust) => void;
             <span className="strong">{t('Existing customer', 'عميل حالي')}</span>
             <span className="small secondary">{t('Find by mobile or name', 'ابحث بالجوال أو الاسم')}</span>
           </button>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <button className="linklike small secondary" data-testid="start-walk-in" onClick={onWalkIn}>{t('Sale without a customer', 'بيع بدون عميل')}</button>
         </div>
       </div>
     );

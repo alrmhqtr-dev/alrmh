@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Download, Printer, Truck } from 'lucide-react';
+import { Download, Printer, Ruler, Truck } from 'lucide-react';
 import { api, downloadCsv, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { L, t } from '../lib/i18n';
@@ -103,7 +103,12 @@ export function Sales() {
                       <td className="right num">{money(r.total)}</td>
                       <td className={`right num ${r.balance ? 'tone-gold strong' : 'muted'}`}>{r.balance ? money(r.balance) : '—'}</td>
                       <td className="right" onClick={(e) => e.stopPropagation()}>
-                        <button className="btn sm ghost" aria-label={t('Print receipt', 'طباعة الإيصال')} onClick={() => openPrint(`receipt/${r.id}`)}><Printer size={15} /></button>
+                        <span className="row nowrap" style={{ gap: 2, justifyContent: 'flex-end' }}>
+                          {r.thobe_count > 0 ? (
+                            <button className="btn sm ghost" data-testid={`print-thobe-${r.number}`} aria-label={t('Print thobe sheet', 'طباعة ورقة الثوب')} title={t('Print thobe sheet', 'طباعة ورقة الثوب')} onClick={() => openPrint(`order/${r.id}`)}><Ruler size={15} /></button>
+                          ) : null}
+                          <button className="btn sm ghost" aria-label={t('Print receipt', 'طباعة الإيصال')} title={t('Print receipt', 'طباعة الإيصال')} onClick={() => openPrint(`receipt/${r.id}`)}><Printer size={15} /></button>
+                        </span>
                       </td>
                     </tr>
                   ))}

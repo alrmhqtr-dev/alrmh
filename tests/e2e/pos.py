@@ -89,9 +89,12 @@ def counter(browser, lang, email, password):
     page.wait_for_selector('[data-testid="pos-start"]', timeout=15000)
     check(f"{tag} a closed register is opened with the cash in the drawer before selling", sql(f"select opening_cash::int from cash_registers r join staff_users u on u.id = r.staff_id where u.email = '{email}' and r.closed_at is null") == "300")
     page.screenshot(path=f"{SHOTS}/pos-empty-{lang}.png")
-    check(f"{tag} the POS opens on two cards, new customer or existing customer, before anything else",
-          page.locator('[data-testid="pos-start"] .choice-card').count() == 2 and page.locator('[data-testid="pos-search"]').count() == 0 and page.locator('[data-testid="pos-tab-thobes"]').count() == 0)
-    page.click('[data-testid="start-walk-in"]'); page.wait_for_selector('[data-testid="pos-search"]', timeout=15000)
+    check(f"{tag} the POS opens on two cards, new customer or existing customer, and there's no sale without a customer",
+          page.locator('[data-testid="pos-start"] .choice-card').count() == 2 and page.locator('[data-testid="pos-search"]').count() == 0
+          and page.locator('[data-testid="pos-tab-thobes"]').count() == 0 and page.locator('[data-testid="start-walk-in"]').count() == 0)
+    page.click('[data-testid="start-new"]')
+    page.fill('[data-testid="start-phone"]', f"5{run[-4:]}{'1' if lang == 'ar' else '2'}00"[:8]); page.fill('[data-testid="start-name"]', f"Counter {lang}")
+    page.click('[data-testid="start-continue"]'); page.wait_for_selector('[data-testid="pos-search"]', timeout=15000)
 
     # ---- walk-in: scan, pay cash, change, receipt ----
     before = level()
@@ -118,8 +121,11 @@ def counter(browser, lang, email, password):
     receipt.wait_for_load_state(); receipt.wait_for_timeout(1800)
     number = page.locator('[data-testid="sale-number"]').inner_text().strip().lstrip("#")
     rtext = receipt.locator("body").inner_text()
+    rtitle = receipt.title()
     order = sql(f"select id from orders where number = '{number}'")
     check(f"{tag} scan, pay QAR 200 cash for QAR 120: change 80 shown, stock down by one", "80" in change and level() == before - 1 and sql(f"select stage || ':' || string_agg(provider || '=' || amount::int, ',') from orders o join payments p on p.order_id = o.id where o.id = '{order}' group by o.stage") == "delivered:cash=120", f"{change} {level()} {before}")
+    check(f"{tag} the receipt page is titled with the order number and customer, so a saved PDF is named after them",
+          rtitle == f"{'إيصال' if lang == 'ar' else 'Receipt'} {number} - Counter {lang}", rtitle)
     check(f"{tag} the receipt opens to print, with the number, total and a QR code to the online copy", number in rtext and "120.00" in rtext and receipt.locator("svg path").count() >= 1, rtext[:200])
     receipt.screenshot(path=f"{SHOTS}/pos-receipt-{lang}.png", full_page=True)
     receipt.close()
@@ -178,15 +184,18 @@ def counter(browser, lang, email, password):
         page.click('[data-testid="print-cart-thobe"]')
     sheet = pop.value; sheet.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); sheet.wait_for_timeout(800)
     stext = sheet.locator('[data-testid="order-sheet"]').inner_text()
+    stitle = sheet.title()
     sheet.screenshot(path=f"{SHOTS}/print-cart-thobe-{lang}.png", full_page=True)
-    ok_sheet = sheet.locator('[data-testid="preview-chest_cm"]').first.text_content() == "108" and "Collar a little higher" in stext and "QAR" not in stext
+    ok_sheet = (stitle.startswith(("Thobe sheet - Salem", "ورقة الثوب - سالم")) and sheet.locator('[data-testid="preview-chest_cm"]').first.text_content() == "108" and "QAR" not in stext
+                and "Collar a little higher" in sheet.locator('[data-testid="sheet-style-collar"]').inner_text() and "Cufflinks provided" in sheet.locator('[data-testid="sheet-style-cuff"]').inner_text()
+                and sheet.locator('[data-testid="sheet-style-collar"] img').evaluate("e => e.naturalWidth > 0") and sheet.locator('[data-testid="sheet-style-pocket"] img').count() == 1)
     sheet.close()
     with page.expect_popup(timeout=15000) as pop:
         page.click('[data-testid="print-cart-receipt"]')
     rec = pop.value; rec.wait_for_load_state(); rec.wait_for_timeout(1500)
     rtext2 = rec.locator("body").inner_text()
     rec.close()
-    check(f"{tag} the sale screen prints the thobe (drawn with its measurements) and the receipt before payment",
+    check(f"{tag} the sale screen prints the thobe (drawn with its measurements, the collar, cuff and pocket pictures with their remarks) and the receipt before payment",
           ok_sheet and ("not paid yet" in rtext2 or "لم تُدفع بعد" in rtext2) and f"{total:.2f}" in rtext2, stext[:120] + " | " + rtext2[:160])
     page.click('[data-testid="pay"]')
     page.fill('[data-testid="pay-cash"]', "100")
@@ -207,6 +216,14 @@ def counter(browser, lang, email, password):
     check(f"{tag} the remarks against the collar and the cuff are kept on the thobes",
           sql(f"select (snapshot->'thobe'->'style_notes'->>'collar') || '|' || (snapshot->'thobe'->'style_notes'->>'cuff') from order_items where order_id = '{order}'") == "Collar a little higher|Cufflinks provided")
     check(f"{tag} the thobes keep their metres, cuff, pocket and the long notes", float(m_) == float(metres) + 0.5 and cuff_ == "true" and pocket_ == "true" and notes_ == "Pocket on the left\nLooser sleeves", line)
+    # The sale page (from Sales, the invoice view) and the Sales list both offer the thobe print.
+    tnum = sql(f"select number from orders where id = '{order}'")
+    page.goto(ADMIN + f"/orders/{order}?view=invoice"); page.wait_for_timeout(1500)
+    on_sale = page.locator('[data-testid="print-thobe-sheet"]').count()
+    page.goto(ADMIN + "/sales"); page.wait_for_selector('[data-testid="sales-search"]', timeout=15000)
+    page.fill('[data-testid="sales-search"]', tnum); page.wait_for_timeout(1800)
+    check(f"{tag} a sale with thobes has the thobe print on its sale page and in the Sales list",
+          on_sale == 1 and page.locator(f'[data-testid="print-thobe-{tnum}"]').count() == 1, f"{on_sale} {tnum}")
     sheet = page.context.new_page()
     sheet.add_init_script("window.print = () => {}")
     sheet.goto(ADMIN + f"/print/order/{order}"); sheet.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); sheet.wait_for_timeout(1500)

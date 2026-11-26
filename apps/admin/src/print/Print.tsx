@@ -93,7 +93,7 @@ function Receipt({ r, biz }: { r: any; biz: Biz }) {
       <div className="hr" />
       <div className="c strong">{r.unpaid ? t('Bill · not paid yet', 'فاتورة · لم تُدفع بعد') : <>{t('Tax invoice', 'فاتورة')} #{r.number}</>}</div>
       <div className="c">{dateTime(r.created_at)} · {L({ name_en: r.branch_en, name_ar: r.branch_ar })}</div>
-      {r.customer_name ? <div className="c">{r.customer_name}{r.phone ? ` · ${phone(r.phone)}` : ''}</div> : null}
+      {r.customer_name ? <div className="c">{r.customer_name}{r.phone ? <> · <bdi dir="ltr">{phone(r.phone)}</bdi></> : null}</div> : null}
       <div className="c">{t('Served by', 'الموظف')}: {r.staff_name ?? '—'}</div>
       <div className="hr" />
       <table>
@@ -140,7 +140,7 @@ function Invoice({ r, biz, title, number, dateText, valid }: { r: any; biz: Biz;
       </div>
       <div className="hr" />
       <div className="row spread">
-        <div>{t('Customer', 'العميل')}: <b>{r.customer_name ?? t('Walk-in', 'زبون')}</b>{r.phone ? ` · ${phone(r.phone)}` : ''}</div>
+        <div>{t('Customer', 'العميل')}: <b>{r.customer_name ?? t('Walk-in', 'زبون')}</b>{r.phone ? <> · <bdi dir="ltr">{phone(r.phone)}</bdi></> : null}</div>
         <div>{L({ name_en: r.branch_en, name_ar: r.branch_ar })}</div>
       </div>
       <table style={{ marginTop: 10 }}>
@@ -202,7 +202,7 @@ function Ticket({ r, biz }: { r: any; biz: Biz }) {
       <div className="c">{L(biz.company)} · {L({ name_en: r.branch_en, name_ar: r.branch_ar })}</div>
       <div className="c">{t('Ordered', 'تاريخ الطلب')} {date(r.created_at)} · <b>{t('Ready by', 'التسليم')} {date(r.expected_delivery)}</b></div>
       {r.service_en ? <div className="c strong">{L({ name_en: r.service_en, name_ar: r.service_ar })}</div> : null}
-      <div className="c">{r.customer_name} · {phone(r.phone)}</div>
+      <div className="c">{r.customer_name} · <bdi dir="ltr">{phone(r.phone)}</bdi></div>
       <div className="c" dangerouslySetInnerHTML={{ __html: code128Svg(r.number, 50, 10) }} />
       {members.map((m) => {
         const meas = r.measurements.find((x: any) => x.member_id === m?.id);
@@ -252,7 +252,7 @@ function ThobeSheet({ r, biz }: { r: any; biz: Biz }) {
       </div>
       <div className="hr" />
       <div className="row spread">
-        <div>{t('Customer', 'العميل')}: <b>{r.customer_name ?? t('Walk-in', 'زبون')}</b>{r.phone ? <> · <span className="ltr">{phone(r.phone)}</span></> : null}</div>
+        <div>{t('Customer', 'العميل')}: <b>{r.customer_name ?? t('Walk-in', 'زبون')}</b>{r.phone ? <> · <bdi dir="ltr">{phone(r.phone)}</bdi></> : null}</div>
         <div>{t('Thobes', 'الثياب')}: <b className="num">{count}</b></div>
       </div>
 
@@ -260,10 +260,13 @@ function ThobeSheet({ r, biz }: { r: any; biz: Biz }) {
         const th = i.snapshot.thobe ?? {};
         const notes = th.style_notes ?? {};
         const meas = r.measurements?.find((x: any) => x.member_id === i.snapshot.member?.id);
+        // The styles as the counter chose them: the picture, the name and the remarks written against each.
+        const styles: { key: string; label: string; name: string; img: string | null; note?: string }[] = [
+          { key: 'collar', label: t('Collar', 'الياقة'), name: L(th.collar), img: th.collar?.image_url ? mediaUrl(th.collar.image_url) : null, note: notes.collar },
+          { key: 'cuff', label: t('Cuff', 'الكبك'), name: th.cuff ? L(th.cuff) : '—', img: th.cuff?.image_url ? mediaUrl(th.cuff.image_url) : null, note: notes.cuff },
+          { key: 'pocket', label: t('Pocket', 'الجيب'), name: th.pocket ? t('Chest pocket', 'جيب صدر') : t('No pocket', 'بدون جيب'), img: th.pocket ? `${window.location.origin}/thobe/pocket.png` : null, note: notes.pocket },
+        ];
         const rows: [string, ReactNode, string?][] = [
-          [t('Collar', 'الياقة'), L(th.collar), notes.collar],
-          [t('Cuff', 'الكبك'), th.cuff ? L(th.cuff) : '—', notes.cuff],
-          [t('Pocket', 'الجيب'), th.pocket ? t('Chest pocket', 'جيب صدر') : t('No pocket', 'بدون جيب'), notes.pocket],
           [t('Cloth', 'القماش'), L(th.fabric)],
           [t('Cloth length', 'طول القماش'), th.metres ? `${th.metres} ${t('m', 'م')}` : '—'],
           [t('Thobes', 'عدد الثياب'), String(i.qty)],
@@ -276,6 +279,18 @@ function ThobeSheet({ r, biz }: { r: any; biz: Biz }) {
             <div className="order-thobe-body">
               <ThobePreview m={meas ?? {}} collar={th.collar} cuff={th.cuff} pocket={th.pocket === true} className="print" />
               <div className="stack" style={{ gap: 8 }}>
+                <div className="sheet-styles">
+                  {styles.map((st) => (
+                    <div key={st.key} className="sheet-style" data-testid={`sheet-style-${st.key}`}>
+                      <div className="sheet-style-pic">{st.img ? <img src={st.img} alt="" /> : null}</div>
+                      <div>
+                        <div className="small">{st.label}</div>
+                        <div className="strong">{st.name}</div>
+                        <div className="sheet-style-note" data-testid="sheet-style-note">{st.note ?? ''}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
                 <table>
                   <tbody>
                     {rows.map(([a, b, note]) => (
@@ -435,7 +450,7 @@ export default function Print() {
           <div className="c strong" style={{ fontSize: '1.3em' }}>{t('Measurements', 'المقاسات')}</div>
           <div className="c">{L(b.company)}</div>
           <div className="c strong">{m.name} · {RELATION[m.relation]}</div>
-          <div className="c">{m.customer_name} · {phone(m.phone)}</div>
+          <div className="c">{m.customer_name} · <bdi dir="ltr">{phone(m.phone)}</bdi></div>
           <div className="hr" />
           {m.latest ? <><MeasureTable m={m.latest} /><div>{date(m.latest.taken_at)} · {m.latest.tailor_name}{m.latest.remarks ? ` · ${m.latest.remarks}` : ''}</div></> : <div>{t('No measurements yet', 'لا توجد مقاسات')}</div>}
         </div>
@@ -468,6 +483,29 @@ export default function Print() {
         );
     }
   }
+  // The page title is the file name a saved PDF gets: what it is, the order number and the customer.
+  const cart = kind.startsWith('cart-') ? JSON.parse(localStorage.getItem(CART_PRINT_KEY) ?? 'null') : null;
+  const o = order.data ?? cart;
+  const who = o?.customer_name ? ` - ${o.customer_name}` : '';
+  const no = o?.number ? ` ${o.number}` : '';
+  const title =
+    kind === 'receipt' ? `${t('Receipt', 'إيصال')}${no}${who}`
+    : kind === 'invoice' ? `${t('Invoice', 'فاتورة')}${no}${who}`
+    : kind === 'order' ? `${t('Thobe sheet', 'ورقة الثوب')}${no}${who}`
+    : kind === 'ticket' ? `${t('Tailor ticket', 'ورقة الخياط')}${no}${who}`
+    : kind === 'cart-receipt' ? `${t('Bill', 'فاتورة')}${who} ${o ? date(o.created_at) : ''}`.trim()
+    : kind === 'cart-thobe' ? `${t('Thobe sheet', 'ورقة الثوب')}${who} ${o ? date(o.created_at) : ''}`.trim()
+    : kind === 'quotation' && draft.data ? `${draft.data.kind === 'quotation' ? t('Quotation', 'عرض سعر') : t('Draft', 'مسودة')} ${draft.data.number}`
+    : kind === 'measure' && member.data ? `${t('Measurements', 'المقاسات')} - ${member.data.name}`
+    : kind === 'purchase' && purchase.data ? `${t('Purchase', 'أمر شراء')} ${purchase.data.number}`
+    : kind === 'register' ? t('Register', 'الصندوق')
+    : kind === 'labels' ? t('Labels', 'الملصقات')
+    : t('Print', 'طباعة');
+  useEffect(() => {
+    const before = document.title;
+    document.title = title;
+    return () => { document.title = before; };
+  }, [title]);
   useAutoPrint(ready);
   return (
     <div style={{ background: '#fff', minHeight: '100vh' }}>

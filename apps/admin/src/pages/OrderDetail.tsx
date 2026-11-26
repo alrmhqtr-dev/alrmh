@@ -149,7 +149,7 @@ export default function OrderDetail() {
       >
         <button className="btn secondary" onClick={() => openPrint(`receipt/${o.id}`)}><Receipt size={16} /> {t('Receipt', 'إيصال')}</button>
         <button className="btn secondary" onClick={() => openPrint(`invoice/${o.id}`)}><Printer size={16} /> {t('Invoice', 'فاتورة')}</button>
-        {isThobe && !invoice ? <button className="btn secondary" data-testid="print-thobe-sheet" onClick={() => openPrint(`order/${o.id}`)}><Ruler size={16} /> {t('Thobe sheet (A4)', 'ورقة الثوب A4')}</button> : null}
+        {isThobe ? <button className="btn secondary" data-testid="print-thobe-sheet" onClick={() => openPrint(`order/${o.id}`)}><Ruler size={16} /> {t('Thobe sheet (A4)', 'ورقة الثوب A4')}</button> : null}
         {isThobe && !invoice ? <button className="btn secondary" onClick={() => openPrint(`ticket/${o.id}`)}><Ruler size={16} /> {t('Tailor ticket', 'ورقة الخياط')}</button> : null}
         {invoice ? <Link className="btn ghost" to={`/orders/${o.id}`}>{t('Open the order', 'فتح الطلب')}</Link> : null}
         {next && can('workshop') && !invoice ? (

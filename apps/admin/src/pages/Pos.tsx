@@ -56,28 +56,15 @@ type SaleResult = { orderId: string; number: string; total: number; paid: number
 
 const key = () => Math.random().toString(36).slice(2);
 
-/** Who the sale is for, in the sale panel: the customer with a way to change, or a sale without one. */
-function SaleCustomer({ customer, walkIn, setWalkIn, onChange }: { customer: Cust | null; walkIn: { name: string; phone: string }; setWalkIn: (w: { name: string; phone: string }) => void; onChange: () => void }) {
-  if (customer)
-    return (
-      <div className="row spread" data-testid="pos-customer">
-        <div>
-          <bdi className="strong">{customer.name}</bdi>
-          <div className="small secondary num">{phone(customer.phone)}</div>
-        </div>
-        <button className="btn sm ghost" data-testid="pos-change-customer" onClick={onChange}>{t('Change', 'تغيير')}</button>
-      </div>
-    );
+/** Who the sale is for, in the sale panel, with a way to change. Every sale has a customer. */
+function SaleCustomer({ customer, onChange }: { customer: Cust; onChange: () => void }) {
   return (
-    <div className="stack" style={{ gap: 8 }} data-testid="pos-walk-in">
-      <div className="row spread">
-        <span className="strong">{t('Sale without a customer', 'بيع بدون عميل')}</span>
-        <button className="btn sm ghost" data-testid="pos-choose-customer" onClick={onChange}>{t('Add customer', 'إضافة عميل')}</button>
+    <div className="row spread" data-testid="pos-customer">
+      <div>
+        <bdi className="strong">{customer.name}</bdi>
+        <div className="small secondary num">{phone(customer.phone)}</div>
       </div>
-      <div className="grid k2" style={{ gap: 8 }}>
-        <Input placeholder={t('Name (optional)', 'الاسم (اختياري)')} value={walkIn.name} onChange={(e) => setWalkIn({ ...walkIn, name: e.target.value })} />
-        <Input placeholder={t('Mobile (optional)', 'الجوال (اختياري)')} dir="ltr" value={walkIn.phone} onChange={(e) => setWalkIn({ ...walkIn, phone: e.target.value })} />
-      </div>
+      <button className="btn sm ghost" data-testid="pos-change-customer" onClick={onChange}>{t('Change', 'تغيير')}</button>
     </div>
   );
 }
@@ -199,8 +186,6 @@ export default function Pos() {
   const [sizeFor, setSizeFor] = useState<Items['products'][number] | null>(null);
   const [customer, setCustomer] = useState<Cust | null>(null);
   const [walkIn, setWalkIn] = useState({ name: '', phone: '' });
-  // A sale starts by choosing a new or existing customer; this is set when staff choose to sell without one.
-  const [walkInMode, setWalkInMode] = useState(false);
   const [lines, setLines] = useState<Line[]>([]);
   const [orderDiscount, setOrderDiscount] = useState<{ kind: 'percent' | 'fixed'; amount: string }>({ kind: 'fixed', amount: '' });
   const [points, setPoints] = useState('');
@@ -244,7 +229,6 @@ export default function Pos() {
     const c = d.cart;
     setLines((c.lines ?? []).map((l: any) => ({ ...l, key: key() })));
     if (c.customerId) setCustomer({ id: c.customerId, name: d.customer_name, phone: d.phone });
-    else setWalkInMode(true);
     setWalkIn({ name: c.walkInName ?? '', phone: c.walkInPhone ?? '' });
     setNotes(c.notes ?? '');
     if (c.branchId) setBranchId(c.branchId);
@@ -287,7 +271,6 @@ export default function Pos() {
   const reset = () => {
     setLines([]);
     setCustomer(null);
-    setWalkInMode(false);
     setWalkIn({ name: '', phone: '' });
     setOrderDiscount({ kind: 'fixed', amount: '' });
     setPoints('');
@@ -426,8 +409,9 @@ export default function Pos() {
           </select>
         </div>
       </div>
-      {!customer && !walkInMode && !fromParam && !draftId ? (
-        <CustomerStart onPick={(c) => { setCustomer(c); setPoints(''); setDeliver(''); }} onWalkIn={() => setWalkInMode(true)} />
+      {/* Every sale starts with the customer: new or existing. A draft keeps its basket while one is chosen. */}
+      {!customer && !fromParam && !(draftId && draft.isLoading) ? (
+        <CustomerStart onPick={(c) => { setCustomer(c); setPoints(''); setDeliver(''); }} />
       ) : (
       <>
       {/* While making thobes the sale stays out of the way until something is in it. */}
@@ -480,7 +464,7 @@ export default function Pos() {
 
         <div className="pos-cart">
           <div className="card pad stack">
-            <SaleCustomer customer={customer} walkIn={walkIn} setWalkIn={setWalkIn} onChange={() => { setCustomer(null); setWalkInMode(false); setPoints(''); setDeliver(''); }} />
+            {customer ? <SaleCustomer customer={customer} onChange={() => { setCustomer(null); setPoints(''); setDeliver(''); }} /> : null}
             {cust.data ? (
               <div className="small secondary">{L(cust.data.tier.tier)} · {t('points', 'النقاط')} <b className="num">{num(cust.data.balance)}</b></div>
             ) : null}
@@ -574,7 +558,7 @@ export default function Pos() {
               <button className="btn secondary" data-testid="save-quotation" disabled={!lines.length || save.isPending} onClick={() => save.mutate('quotation')}>{t('Quotation', 'عرض سعر')}</button>
             </div>
             {mode !== 'draft' && mode !== 'quotation' ? (
-              <button className="btn big-btn" data-testid="pay" disabled={!q || Boolean(quoteError) || Boolean(q.stockError) || Boolean(reg.data && !reg.data.open && reg.data.required)} onClick={() => setPaying(true)}>
+              <button className="btn big-btn" data-testid="pay" disabled={!q || !customer || Boolean(quoteError) || Boolean(q.stockError) || Boolean(reg.data && !reg.data.open && reg.data.required)} onClick={() => setPaying(true)}>
                 {t('Pay', 'الدفع')} {q ? money(q.total) : ''}
               </button>
             ) : null}
