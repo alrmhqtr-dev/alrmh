@@ -23,8 +23,8 @@ const fromLatest = (m: Member) => (m.latest ? Object.fromEntries(MEASURE_KEYS.ma
 
 /**
  * Thobes at the counter for the sale's customer. The thobe page: who they're for (with a Measurements
- * button), the cloth and how many, the preview, and every collar, cuff and detail with a remarks box.
- * Measurements have their own screen, opened from that button.
+ * button), the cloth and how many, and every collar, cuff and detail with a remarks box.
+ * The measurements and the preview have their own screen, opened from that button.
  */
 export function ThobeDesk({
   items,
@@ -250,9 +250,8 @@ export function ThobeDesk({
           </div>
         </div>
       </div>
-      {/* The preview, and under it every collar, cuff and detail with its own remarks. */}
+      {/* Every collar, cuff and detail with its own remarks. The preview is with the measurements, on their own screen. */}
       <aside className="thobe-desk-preview stack">
-        <ThobePreview m={meas} collar={drawn.collar} cuff={drawn.cuff} pocket={drawn.pocket} />
         <div className="card pad">
           <StyleRemarks options={items} notes={notes} onChange={(k, v) => setNotes((n) => ({ ...n, [k]: v }))} />
         </div>

@@ -175,8 +175,9 @@ def counter(browser, lang, email, password):
     live = prev.locator('[data-testid="preview-waist_cm"]').text_content()
     page.fill('[data-testid="thobe-m-waist_cm"]', "98")
     page.screenshot(path=f"{SHOTS}/pos-thobe-measure-{lang}.png", full_page=True)
-    check(f"{tag} the measurements screen marks them on the preview as they're typed",
-          live == "97" and prev.locator('[data-testid="preview-waist_cm"]').text_content() == "98" and prev.locator('[data-testid="preview-chest_cm"]').text_content() == "108")
+    check(f"{tag} the measurements screen has the preview: marked as they're typed, with the collar, cuff and pocket written up",
+          live == "97" and prev.locator('[data-testid="preview-waist_cm"]').text_content() == "98" and prev.locator('[data-testid="preview-chest_cm"]').text_content() == "108"
+          and all(prev.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket")))
     page.click('[data-testid="thobe-m-save"]'); page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(800)
     saved = sql(f"select count(*) || ':' || max(waist_cm)::float from measurements m join family_members f on f.id = m.member_id join customers c on c.id = f.customer_id where c.phone = '+974{phone}'")
     metres = page.input_value('[data-testid="thobe-metres"]')
@@ -184,13 +185,11 @@ def counter(browser, lang, email, password):
     page.fill('[data-testid="thobe-qty"]', "2")
     page.fill('[data-testid="thobe-remarks"]', "Pocket on the left\nLooser sleeves")
     page.screenshot(path=f"{SHOTS}/pos-thobe-{lang}.png", full_page=True)
-    prev = page.locator('[data-testid="thobe-preview"]')
     check(f"{tag} saving measurements returns to the thobe page; thobes couldn't be added before",
           saved == "1:98" and add_off and not page.locator('[data-testid="thobe-add"]').is_disabled()
           and "Not taken" not in page.locator('[data-testid="thobe-measured-on"]').inner_text(), saved)
-    check(f"{tag} the preview draws the collar, cuff and pocket written up, with the measurements; the cloth length + adds 0.5 m",
-          all(prev.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket"))
-          and prev.locator('[data-testid="preview-chest_cm"]').text_content() == "108" and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)
+    check(f"{tag} the thobe page has no preview (it's with the measurements); the cloth length + adds 0.5 m",
+          page.locator('[data-testid="thobe-preview"]').count() == 0 and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)
     page.click('[data-testid="thobe-add"]')
     page.wait_for_selector('[data-testid="print-cart-thobe"]', timeout=15000)
     page.wait_for_timeout(1200)
