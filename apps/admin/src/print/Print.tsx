@@ -280,9 +280,13 @@ function ThobeSheet({ r, biz, options }: { r: any; biz: Biz; options?: StyleOpti
         ];
         return (
           <section key={i.id} className="order-thobe" data-testid={`order-thobe-${k}`}>
-            <div className="strong" style={{ fontSize: 15 }}>
-              {thobes.length > 1 ? `${k + 1}. ` : ''}{i.snapshot.member?.name ?? r.customer_name}{i.snapshot.member?.relation && i.snapshot.member.relation !== 'self' ? ` · ${RELATION[i.snapshot.member.relation] ?? ''}` : ''}
-            </div>
+            {/* The customer's name is in the header; a heading only for a family member's thobe, or to number several. */}
+            {thobes.length > 1 || (i.snapshot.member?.relation && i.snapshot.member.relation !== 'self') ? (
+              <div className="strong" style={{ fontSize: 15 }} data-testid={`order-thobe-head-${k}`}>
+                {thobes.length > 1 ? `${k + 1}. ` : ''}
+                {i.snapshot.member?.relation && i.snapshot.member.relation !== 'self' ? `${i.snapshot.member.name} · ${RELATION[i.snapshot.member.relation] ?? ''}` : t('Thobe', 'ثوب')}
+              </div>
+            ) : null}
             <div className="order-thobe-body">
               <ThobePreview m={meas ?? {}} collar={th.collar} cuff={th.cuff} pocket={th.pocket === true} className="print" />
               <div className="stack" style={{ gap: 8 }}>

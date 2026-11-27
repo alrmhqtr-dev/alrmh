@@ -48,8 +48,8 @@ export function ThobePreview({ m, collar, cuff, pocket, className }: { m?: Previ
             <Measure field="neck_cm" value={m.neck_cm} x1={FX + 150} y1={30} x2={FX + 190} y2={14} lx={FX + 222} ly={8} />
             <Measure field="chest_cm" value={m.chest_cm} x1={FX + 64} y1={130} x2={FX + 186} y2={130} lx={FX + 124} ly={156} />
             <Measure field="waist_cm" value={m.waist_cm} x1={FX + 62} y1={300} x2={FX + 194} y2={300} lx={FX + 128} ly={300} />
-            <Measure field="cuff_cm" value={m.cuff_cm} x1={FX + 70} y1={214} x2={FX + 40} y2={262} lx={FX + 36} ly={284} />
-            <Measure field="length_cm" value={m.length_cm} x1={FX + 250} y1={42} x2={FX + 250} y2={527} lx={FX + 250} ly={285} />
+            <Measure field="cuff_cm" value={m.cuff_cm} x1={FX + 70} y1={214} x2={FX + 34} y2={248} lx={FX + 20} ly={266} />
+            <Measure field="length_cm" value={m.length_cm} x1={FX + 250} y1={42} x2={FX + 250} y2={527} lx={FX + 250} ly={430} />
           </>
         ) : null}
       </svg>
