@@ -10,6 +10,7 @@ import { receiptUrl } from '../lib/whatsapp';
 import { LABELS_KEY } from '../pages/Labels';
 import { CART_PRINT_KEY } from './cart';
 import { ThobePreview } from '../thobe-preview';
+import { styleGroups, type StyleOptions } from '../thobe-options';
 
 type Biz = { company: any; invoice: any; barcode: any; printing: any };
 
@@ -57,7 +58,7 @@ function Head({ biz, compact }: { biz: Biz; compact?: boolean }) {
 
 const itemName = (i: any) =>
   i.kind === 'thobe'
-    ? `${t('Thobe', 'ثوب')} · ${L(i.snapshot.thobe?.collar)}${i.snapshot.thobe?.cuff ? ` · ${L(i.snapshot.thobe.cuff)}` : ''} · ${L(i.snapshot.thobe?.fabric)}${i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}${i.snapshot.thobe?.pocket ? ` · ${t('pocket', 'جيب')}` : ''}`
+    ? `${t('Thobe', 'ثوب')}${i.snapshot.thobe?.collar ? ` · ${L(i.snapshot.thobe.collar)}` : ''}${i.snapshot.thobe?.cuff ? ` · ${L(i.snapshot.thobe.cuff)}` : ''} · ${L(i.snapshot.thobe?.fabric)}${i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}${i.snapshot.thobe?.pocket ? ` · ${t('pocket', 'جيب')}` : ''}`
     : i.kind === 'product'
       ? `${L(i.snapshot.product)}${i.snapshot.size ? ` · ${i.snapshot.size}` : ''}`
       : t('Sale', 'مبيعات');
@@ -184,8 +185,20 @@ function MeasureTable({ m }: { m: any }) {
   );
 }
 
+/** The remarks written against one option on a thobe; on orders from before 27 Nov, the chosen collar, cuff and pocket. */
+function noteFor(th: any, kind: string, id: string): string {
+  const n = th?.style_notes ?? {};
+  if (n[`${kind}:${id}`]) return n[`${kind}:${id}`];
+  if (Object.keys(n).some((k) => k.includes(':'))) return '';
+  if (kind === 'collar' && th?.collar?.id === id) return n.collar || '✓';
+  if (kind === 'cuff' && th?.cuff?.id === id) return n.cuff || '✓';
+  if (kind === 'detail' && id === 'pocket' && th?.pocket) return n.pocket || '✓';
+  return '';
+}
+
 /** Remarks the counter wrote against the collar, cuff and pocket. */
-function StyleNotesLine({ n }: { n?: { collar?: string; cuff?: string; pocket?: string } | null }) {
+function StyleNotesLine({ n, list }: { n?: Record<string, string> | null; list?: { name_en: string; name_ar: string; note: string }[] | null }) {
+  if (list?.length) return <>{list.map((x, i) => <div key={i}>{L(x)}: {x.note}</div>)}</>;
   if (!n) return null;
   const parts: [string, string | undefined][] = [[t('Collar', 'الياقة'), n.collar], [t('Cuff', 'الكبك'), n.cuff], [t('Pocket', 'الجيب'), n.pocket]];
   return <>{parts.filter(([, v]) => v).map(([k, v]) => <div key={k}>{k}: {v}</div>)}</>;
@@ -212,8 +225,8 @@ function Ticket({ r, biz }: { r: any; biz: Biz }) {
             <div className="strong" style={{ fontSize: '1.15em' }}>{m?.name} · {RELATION[m?.relation] ?? ''}</div>
             {thobes.filter((i: any) => i.snapshot.member?.id === m?.id).map((i: any) => (
               <div key={i.id}>
-                <b>{i.qty} ×</b> {L(i.snapshot.thobe?.collar)}{i.snapshot.thobe?.cuff ? ` · ${t('cuff', 'كبك')} ${L(i.snapshot.thobe.cuff)}` : ''} · {L(i.snapshot.thobe?.fabric)}{i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}{i.snapshot.thobe?.pocket ? ` · ${t('chest pocket', 'جيب صدر')}` : ''}
-                <StyleNotesLine n={i.snapshot.thobe?.style_notes} />
+                <b>{i.qty} ×</b> {i.snapshot.thobe?.collar ? `${L(i.snapshot.thobe.collar)} · ` : ''}{i.snapshot.thobe?.cuff ? `${t('cuff', 'كبك')} ${L(i.snapshot.thobe.cuff)} · ` : ''}{L(i.snapshot.thobe?.fabric)}{i.snapshot.thobe?.metres ? ` · ${i.snapshot.thobe.metres} ${t('m', 'م')}` : ''}{i.snapshot.thobe?.pocket ? ` · ${t('chest pocket', 'جيب صدر')}` : ''}
+                <StyleNotesLine n={i.snapshot.thobe?.style_notes} list={i.snapshot.thobe?.style_remarks} />
                 {i.snapshot.remarks ? <div>{t('Note', 'ملاحظة')}: {i.snapshot.remarks}</div> : null}
               </div>
             ))}
@@ -232,7 +245,7 @@ function Ticket({ r, biz }: { r: any; biz: Biz }) {
 }
 
 /** The thobe record on A4: each thobe drawn with its collar, cuff, pocket and the measurements marked, the styles with their remarks, and the measurements in full. No prices: that's the receipt and the invoice. */
-function ThobeSheet({ r, biz }: { r: any; biz: Biz }) {
+function ThobeSheet({ r, biz, options }: { r: any; biz: Biz; options?: StyleOptions }) {
   const thobes = r.items.filter((i: any) => i.kind === 'thobe');
   const count = thobes.reduce((n: number, i: any) => n + i.qty, 0);
   return (
@@ -260,13 +273,7 @@ function ThobeSheet({ r, biz }: { r: any; biz: Biz }) {
         const th = i.snapshot.thobe ?? {};
         const notes = th.style_notes ?? {};
         const meas = r.measurements?.find((x: any) => x.member_id === i.snapshot.member?.id);
-        // The styles as the counter chose them: the picture, the name and the remarks written against each.
-        const styles: { key: string; label: string; name: string; img: string | null; note?: string }[] = [
-          { key: 'collar', label: t('Collar', 'الياقة'), name: L(th.collar), img: th.collar?.image_url ? mediaUrl(th.collar.image_url) : null, note: notes.collar },
-          { key: 'cuff', label: t('Cuff', 'الكبك'), name: th.cuff ? L(th.cuff) : '—', img: th.cuff?.image_url ? mediaUrl(th.cuff.image_url) : null, note: notes.cuff },
-          { key: 'pocket', label: t('Pocket', 'الجيب'), name: th.pocket ? t('Chest pocket', 'جيب صدر') : t('No pocket', 'بدون جيب'), img: th.pocket ? `${window.location.origin}/thobe/pocket.png` : null, note: notes.pocket },
-        ];
-        const rows: [string, ReactNode, string?][] = [
+        const rows: [string, ReactNode][] = [
           [t('Cloth', 'القماش'), L(th.fabric)],
           [t('Cloth length', 'طول القماش'), th.metres ? `${th.metres} ${t('m', 'م')}` : '—'],
           [t('Thobes', 'عدد الثياب'), String(i.qty)],
@@ -279,24 +286,12 @@ function ThobeSheet({ r, biz }: { r: any; biz: Biz }) {
             <div className="order-thobe-body">
               <ThobePreview m={meas ?? {}} collar={th.collar} cuff={th.cuff} pocket={th.pocket === true} className="print" />
               <div className="stack" style={{ gap: 8 }}>
-                <div className="sheet-styles">
-                  {styles.map((st) => (
-                    <div key={st.key} className="sheet-style" data-testid={`sheet-style-${st.key}`}>
-                      <div className="sheet-style-pic">{st.img ? <img src={st.img} alt="" /> : null}</div>
-                      <div>
-                        <div className="small">{st.label}</div>
-                        <div className="strong">{st.name}</div>
-                        <div className="sheet-style-note" data-testid="sheet-style-note">{st.note ?? ''}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
                 <table>
                   <tbody>
-                    {rows.map(([a, b, note]) => (
+                    {rows.map(([a, b]) => (
                       <tr key={a}>
                         <td>{a}</td>
-                        <td className="e"><b>{b}</b>{note ? <div className="small" data-testid="sheet-style-note">{note}</div> : null}</td>
+                        <td className="e"><b>{b}</b></td>
                       </tr>
                     ))}
                   </tbody>
@@ -311,6 +306,21 @@ function ThobeSheet({ r, biz }: { r: any; biz: Biz }) {
                 ) : <div className="strong">{t('No measurements yet', 'لا توجد مقاسات بعد')}</div>}
               </div>
             </div>
+            {/* Every collar, cuff and detail, its picture and the remarks written against it (blank where none). */}
+            {options ? (
+              <div className="sheet-options" data-testid="sheet-options">
+                {styleGroups(options).map((g) => (
+                  <div key={g.kind} className={`sheet-group ${g.tone}`}>
+                    {g.items.map((s) => (
+                      <div key={s.id} className="sheet-option" data-testid={`sheet-${g.kind}-${s.id}`}>
+                        <div className="sheet-option-pic">{s.image_url ? <img src={mediaUrl(s.image_url)} alt="" /> : null}<span>{L(s)}</span></div>
+                        <div className="sheet-option-note">{noteFor(th, g.kind, s.id)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </section>
         );
       })}
@@ -404,6 +414,7 @@ export default function Print() {
   const draft = useQuery({ queryKey: ['draft', id], queryFn: () => api<any>(`/drafts/${id}`), enabled: kind === 'quotation' });
   const member = useQuery({ queryKey: ['member', id], queryFn: () => api<any>(`/members/${id}`), enabled: kind === 'measure' });
   const reg = useQuery({ queryKey: ['register-print', id], queryFn: () => api<any>(`/registers/${id}`), enabled: kind === 'register' });
+  const styles = useQuery({ queryKey: ['pos-items'], queryFn: () => api<StyleOptions>('/pos/items'), enabled: kind === 'order' || kind === 'cart-thobe' });
   const purchase = useQuery({ queryKey: ['purchase', id], queryFn: () => api<any>(`/purchases/${id}`), enabled: kind === 'purchase' });
   const b = biz.data;
   let body: ReactNode = null;
@@ -415,9 +426,9 @@ export default function Print() {
     } else if (kind === 'invoice' && order.data) {
       ready = true;
       body = <Invoice r={order.data} biz={b} title={t('Invoice', 'فاتورة')} number={order.data.number} dateText={dateTime(order.data.created_at)} />;
-    } else if (kind === 'order' && order.data) {
+    } else if (kind === 'order' && order.data && !styles.isLoading) {
       ready = true;
-      body = <ThobeSheet r={order.data} biz={b} />;
+      body = <ThobeSheet r={order.data} biz={b} options={styles.data} />;
     } else if (kind === 'ticket' && order.data) {
       ready = true;
       body = Array.from({ length: b.printing.ticket_copies || 1 }, (_, i) => <div key={i} style={{ breakAfter: 'page' }}><Ticket r={order.data} biz={b} /></div>);
@@ -464,8 +475,8 @@ export default function Print() {
     } else if (kind === 'cart-receipt' || kind === 'cart-thobe') {
       // A sale on the POS screen that isn't paid yet.
       const r = JSON.parse(localStorage.getItem(CART_PRINT_KEY) ?? 'null');
-      ready = Boolean(r);
-      body = !r ? null : kind === 'cart-receipt' ? <Receipt r={r} biz={b} /> : <ThobeSheet r={r} biz={b} />;
+      ready = Boolean(r) && (kind === 'cart-receipt' || !styles.isLoading);
+      body = !r || !ready ? null : kind === 'cart-receipt' ? <Receipt r={r} biz={b} /> : <ThobeSheet r={r} biz={b} options={styles.data} />;
     } else if (kind === 'labels') {
       ready = true;
       body = <Labels biz={b} />;

@@ -126,9 +126,7 @@ def journey(browser, lang, method, phone, name, reorder):
     for k, v in {"length_cm": 149, "shoulder_cm": 47, "chest_cm": 111, "waist_cm": 102, "sleeve_cm": 62, "neck_cm": 41, "cuff_cm": 24}.items():
         admin.fill(f'[data-testid="m-{k}"]', str(v))
     admin.click('[data-testid="measure-save"]'); admin.wait_for_timeout(1500)
-    admin.click(f'[data-testid="appt-order-{name}"]'); admin.wait_for_selector('[data-testid="po-type-0-classic-qatari"]', timeout=15000)
-    admin.click('[data-testid="po-type-0-classic-qatari"]')
-    admin.click('[data-testid="po-cuff-0-double"]')
+    admin.click(f'[data-testid="appt-order-{name}"]'); admin.wait_for_selector('[data-testid="style-note-collar-classic-qatari"]', timeout=15000)
     admin.select_option('[data-testid="po-cloth-0"]', "japanese-cotton")
     start = admin.input_value('[data-testid="po-metres-0"]')
     admin.click('[data-testid="po-metres-0-more"]'); admin.click('[data-testid="po-metres-0-less"]'); admin.click('[data-testid="po-metres-0-less"]')
@@ -137,8 +135,9 @@ def journey(browser, lang, method, phone, name, reorder):
     check(f"{tag}: the cloth length starts at the usual {fabric['metres']} m and the buttons move 0.5 m",
           float(start) == fabric["metres"] and float(stepped) == fabric["metres"] - 0.5, f"{start} {stepped}")
     admin.fill('[data-testid="po-qty-0"]', "2")
-    admin.fill('[data-testid="po-type-0-note"]', "Stiffer collar")
-    admin.click('[data-testid="po-pocket-0-yes"]'); admin.fill('[data-testid="po-pocket-0-note"]', "Pen slot inside")
+    admin.fill('[data-testid="style-note-collar-classic-qatari"]', "Stiffer collar")
+    admin.fill('[data-testid="style-note-detail-pen"]', "Pen slot inside")
+    admin.fill('[data-testid="style-note-cuff-double"]', "Cufflinks")
     total = round(fabric["price_per_metre"] * 3.75, 2) * 2
     po_total = admin.locator('[data-testid="po-total"]').inner_text().replace(",", "")
     admin.check('[data-testid="po-paid"]'); admin.click('[data-testid="place-order"]')
@@ -148,7 +147,7 @@ def journey(browser, lang, method, phone, name, reorder):
     check(f"{tag}: staff place the order at the visit (2 thobes of 3.75 m, QAR {total:.2f}, card machine, to collect from the branch); it starts at Taking measurements",
           float("".join(ch for ch in po_total if ch.isdigit() or ch == ".")) == total and sql(f"select stage || ':' || total::numeric(10,2) from orders where id = '{order_id}'") == f"measured:{total:.2f}"
           and sql(f"select provider from payments where order_id = '{order_id}'") == "card_machine"
-          and sql(f"select (snapshot->'thobe'->'style_notes'->>'collar') || '|' || (snapshot->'thobe'->'style_notes'->>'pocket') from order_items where order_id = '{order_id}'") == "Stiffer collar|Pen slot inside", f"{po_total} {sql(f'select stage, total from orders where id = {chr(39)}{order_id}{chr(39)}')}")
+          and sql(f"select (snapshot->'thobe'->'style_notes'->>'collar:classic-qatari') || '|' || (snapshot->'thobe'->'style_notes'->>'detail:pen') || '|' || (snapshot->'thobe'->'collar'->>'id') from order_items where order_id = '{order_id}'") == "Stiffer collar|Pen slot inside|classic-qatari", f"{po_total} {sql(f'select stage, total from orders where id = {chr(39)}{order_id}{chr(39)}')}")
 
     page.goto(APP + "/orders"); page.wait_for_timeout(2500)
     check(f"{tag}: the order shows in the customer's app", number in text(page), text(page)[:300])

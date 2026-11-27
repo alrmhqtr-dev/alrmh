@@ -56,7 +56,7 @@ export class PosController {
   @UseGuards(AnyStaff)
   async items(@CurrentStaff() me: StaffUser, @Query('branch') branch?: string) {
     const branchId = uuidOrNull(branch) ?? me.branch_id ?? (await db.one('select id from branches where active order by sort limit 1'))?.id ?? null;
-    const [products, fabrics, collars, cuffs, categories, branches, stock] = await Promise.all([
+    const [products, fabrics, collars, cuffs, details, categories, branches, stock] = await Promise.all([
       db.many(
         `select p.id, p.sku, p.category, p.brand_id, p.name_en, p.name_ar, p.price::float as price, p.sizes, p.image_url, p.track_stock, p.alert_qty::float as alert_qty, u.short_name as unit
            from products p left join units u on u.id = p.unit_id where p.active order by p.category, p.sort, p.name_en`,
@@ -64,6 +64,7 @@ export class PosController {
       db.many('select id, sku, name_en, name_ar, price::float as price, track_stock, metres_per_thobe::float as metres_per_thobe from fabrics where active order by sort'),
       db.many('select id, name_en, name_ar, shape, image_url from collars where active order by sort'),
       db.many('select id, name_en, name_ar, image_url from cuffs where active order by sort'),
+      db.many('select id, name_en, name_ar, image_url from thobe_details where active order by sort'),
       db.many('select id, name_en, name_ar from categories where active order by sort, name_en'),
       db.many('select id, name_en, name_ar from branches where active order by sort'),
       db.many(
@@ -78,6 +79,7 @@ export class PosController {
       categories,
       collars,
       cuffs,
+      details,
       products: products.map((p) => ({
         ...p,
         stock: p.track_stock ? (p.sizes.length ? Object.fromEntries(p.sizes.map((s: string) => [s, level('product', p.id, s)])) : { '': level('product', p.id) }) : null,

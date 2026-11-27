@@ -19,14 +19,16 @@ export function CustomerStart({ onPick }: { onPick: (c: Cust) => void }) {
   const [q, setQ] = useState('');
   const [v, setV] = useState({ name: '', phone: '' });
   const [busy, setBusy] = useState(false);
+  const [taken, setTaken] = useState<Cust | null>(null);
   const found = useQuery({ queryKey: ['pos-customers', q], queryFn: () => api<Cust[]>(`/customers?q=${encodeURIComponent(q)}`), enabled: mode === 'existing' && q.trim().length >= 2 });
 
   const create = async () => {
     setBusy(true);
     try {
       const c = await api<Cust & { existing?: boolean }>('/customers', { body: { name: v.name.trim(), phone: v.phone } });
-      if (c.existing) toast(t('This mobile already has an account, so it was selected.', 'لهذا الرقم حساب مسبق فتم اختياره.'));
-      onPick({ id: c.id, name: c.name, phone: c.phone });
+      // A new customer must be new: an existing mobile is found under Existing customer instead.
+      if (c.existing) setTaken(c);
+      else onPick({ id: c.id, name: c.name, phone: c.phone });
     } catch (e) {
       toast(errorMessage(e), 'error');
     }
@@ -60,11 +62,16 @@ export function CustomerStart({ onPick }: { onPick: (c: Cust) => void }) {
       {mode === 'new' ? (
         <>
           <div className="grid k2">
-            <Field label={t('Mobile (8 digits)', 'الجوال (8 أرقام)')}><Input data-testid="start-phone" dir="ltr" inputMode="tel" autoFocus value={v.phone} onChange={(e) => setV({ ...v, phone: e.target.value })} /></Field>
+            <Field label={t('Mobile (8 digits)', 'الجوال (8 أرقام)')}><Input data-testid="start-phone" dir="ltr" inputMode="tel" autoFocus value={v.phone} aria-invalid={Boolean(taken)} onChange={(e) => { setTaken(null); setV({ ...v, phone: e.target.value }); }} /></Field>
             <Field label={t('Name', 'الاسم')}><Input data-testid="start-name" value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} /></Field>
           </div>
+          {taken ? (
+            <div className="note tone-error" role="alert" data-testid="start-taken">
+              {t(`This mobile already belongs to ${taken.name}. A new customer needs a new mobile; find them under Existing customer.`, `هذا الرقم مسجل باسم ${taken.name}. العميل الجديد يحتاج رقمًا جديدًا؛ ابحث عنه في العملاء الحاليين.`)}
+            </div>
+          ) : null}
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button className="btn" data-testid="start-continue" disabled={busy || !v.name.trim() || v.phone.replace(/\D/g, '').length < 8} onClick={create}>{t('Continue', 'متابعة')}</button>
+            <button className="btn" data-testid="start-continue" disabled={busy || Boolean(taken) || !v.name.trim() || v.phone.replace(/\D/g, '').length < 8} onClick={create}>{t('Continue', 'متابعة')}</button>
           </div>
         </>
       ) : (

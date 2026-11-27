@@ -185,11 +185,18 @@ export default function OrderDetail() {
                   <span className="num strong">{money(it.line_total)}</span>
                 </div>
                 <div className="grid k4">
-                  <div><div className="overline">{t('Collar', 'الياقة')}</div><div className="strong">{L(s.thobe?.collar)}</div>{s.thobe?.style_notes?.collar ? <div className="small secondary" dir="auto">{s.thobe.style_notes.collar}</div> : null}</div>
-                  <div>
-                    <div className="overline">{t('Cuff', 'الكبك')}</div><div className="strong">{s.thobe?.cuff ? L(s.thobe.cuff) : '—'}{s.thobe?.pocket ? <span className="small secondary"> · {t('chest pocket', 'جيب صدر')}</span> : null}</div>
-                    {s.thobe?.style_notes?.cuff ? <div className="small secondary" dir="auto">{s.thobe.style_notes.cuff}</div> : null}
-                    {s.thobe?.style_notes?.pocket ? <div className="small secondary" dir="auto">{t('Pocket', 'الجيب')}: {s.thobe.style_notes.pocket}</div> : null}
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <div className="overline">{t('Collar, cuff and details', 'الياقة والكبك والتفاصيل')}</div>
+                    {s.thobe?.style_remarks?.length ? (
+                      <div className="stack" style={{ gap: 2 }} data-testid={`style-remarks-${it.id}`}>
+                        {s.thobe.style_remarks.map((x: any, i: number) => <div key={i} className="small"><span className="strong">{L(x)}</span>: <span dir="auto">{x.note}</span></div>)}
+                      </div>
+                    ) : s.thobe?.collar && !Object.keys(s.thobe?.style_notes ?? {}).some((k) => k.includes(':')) ? (
+                      <div className="strong">
+                        {L(s.thobe.collar)}{s.thobe.cuff ? ` · ${L(s.thobe.cuff)}` : ''}{s.thobe.pocket ? ` · ${t('chest pocket', 'جيب صدر')}` : ''}
+                        {['collar', 'cuff', 'pocket'].map((k) => (s.thobe?.style_notes?.[k] ? <div key={k} className="small secondary" dir="auto">{s.thobe.style_notes[k]}</div> : null))}
+                      </div>
+                    ) : <div className="small secondary">{t('No remarks', 'لا ملاحظات')}</div>}
                   </div>
                   <div><div className="overline">{t('Cloth', 'القماش')}</div><div className="strong">{L(s.thobe?.fabric)}{s.thobe?.colour ? <span className="small secondary"> · {L(s.thobe.colour)}</span> : null}</div></div>
                   <div><div className="overline">{t('Length', 'الطول')}</div><div className="strong num">{s.thobe?.metres ? `${num(s.thobe.metres)} ${t('m', 'م')}` : '—'}</div></div>

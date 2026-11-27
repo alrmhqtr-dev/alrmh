@@ -58,8 +58,13 @@ check("counter: a thobe costs metres × price per metre", q["lines"][0]["unitPri
 check("counter: the cuff is on the thobe, and there is no colour", q["lines"][0]["thobe"]["cuff"]["id"] == "double" and q["lines"][0]["thobe"].get("colour") is None)
 bad = [call("POST", "/admin/pos/quote", {**sale, "lines": [{**line, "metres": m}]}, owner)[1].get("code") for m in (0.2, 25, "x")]
 check("counter: lengths outside 0.5 to 20 m are refused", bad == ["invalid_metres"] * 3, bad)
-s, r, _ = call("POST", "/admin/pos/quote", {**sale, "lines": [{**line, "cuffId": None}]}, owner)
-check("counter: a cuff style must be chosen", r.get("code") == "cuff_required", r)
+s, r, _ = call("POST", "/admin/pos/quote", {**sale, "lines": [{**line, "collarId": None, "cuffId": None, "styleNotes": {"collar:classic-qatari": "Two buttons", "detail:pen": "Inside", "detail:pocket": "Left", "bogus": "x", "detail:pen2": ""}}]}, owner)
+th = (r.get("lines") or [{}])[0].get("thobe") or {}
+check("counter: nothing has to be chosen; remarks are kept against each option, with names", s == 200 and th.get("collar") is None and th.get("pocket") is True
+      and th.get("style_notes") == {"collar:classic-qatari": "Two buttons", "detail:pen": "Inside", "detail:pocket": "Left"}
+      and [x["id"] for x in th.get("style_remarks") or []] == ["classic-qatari", "pocket", "pen"], r)
+items_ = call("GET", "/admin/pos/items", token=owner)[1]
+check("counter: the details (chest pocket, pen and two more) come with their pictures", [d["id"] for d in items_.get("details", [])] == ["pocket", "pen", "placket", "yoke"] and all(d["image_url"] for d in items_["details"]), items_.get("details"))
 s, r, _ = call("POST", "/admin/pos/quote", {**sale, "notes": "x" * 1500, "lines": [{**line, "remarks": "y" * 900}]}, owner)
 check("counter: long notes are kept", s == 200, r)
 s, sold, _ = call("POST", "/admin/pos/sales", {"sale": {**sale, "notes": "Long notes " * 50}, "payments": [{"method": "card", "amount": q["total"]}]}, owner)

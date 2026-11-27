@@ -144,37 +144,53 @@ def counter(browser, lang, email, password):
     page.click('[data-testid="start-continue"]')
     page.wait_for_selector('[data-testid="pos-customer"]', timeout=15000)
     check(f"{tag} a new customer is mobile first, then name, and the sale opens for them", first == "start-phone" and sql(f"select count(*) from customers where phone = '+974{phone}'") == "1")
+    # A new customer who already exists is refused, not picked.
+    page.click('[data-testid="pos-change-customer"]'); page.click('[data-testid="start-new"]')
+    page.fill('[data-testid="start-phone"]', phone); page.fill('[data-testid="start-name"]', "Someone else")
+    page.click('[data-testid="start-continue"]'); page.wait_for_selector('[data-testid="start-taken"]', timeout=15000)
+    check(f"{tag} New customer with a mobile already on file shows an error and doesn't pick that customer",
+          page.locator('[data-testid="pos-customer"]').count() == 0 and page.locator('[data-testid="start-continue"]').is_disabled())
+    page.click('text=' + ("رجوع" if lang == "ar" else "Back")); page.click('[data-testid="start-existing"]')
+    page.fill('[data-testid="start-search"]', phone); page.click(f'[data-testid="start-pick-+974{phone}"]')
+    page.wait_for_selector('[data-testid="pos-customer"]', timeout=15000)
+
+    # The thobe page: a Measurements button under the customer; every collar, cuff and detail with a remarks box.
     page.click('[data-testid="pos-tab-thobes"]')
     page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(600)
-    check(f"{tag} thobes go straight to measurements and styles for them (open to fill in), with the sale out of the way",
-          page.locator('[data-testid="thobe-m-chest_cm"]').count() == 1 and page.locator('[data-testid="thobe-choose"]').count() == 0 and not page.locator('[data-testid="pay"]').is_visible())
-    page.locator('[data-testid^="thobe-collar-"]').first.click()
-    page.locator('[data-testid^="thobe-cuff-"]').first.click()
+    n_opts = page.locator('[data-testid="thobe-styles"] textarea').count()
+    check(f"{tag} the thobe page has no measurement fields, a Measurements button under the customer, and every style option with its own remarks box",
+          page.locator('[data-testid="thobe-m-chest_cm"]').count() == 0 and page.locator('[data-testid="thobe-measurements"]').count() == 1
+          and n_opts == 9 and page.locator('.style-tile').count() == 0 and not page.locator('[data-testid="pay"]').is_visible(), n_opts)
     page.select_option('[data-testid="thobe-fabric"]', index=1)
     add_off = page.locator('[data-testid="thobe-add"]').is_disabled()
-    for k, v in {"length_cm": 148, "shoulder_cm": 46, "chest_cm": 108, "waist_cm": 98, "sleeve_cm": 60, "neck_cm": 40, "cuff_cm": 24}.items():
+    page.fill('[data-testid="style-note-collar-wide-collar"]', "Collar a little higher")
+    page.fill('[data-testid="style-note-cuff-double"]', "Cufflinks provided")
+    page.fill('[data-testid="style-note-detail-pocket"]', "Left side")
+    page.fill('[data-testid="style-note-detail-pen"]', "Pen slot inside")
+    # Measurements on their own screen.
+    page.click('[data-testid="thobe-measurements"]'); page.wait_for_selector('[data-testid="thobe-measure"]', timeout=15000)
+    for k, v in {"length_cm": 148, "shoulder_cm": 46, "chest_cm": 108, "waist_cm": 97, "sleeve_cm": 60, "neck_cm": 40, "cuff_cm": 24}.items():
         page.fill(f'[data-testid="thobe-m-{k}"]', str(v))
-    page.click('[data-testid="thobe-pocket-yes"]')
-    page.fill('[data-testid="thobe-collar-note"]', "Collar a little higher")
-    page.fill('[data-testid="thobe-cuff-note"]', "Cufflinks provided")
-    styles_under = page.locator('[data-testid="thobe-styles"]').bounding_box()["y"] > prev_box(page)["y"]
+    prev = page.locator('[data-testid="thobe-preview"]')
+    live = prev.locator('[data-testid="preview-waist_cm"]').text_content()
+    page.fill('[data-testid="thobe-m-waist_cm"]', "98")
+    page.screenshot(path=f"{SHOTS}/pos-thobe-measure-{lang}.png", full_page=True)
+    check(f"{tag} the measurements screen marks them on the preview as they're typed",
+          live == "97" and prev.locator('[data-testid="preview-waist_cm"]').text_content() == "98" and prev.locator('[data-testid="preview-chest_cm"]').text_content() == "108")
+    page.click('[data-testid="thobe-m-save"]'); page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(800)
+    saved = sql(f"select count(*) || ':' || max(waist_cm)::float from measurements m join family_members f on f.id = m.member_id join customers c on c.id = f.customer_id where c.phone = '+974{phone}'")
     metres = page.input_value('[data-testid="thobe-metres"]')
     page.click('[data-testid="thobe-metres-more"]')
     page.fill('[data-testid="thobe-qty"]', "2")
     page.fill('[data-testid="thobe-remarks"]', "Pocket on the left\nLooser sleeves")
     page.screenshot(path=f"{SHOTS}/pos-thobe-{lang}.png", full_page=True)
     prev = page.locator('[data-testid="thobe-preview"]')
-    check(f"{tag} collar, cuff and pocket are under the preview, each with its own remarks", styles_under and page.locator('[data-testid="thobe-pocket-note"]').count() == 1)
-    check(f"{tag} thobes can't be added until the measurements are in", add_off and not page.locator('[data-testid="thobe-add"]').is_disabled())
-    page.fill('[data-testid="thobe-m-waist_cm"]', "97")
-    live = prev.locator('[data-testid="preview-waist_cm"]').text_content()
-    page.fill('[data-testid="thobe-m-waist_cm"]', "98")
-    check(f"{tag} the preview marks the measurements as they're typed and shows the chosen collar, cuff and pocket",
-          live == "97" and prev.locator('[data-testid="preview-waist_cm"]').text_content() == "98"
-          and prev.locator('[data-testid="preview-chest_cm"]').text_content() == "108" and prev.locator('[data-testid="preview-length_cm"]').text_content() == "148"
-          and all(prev.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket")))
-    check(f"{tag} collar, cuff and pocket are picked by picture; the cloth length starts at the usual metres and + adds 0.5 m",
-          page.locator('.style-tile.on').count() == 3 and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)
+    check(f"{tag} saving measurements returns to the thobe page; thobes couldn't be added before",
+          saved == "1:98" and add_off and not page.locator('[data-testid="thobe-add"]').is_disabled()
+          and "Not taken" not in page.locator('[data-testid="thobe-measured-on"]').inner_text(), saved)
+    check(f"{tag} the preview draws the collar, cuff and pocket written up, with the measurements; the cloth length + adds 0.5 m",
+          all(prev.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket"))
+          and prev.locator('[data-testid="preview-chest_cm"]').text_content() == "108" and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)
     page.click('[data-testid="thobe-add"]')
     page.wait_for_selector('[data-testid="print-cart-thobe"]', timeout=15000)
     page.wait_for_timeout(1200)
@@ -187,8 +203,10 @@ def counter(browser, lang, email, password):
     stitle = sheet.title()
     sheet.screenshot(path=f"{SHOTS}/print-cart-thobe-{lang}.png", full_page=True)
     ok_sheet = (stitle.startswith(("Thobe sheet - Salem", "ورقة الثوب - سالم")) and sheet.locator('[data-testid="preview-chest_cm"]').first.text_content() == "108" and "QAR" not in stext
-                and "Collar a little higher" in sheet.locator('[data-testid="sheet-style-collar"]').inner_text() and "Cufflinks provided" in sheet.locator('[data-testid="sheet-style-cuff"]').inner_text()
-                and sheet.locator('[data-testid="sheet-style-collar"] img').evaluate("e => e.naturalWidth > 0") and sheet.locator('[data-testid="sheet-style-pocket"] img').count() == 1)
+                and sheet.locator('[data-testid="sheet-options"] .sheet-option').count() == 9
+                and "Collar a little higher" in sheet.locator('[data-testid="sheet-collar-wide-collar"]').inner_text() and "Cufflinks provided" in sheet.locator('[data-testid="sheet-cuff-double"]').inner_text()
+                and "Pen slot inside" in sheet.locator('[data-testid="sheet-detail-pen"]').inner_text() and sheet.locator('[data-testid="sheet-collar-classic-qatari"] .sheet-option-note').inner_text().strip() == ""
+                and sheet.locator('[data-testid="sheet-detail-pen"] img').evaluate("e => e.naturalWidth > 0"))
     sheet.close()
     with page.expect_popup(timeout=15000) as pop:
         page.click('[data-testid="print-cart-receipt"]')
@@ -213,8 +231,8 @@ def counter(browser, lang, email, password):
           and sql(f"select sum(amount)::int from payments where order_id = '{order}'") == "100", sql(f"select stage, total from orders where id = '{order}'"))
     line = sql(f"select (snapshot->'thobe'->>'metres') || ':' || (snapshot->'thobe'->'cuff' is not null) || ':' || (snapshot->'thobe'->>'pocket') || ':' || (snapshot->>'remarks') from order_items where order_id = '{order}'")
     m_, cuff_, pocket_, notes_ = line.split(":", 3)
-    check(f"{tag} the remarks against the collar and the cuff are kept on the thobes",
-          sql(f"select (snapshot->'thobe'->'style_notes'->>'collar') || '|' || (snapshot->'thobe'->'style_notes'->>'cuff') from order_items where order_id = '{order}'") == "Collar a little higher|Cufflinks provided")
+    check(f"{tag} the remarks against each option are kept on the thobes, with their names",
+          sql(f"select (snapshot->'thobe'->'style_notes'->>'collar:wide-collar') || '|' || (snapshot->'thobe'->'style_notes'->>'detail:pen') || '|' || jsonb_array_length(snapshot->'thobe'->'style_remarks') from order_items where order_id = '{order}'") == "Collar a little higher|Pen slot inside|4")
     check(f"{tag} the thobes keep their metres, cuff, pocket and the long notes", float(m_) == float(metres) + 0.5 and cuff_ == "true" and pocket_ == "true" and notes_ == "Pocket on the left\nLooser sleeves", line)
     # The sale page (from Sales, the invoice view) and the Sales list both offer the thobe print.
     tnum = sql(f"select number from orders where id = '{order}'")
@@ -382,25 +400,23 @@ def workshop(browser, lang):
     page.fill('[data-testid="start-search"]', mob); page.click(f'[data-testid="start-pick-+974{mob}"]')
     page.wait_for_selector('[data-testid="pos-tab-thobes"]', timeout=15000); page.click('[data-testid="pos-tab-thobes"]')
     page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(600)
+    on_desk = page.locator('[data-testid="thobe-m-chest_cm"]').count() + page.locator('[data-testid="thobe-m-view"]').count()
+    page.click('[data-testid="thobe-measurements"]'); page.wait_for_selector('[data-testid="thobe-measure"]', timeout=15000)
     viewed = page.locator('[data-testid="thobe-m-view-chest_cm"]').inner_text()
     inputs = page.locator('[data-testid="thobe-m-chest_cm"]').count()
-    last_collar = sql(f"select oi.snapshot->'thobe'->'collar'->>'id' from order_items oi join orders o on o.id = oi.order_id where oi.snapshot->'member'->>'id' = '{member}' order by o.created_at desc limit 1")
-    picked = page.locator(f'[data-testid="thobe-collar-{last_collar}"]').get_attribute("class") or ""
     page.screenshot(path=f"{SHOTS}/pos-thobe-existing-view-{lang}.png", full_page=True)
-    check(f"{tag} an existing customer's measurements show as a table, not a form, and their last collar is already picked",
-          viewed == "110" and inputs == 0 and page.locator('[data-testid="preview-chest_cm"]').text_content() == "110" and " on" in f" {picked}", f"{viewed} {inputs} {last_collar} {picked}")
+    check(f"{tag} an existing customer's measurements open from the Measurements button, as a table, not a form",
+          on_desk == 0 and viewed == "110" and inputs == 0 and page.locator('[data-testid="preview-chest_cm"]').text_content() == "110", f"{on_desk} {viewed} {inputs}")
     page.click('[data-testid="thobe-m-edit"]')
     filled = page.input_value('[data-testid="thobe-m-chest_cm"]')
     page.fill('[data-testid="thobe-m-sleeve_cm"]', "62")
-    said = page.locator('[data-testid="thobe-measured-on"]').inner_text()
-    page.locator('[data-testid^="thobe-cuff-"]').first.click()
+    page.click('[data-testid="thobe-m-save"]'); page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(600)
     page.select_option('[data-testid="thobe-fabric"]', index=1)
     page.screenshot(path=f"{SHOTS}/pos-thobe-existing-{lang}.png", full_page=True)
     page.click('[data-testid="thobe-add"]'); page.wait_for_selector('.cart-line', timeout=15000); page.wait_for_timeout(800)
-    check(f"{tag} Edit opens their measurements for changing; a change is saved as new measurements",
-          float(filled) == 110 and ("Changed" in said or "معدّلة" in said)
-          and sql(f"select count(*) || ':' || max(sleeve_cm)::float from measurements where member_id = '{member}'") == "2:62"
-          and page.locator('.cart-line').count() >= 1, f"{filled} {said}")
+    check(f"{tag} Edit opens their measurements for changing; Save keeps them as new measurements; then just cloth and add",
+          float(filled) == 110 and sql(f"select count(*) || ':' || max(sleeve_cm)::float from measurements where member_id = '{member}'") == "2:62"
+          and page.locator('.cart-line').count() >= 1, f"{filled}")
 
     # Asking before saving an edit
     page.goto(ADMIN + "/products"); page.wait_for_selector('table tbody tr', timeout=15000)

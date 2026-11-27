@@ -46,7 +46,8 @@ export default function Reorder() {
             metres: Number(i.snapshot.thobe.metres) || null,
             pocket: i.snapshot.thobe.pocket === true,
             qty: i.qty,
-            editing: false,
+            // A thobe made at the counter may have no collar named: the customer picks one.
+            editing: !i.snapshot.thobe.collar,
           })),
       );
   }, [order.data, lines]);

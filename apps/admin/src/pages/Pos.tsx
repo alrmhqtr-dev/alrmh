@@ -21,12 +21,13 @@ type Items = {
   categories: { id: string; name_en: string; name_ar: string }[];
   collars: Style[];
   cuffs: Style[];
+  details: Style[];
   products: { id: string; sku: string; category: string; name_en: string; name_ar: string; price: number; sizes: string[]; image_url: string | null; track_stock: boolean; unit: string | null; stock: Record<string, number> | null }[];
   fabrics: (Cloth & { sku: string; stock: number | null })[];
 };
 type Line =
   | { key: string; kind: 'product'; productId: string; size?: string | null; qty: number; price?: number | null; discount?: number | null }
-  | { key: string; kind: 'thobe'; memberId: string; collarId: string; cuffId?: string | null; fabricId: string; metres: number; pocket?: boolean; styleNotes?: { collar?: string; cuff?: string; pocket?: string } | null; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
+  | { key: string; kind: 'thobe'; memberId: string; collarId: string | null; cuffId?: string | null; fabricId: string; metres: number; pocket?: boolean; styleNotes?: Record<string, string> | null; qty: number; price?: number | null; discount?: number | null; remarks?: string | null };
 type Cust = { id: string; name: string | null; phone: string };
 type CustomerFull = {
   id: string;
@@ -363,10 +364,8 @@ export default function Pos() {
       return `${L(p)}${l.size ? ` · ${l.size}` : ''}`;
     }
     const f = data.fabrics.find((x) => x.id === l.fabricId);
-    const c = data.collars.find((x) => x.id === l.collarId);
-    const cuff = data.cuffs.find((x) => x.id === l.cuffId);
     const m = family.find((x) => x.id === l.memberId);
-    return `${t('Thobe', 'ثوب')} · ${L(c)}${cuff ? ` · ${L(cuff)}` : ''}${l.pocket ? ` · ${t('pocket', 'جيب')}` : ''} · ${L(f)} · ${num(l.metres)} ${t('m', 'م')}${m ? ` · ${m.name}` : ''}`;
+    return `${t('Thobe', 'ثوب')} · ${L(f)} · ${num(l.metres)} ${t('m', 'م')}${m ? ` · ${m.name}` : ''}`;
   };
   const q = quote;
   /** Print the sale as it stands, before it's paid: the receipt, or the thobes drawn with their measurements. */

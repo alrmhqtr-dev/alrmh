@@ -106,3 +106,66 @@ export function StyleWithNote({ label, items, value, onChange, testid, note, onN
     </div>
   );
 }
+
+/** Every option a thobe can be written up with: collars, cuffs and the other details. */
+export type StyleOptions = { collars: Style[]; cuffs: Style[]; details: Style[] };
+export type StyleNotes = Record<string, string>;
+
+/** The options as groups, each option keyed "collar:<id>", "cuff:<id>" or "detail:<id>". */
+export const styleGroups = (o: StyleOptions) =>
+  [
+    { kind: 'collar', label: t('Collar', 'الياقة'), tone: 'collar', items: o.collars },
+    { kind: 'cuff', label: t('Cuff', 'الكبك'), tone: 'cuff', items: o.cuffs },
+    { kind: 'detail', label: t('Details', 'تفاصيل'), tone: 'detail', items: o.details },
+  ].filter((g) => g.items.length);
+
+/** The remarks with the empty ones left out, or null when there are none. */
+export const cleanNotes = (n: StyleNotes): StyleNotes | null => {
+  const out = Object.fromEntries(Object.entries(n).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+  return Object.keys(out).length ? out : null;
+};
+
+/** For the drawing: the first collar and cuff with remarks, and the chest pocket when it has remarks. */
+export function drawnStyles(o: StyleOptions, n: StyleNotes | null | undefined) {
+  const has = (k: string) => Boolean(n?.[k]?.trim());
+  return {
+    collar: o.collars.find((c) => has(`collar:${c.id}`)),
+    cuff: o.cuffs.find((c) => has(`cuff:${c.id}`)),
+    pocket: has('detail:pocket'),
+  };
+}
+
+/**
+ * Every collar, cuff and detail listed with its picture and a remarks box in front, as on the tailor's sheet.
+ * Nothing is chosen: staff write against the ones that apply.
+ */
+export function StyleRemarks({ options, notes, onChange }: { options: StyleOptions; notes: StyleNotes; onChange: (key: string, v: string) => void }) {
+  return (
+    <div className="style-remarks" data-testid="thobe-styles">
+      {styleGroups(options).map((g) => (
+        <div key={g.kind} className={`style-group ${g.tone}`} role="group" aria-label={g.label}>
+          {g.items.map((s) => {
+            const k = `${g.kind}:${s.id}`;
+            return (
+              <div key={k} className="style-remark">
+                <div className="style-remark-pic" title={L(s)}>
+                  {s.image_url ? <img src={mediaUrl(s.image_url)} alt="" /> : null}
+                  <span className="small">{L(s)}</span>
+                </div>
+                <TextArea
+                  className="input"
+                  rows={2}
+                  maxLength={300}
+                  data-testid={`style-note-${g.kind}-${s.id}`}
+                  aria-label={`${L(s)} – ${t('remarks', 'ملاحظات')}`}
+                  value={notes[k] ?? ''}
+                  onChange={(e) => onChange(k, e.target.value)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}

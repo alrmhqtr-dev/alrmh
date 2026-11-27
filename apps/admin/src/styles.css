@@ -382,3 +382,29 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 .order-sheet .sheet-style-pic { width: 52px; height: 52px; display: grid; place-items: center; }
 .order-sheet .sheet-style-pic img { max-width: 52px; max-height: 52px; }
 .order-sheet .sheet-style-note { min-height: 1.3em; white-space: pre-line; border-bottom: 1px dotted #999; }
+
+/* Every collar, cuff and detail with a remarks box, grouped like the tailor's sheet. */
+.style-remarks { display: grid; gap: 12px; }
+.style-group { border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; }
+.style-group.collar { border-color: #7cb342; }
+.style-group.cuff { border-color: #3f74b8; }
+.style-group.detail { border-color: #b8407a; }
+.style-remark { display: grid; grid-template-columns: 84px 1fr; gap: 10px; align-items: center; padding: 8px 10px; }
+.style-remark + .style-remark { border-top: 1px solid var(--border); }
+.style-remark-pic { display: grid; justify-items: center; gap: 2px; text-align: center; }
+.style-remark-pic img { width: 54px; height: 44px; object-fit: contain; }
+.style-remark-pic .small { font-size: 11px; line-height: 1.2; color: var(--secondary, #555); }
+.style-remark textarea { min-height: 52px; resize: vertical; }
+.measure-button-row { padding-top: 10px; border-top: 1px solid var(--border); }
+
+/* Thobe sheet: every collar, cuff and detail with its picture and remarks, as on the tailor's sheet. */
+.order-sheet .sheet-options { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin-top: 3mm; align-items: start; }
+.order-sheet .sheet-group { border: 1.2px solid #999; border-radius: 4px; break-inside: avoid; }
+.order-sheet .sheet-group.collar { border-color: #6a9a35; }
+.order-sheet .sheet-group.cuff { border-color: #3f74b8; }
+.order-sheet .sheet-group.detail { border-color: #b8407a; }
+.order-sheet .sheet-option { display: grid; grid-template-columns: 22mm 1fr; gap: 2mm; align-items: center; padding: 1.5mm 2mm; min-height: 13mm; }
+.order-sheet .sheet-option + .sheet-option { border-top: 1px solid #ccc; }
+.order-sheet .sheet-option-pic { display: grid; justify-items: center; text-align: center; font-size: 8pt; line-height: 1.15; }
+.order-sheet .sheet-option-pic img { width: 13mm; height: 9mm; object-fit: contain; }
+.order-sheet .sheet-option-note { border: 1px solid #bbb; border-radius: 3px; min-height: 9mm; padding: 1mm 2mm; white-space: pre-line; font-size: 10pt; }

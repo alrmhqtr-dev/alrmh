@@ -101,34 +101,46 @@ export function cleanMetres(v: unknown, fallback: number) {
  * The options of one thobe as they are sold: collar, cuff (when the business has cuff styles) and
  * cloth, priced by the metre. Without a length the cloth's usual metres per thobe are used.
  */
-/** Remarks against the collar, the cuff and the pocket: short text each, empty ones dropped. */
+/**
+ * Remarks for the tailor written against each style option: keys like "collar:wide-collar", "cuff:double"
+ * or "detail:pocket" (and, from before 27 Nov, plain "collar", "cuff", "pocket"). Short text each; empty ones dropped.
+ */
 export function cleanStyleNotes(v: unknown) {
   if (!v || typeof v !== 'object') return null;
   const out: Record<string, string> = {};
-  for (const k of ['collar', 'cuff', 'pocket'] as const) {
-    const x = (v as Record<string, unknown>)[k];
+  for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 40)) {
+    if (!/^((collar|cuff|detail):[a-z0-9-]{1,40}|collar|cuff|pocket)$/.test(k)) continue;
     if (typeof x === 'string' && x.trim()) out[k] = x.trim().slice(0, 300);
   }
-  return Object.keys(out).length ? (out as { collar?: string; cuff?: string; pocket?: string }) : null;
+  return Object.keys(out).length ? out : null;
 }
 
-export async function thobeOptions(o: { collarId?: string | null; cuffId?: string | null; fabricId?: string | null; metres?: unknown; pocket?: unknown; styleNotes?: unknown }, client: Queryable, needCuff = false) {
-  const collar = await db.one('select id, name_en, name_ar, shape, image_url from collars where id = $1 and active', [o.collarId ?? null], client);
+export async function thobeOptions(o: { collarId?: string | null; cuffId?: string | null; fabricId?: string | null; metres?: unknown; pocket?: unknown; styleNotes?: unknown }, client: Queryable, needCuff = false, needCollar = true) {
+  const collar = o.collarId ? await db.one('select id, name_en, name_ar, shape, image_url from collars where id = $1 and active', [o.collarId], client) : null;
   const fabric = await db.one(
     'select id, sku, name_en, name_ar, price::float as price, cost::float as cost, metres_per_thobe::float as metres, tax_rate_id from fabrics where id = $1 and active',
     [o.fabricId ?? null],
     client,
   );
-  if (!collar || !fabric) fail('invalid_thobe_options');
+  // At the counter the collar can be left to the remarks; a collar that is named must be one on offer.
+  if ((o.collarId && !collar) || (!o.collarId && needCollar) || !fabric) fail('invalid_thobe_options');
   let cuff = null;
   if (o.cuffId) {
     cuff = await db.one('select id, name_en, name_ar, image_url from cuffs where id = $1 and active', [o.cuffId], client);
     if (!cuff) fail('invalid_thobe_options');
   } else if (needCuff && (await db.one('select 1 from cuffs where active limit 1', [], client))) fail('cuff_required');
   const metres = cleanMetres(o.metres, fabric.metres || 3.5);
-  /** A chest pocket, or none. */
-  const pocket = o.pocket === true;
   const styleNotes = cleanStyleNotes(o.styleNotes);
+  /** A chest pocket: chosen in the app, or remarks written against it at the counter. */
+  const pocket = o.pocket === true || Boolean(styleNotes?.['detail:pocket']);
+  // The remarks with the name of what each is written against, so the order reads on its own later.
+  const styleRemarks: { kind: string; id: string; name_en: string; name_ar: string; note: string }[] = [];
+  if (styleNotes) {
+    for (const [kind, table] of [['collar', 'collars'], ['cuff', 'cuffs'], ['detail', 'thobe_details']] as const) {
+      const rows = await db.many(`select id, name_en, name_ar from ${table} order by sort`, [], client);
+      for (const r of rows) if (styleNotes[`${kind}:${r.id}`]) styleRemarks.push({ kind, id: r.id, name_en: r.name_en, name_ar: r.name_ar, note: styleNotes[`${kind}:${r.id}`] });
+    }
+  }
   return {
     collar,
     cuff,
@@ -138,7 +150,7 @@ export async function thobeOptions(o: { collarId?: string | null; cuffId?: strin
     /** One thobe: metres × the cloth's price per metre. */
     unit: round2(metres * fabric.price),
     unitCost: round2(fabric.cost * metres),
-    snapshot: { collar, cuff, fabric: { id: fabric.id, name_en: fabric.name_en, name_ar: fabric.name_ar, price: fabric.price, per: 'metre' }, metres, pocket, style_notes: styleNotes, colour: null },
+    snapshot: { collar, cuff, fabric: { id: fabric.id, name_en: fabric.name_en, name_ar: fabric.name_ar, price: fabric.price, per: 'metre' }, metres, pocket, style_notes: styleNotes, style_remarks: styleRemarks.length ? styleRemarks : null, colour: null },
   };
 }
 
@@ -346,7 +358,7 @@ export async function priceSale(input: SaleInput, staff: StaffUser, client: Quer
       if (!customer) fail('customer_required');
       const member = await db.one('select id, name, relation, size from family_members where id = $1 and customer_id = $2', [raw.memberId, customer.id], client);
       if (!member) fail('member_not_found');
-      const th = await thobeOptions(raw, client, true);
+      const th = await thobeOptions(raw, client, false, false);
       const fabric = th.fabric;
       const unit = override !== null ? round2(Math.max(0, override)) : th.unit;
       const auto = override !== null ? { amount: 0, label: null } : unitDiscount({ kind: 'thobe', fabricId: fabric.id, price: unit }, rules, gp);

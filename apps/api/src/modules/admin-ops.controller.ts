@@ -453,7 +453,7 @@ export class AdminOpsController {
       for (const l of lines) {
         const qty = Math.trunc(Number(l?.qty));
         if (!(qty >= 1 && qty <= 20)) fail('invalid_qty');
-        const th = await thobeOptions(l, c, true);
+        const th = await thobeOptions(l, c, false, false);
         items.push({ qty, unit: th.unit, th, remarks: l.remarks ? String(l.remarks).slice(0, 1000) : null });
       }
       // Thobes are always collected from the branch.
@@ -514,7 +514,7 @@ export class AdminOpsController {
         `/orders/${order!.id}`,
         c,
       );
-      await audit(me, 'place_order', 'order', order!.id, { customer: id, total, lines: items.map((i) => ({ collar: i.th.collar.id, cuff: i.th.cuff?.id ?? null, fabric: i.th.fabric.id, metres: i.th.metres, pocket: i.th.pocket, qty: i.qty })) }, c);
+      await audit(me, 'place_order', 'order', order!.id, { customer: id, total, lines: items.map((i) => ({ collar: i.th.collar?.id ?? null, cuff: i.th.cuff?.id ?? null, fabric: i.th.fabric.id, metres: i.th.metres, pocket: i.th.pocket, qty: i.qty })) }, c);
       return { orderId: order!.id, number: order!.number, total: order!.total, pointsToEarn };
     });
   }
