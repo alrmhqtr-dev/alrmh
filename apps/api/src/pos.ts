@@ -105,6 +105,15 @@ export function cleanMetres(v: unknown, fallback: number) {
  * Remarks for the tailor written against each style option: keys like "collar:wide-collar", "cuff:double"
  * or "detail:pocket" (and, from before 27 Nov, plain "collar", "cuff", "pocket"). Short text each; empty ones dropped.
  */
+/**
+ * The remarks a person's next thobe starts from: the ones saved on the Measurements screen if they're
+ * newer than the person's last thobe, otherwise that thobe's.
+ */
+export function memberStyles(saved: Record<string, string> | null, savedAt: string | Date | null, lastThobe: { style_notes?: Record<string, string> | null } | null, lastAt: string | Date | null) {
+  if (saved && savedAt && (!lastAt || new Date(savedAt) >= new Date(lastAt))) return saved;
+  return lastThobe?.style_notes ?? saved ?? null;
+}
+
 export function cleanStyleNotes(v: unknown) {
   if (!v || typeof v !== 'object') return null;
   const out: Record<string, string> = {};

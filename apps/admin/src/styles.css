@@ -399,6 +399,16 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 .style-remark-pic img { width: 54px; height: 44px; object-fit: contain; }
 .style-remark-pic .small { font-size: 11px; line-height: 1.2; color: var(--secondary, #555); }
 .style-remark textarea { min-height: 52px; resize: vertical; }
+/* The collar, cuff and details under the preview: side by side, like the print. */
+.style-remarks.cols { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); align-items: start; gap: 10px; }
+.style-remarks.cols .style-remark { grid-template-columns: 58px 1fr; gap: 6px; padding: 6px 8px; }
+.style-remarks.cols .style-remark-pic img { width: 42px; height: 32px; }
+.style-remarks.cols .style-remark-pic .small { font-size: 10.5px; }
+.style-remarks.cols .style-remark textarea { min-height: 46px; font-size: 13px; padding: 6px 8px; }
+/* Notes in a box of their own, like the print. */
+.notes-box { display: flex; flex-direction: column; gap: 6px; border: 1.5px solid var(--border-strong, #b9b4aa); border-radius: 10px; padding: 10px 12px; }
+.notes-box-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--secondary, #555); }
+.notes-box textarea { min-height: 72px; }
 .measure-button-row { padding-top: 10px; border-top: 1px solid var(--border); }
 
 /* Thobe sheet: every collar, cuff and detail with its picture and remarks, as on the tailor's sheet. */
@@ -419,6 +429,3 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 
 /* Recording or editing measurements from the customer pages: a screen of its own, with the preview. */
 @media (min-width: 1101px) { .measure-page .sticky-preview { position: sticky; top: 70px; } }
-
-.tools { display: flex; gap: 8px; flex-wrap: wrap; }
-.tools .pill { color: inherit; text-decoration: none; }

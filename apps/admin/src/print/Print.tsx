@@ -319,7 +319,7 @@ function ThobeSheet({ r, biz, options, mode = 'order' }: { r: any; biz: Biz; opt
               </div>
             </div>
             {/* Every collar, cuff and detail, its picture and the remarks written against it (blank where none). */}
-            {options && measure ? <div className="small strong" style={{ marginTop: '3mm' }}>{t("Collar, cuff and details · from the last thobe", 'الياقة والكبك والتفاصيل · من آخر ثوب')}</div> : null}
+            {options && measure ? <div className="small strong" style={{ marginTop: '3mm' }}>{t('Collar, cuff and details', 'الياقة والكبك والتفاصيل')}</div> : null}
             {options ? (
               <div className="sheet-options" data-testid="sheet-options">
                 {styleGroups(options).map((g) => (
@@ -482,7 +482,7 @@ export default function Print() {
         created_at: latest?.taken_at ?? new Date().toISOString(),
         customer_name: m.customer_name,
         phone: m.phone,
-        items: [{ id: 0, kind: 'thobe', qty: 1, snapshot: { member: { id: m.id, name: m.name, relation: m.relation }, thobe: m.last_thobe ?? {} } }],
+        items: [{ id: 0, kind: 'thobe', qty: 1, snapshot: { member: { id: m.id, name: m.name, relation: m.relation }, thobe: { ...(m.last_thobe ?? {}), style_notes: m.styles ?? m.last_thobe?.style_notes ?? null } } }],
         measurements: latest ? [{ ...latest, member_id: m.id }] : [],
       };
       body = <ThobeSheet r={r} biz={b} options={styles.data} mode="measure" />;

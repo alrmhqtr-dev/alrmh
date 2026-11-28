@@ -5,7 +5,7 @@ import { STAGES, addDays, addWorkingDays, expirePoints, fail, getSettings, lifet
 import { setStage, stagesFor } from '../orders.js';
 import { addMonthsSql } from '../sql-helpers.js';
 import { AnyStaff, CurrentStaff, ReportsGuard, ReturnsGuard, Managers, Measurers, Workshop, audit, type StaffUser } from '../staff.js';
-import { assertInStock, openRegister, orderBalance, requireRegister, returnStockForOrder, stockNeeds, takeStockForOrder, thobeOptions } from '../pos.js';
+import { assertInStock, cleanStyleNotes, memberStyles, openRegister, orderBalance, requireRegister, returnStockForOrder, stockNeeds, takeStockForOrder, thobeOptions } from '../pos.js';
 import { toCsv } from '../csv.js';
 import { assertSlotFree, slotLockKey } from './booking.controller.js';
 import { round2 } from '../lib.js';
@@ -403,10 +403,11 @@ export class AdminOpsController {
         `select f.id, f.name, f.relation, f.size,
                 (select row_to_json(m) from (select id, taken_at, tailor_name, method, ${FIELDS.join(', ')}, remarks from measurements where member_id = f.id order by taken_at desc limit 1) m) as latest,
                 (select count(*)::int from measurements where member_id = f.id) as measurement_count,
-                (select oi.snapshot->'thobe' from order_items oi join orders o on o.id = oi.order_id
+                lt.thobe as last_thobe, lt.created_at as last_thobe_at, f.style_notes as saved_styles, f.style_notes_at as saved_styles_at
+           from family_members f
+           left join lateral (select oi.snapshot->'thobe' as thobe, o.created_at from order_items oi join orders o on o.id = oi.order_id
                   where oi.kind = 'thobe' and oi.snapshot->'member'->>'id' = f.id::text and o.stage <> 'cancelled'
-                  order by o.created_at desc limit 1) as last_thobe
-           from family_members f where f.customer_id = $1 order by (f.relation = 'self') desc, f.created_at`,
+                  order by o.created_at desc limit 1) lt on true where f.customer_id = $1 order by (f.relation = 'self') desc, f.created_at`,
         [id],
       ),
       db.many('select id, label, line1, area, city, notes, is_default from addresses where customer_id = $1 order by is_default desc', [id]),
@@ -424,7 +425,8 @@ export class AdminOpsController {
       tierStatus(id),
       pointsBalance(id),
     ]);
-    return { ...c, family, addresses, orders, ledger, tier, balance };
+    const people = family.map(({ last_thobe_at, saved_styles, saved_styles_at, ...f }: any) => ({ ...f, styles: memberStyles(saved_styles, saved_styles_at, f.last_thobe, last_thobe_at) }));
+    return { ...c, family: people, addresses, orders, ledger, tier, balance };
   }
 
   /**
@@ -584,6 +586,18 @@ export class AdminOpsController {
     );
     await audit(me, 'create', 'measurement', m!.id, { member: memberId });
     return m;
+  }
+
+  /** Saves a person's collar, cuff and detail remarks from the Measurements screen; their next thobe starts from them. */
+  @Post('members/:id/styles')
+  @UseGuards(Measurers)
+  async saveStyles(@CurrentStaff() me: StaffUser, @Param('id') memberId: string, @Body() body: { styleNotes?: unknown }) {
+    if (!/^[0-9a-f-]{36}$/i.test(memberId)) throw new NotFoundException({ code: 'member_not_found' });
+    const notes = cleanStyleNotes(body?.styleNotes);
+    const row = await db.one('update family_members set style_notes = $2, style_notes_at = now() where id = $1 returning id, style_notes, style_notes_at', [memberId, notes ? JSON.stringify(notes) : '{}']);
+    if (!row) throw new NotFoundException({ code: 'member_not_found' });
+    await audit(me, 'update', 'member_styles', memberId, { count: Object.keys(notes ?? {}).length });
+    return { styles: notes ?? {} };
   }
 
   /** Corrects a measurement that was saved wrongly (the date it was taken stays). */

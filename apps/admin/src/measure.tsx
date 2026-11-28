@@ -114,9 +114,11 @@ export function MeasureModal({ memberId, memberName, previous, edit, onClose, on
               ) : <div />}
               </>}
             </div>
-            <Field label={t('Remarks for the workshop', 'ملاحظات للورشة')} hint={t('Shown to the customer and on the tailor sheet.', 'تظهر للعميل وفي ورقة الخياط.')}>
+            <label className="notes-box" data-testid="measure-notes">
+              <span className="notes-box-label">{t('Notes', 'ملاحظات')}</span>
               <TextArea value={remarks} maxLength={300} onChange={(e) => setRemarks(e.target.value)} placeholder={t('e.g. Prefers a looser fit around the chest', 'مثال: يفضّل قصة أوسع عند الصدر')} />
-            </Field>
+              <span className="small muted">{t('Shown to the customer and on the tailor sheet.', 'تظهر للعميل وفي ورقة الخياط.')}</span>
+            </label>
             <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
               <button className="btn secondary" onClick={onClose}>{t('Cancel', 'إلغاء')}</button>
               <button className="btn" data-testid="measure-save" disabled={!complete || save.isPending} onClick={async () => (!edit || (await confirmSave({ message: t(`Replace ${memberName}'s saved measurements with these?`, `استبدال مقاسات ${memberName} المحفوظة بهذه؟`) }))) && save.mutate()}>

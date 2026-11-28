@@ -139,9 +139,9 @@ export function drawnStyles(o: StyleOptions, n: StyleNotes | null | undefined) {
  * Every collar, cuff and detail listed with its picture and a remarks box in front, as on the tailor's sheet.
  * Nothing is chosen: staff write against the ones that apply.
  */
-export function StyleRemarks({ options, notes, onChange }: { options: StyleOptions; notes: StyleNotes; onChange: (key: string, v: string) => void }) {
+export function StyleRemarks({ options, notes, onChange, columns }: { options: StyleOptions; notes: StyleNotes; onChange: (key: string, v: string) => void; columns?: boolean }) {
   return (
-    <div className="style-remarks" data-testid="thobe-styles">
+    <div className={`style-remarks${columns ? ' cols' : ''}`} data-testid="thobe-styles">
       {styleGroups(options).map((g) => (
         <div key={g.kind} className={`style-group ${g.tone}`} role="group" aria-label={g.label}>
           {g.items.map((s) => {

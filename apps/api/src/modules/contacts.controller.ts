@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { db } from '../db.js';
+import { memberStyles } from '../pos.js';
 import { fail, need, normaliseQatarPhone } from '../lib.js';
 import { parseCsv } from '../csv.js';
 import { AnyStaff, ContactsGuard, CurrentStaff, PurchasesGuard, audit, hasPerm, staffGuard, type StaffUser } from '../staff.js';
@@ -107,7 +108,7 @@ export class ContactsController {
   @UseGuards(AnyStaff)
   async member(@Param('id') id: string) {
     const m = await db.one(
-      `select f.id, f.name, f.relation, f.size, c.id as customer_id, c.name as customer_name, c.phone from family_members f join customers c on c.id = f.customer_id where f.id = $1`,
+      `select f.id, f.name, f.relation, f.size, f.style_notes as saved_styles, f.style_notes_at as saved_styles_at, c.id as customer_id, c.name as customer_name, c.phone from family_members f join customers c on c.id = f.customer_id where f.id = $1`,
       [id],
     );
     if (!m) throw new NotFoundException({ code: 'not_found' });
@@ -117,11 +118,12 @@ export class ContactsController {
     );
     // The styles of the person's last thobe, for the measurement sheet.
     const last = await db.one(
-      `select oi.snapshot->'thobe' as thobe from order_items oi join orders o on o.id = oi.order_id
+      `select oi.snapshot->'thobe' as thobe, o.created_at from order_items oi join orders o on o.id = oi.order_id
         where oi.kind = 'thobe' and oi.snapshot->'member'->>'id' = $1 and o.stage <> 'cancelled' order by o.created_at desc limit 1`,
       [id],
     );
-    return { ...m, latest: latest ?? null, last_thobe: last?.thobe ?? null };
+    const { saved_styles, saved_styles_at, ...person } = m as any;
+    return { ...person, latest: latest ?? null, last_thobe: last?.thobe ?? null, styles: memberStyles(saved_styles, saved_styles_at, last?.thobe ?? null, last?.created_at ?? null) };
   }
 
   @Get('suppliers/:id')

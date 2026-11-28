@@ -68,7 +68,7 @@ CASHIER = f"cashier{run}@alrmh.qa"
 call("POST", "/admin/staff", {"email": CASHIER, "name": "أمين الكاشير", "role": "cashier", "password": "cashier-pass-2026", "branchId": branch, "language": "ar"}, owner)
 level = lambda: float(sql(f"select coalesce(sum(qty),0) from stock_moves where item_kind = 'product' and item_id = '{prod}' and branch_id = '{branch}'"))
 
-PAGES = ["/", "/pos", "/sales", "/sales?payment=due", "/drafts", "/quotations", "/returns", "/shipments", "/registers", "/discounts", "/products", "/cloth", "/labels", "/stock", "/stock/adjustments",
+PAGES = ["/", "/pos", "/sales", "/sales?payment=due", "/drafts", "/quotations", "/returns", "/shipments", "/registers", "/discounts", "/products", "/labels", "/stock", "/stock/adjustments",
          "/stock/transfers", "/suggestions", "/catalogue", "/brands", "/units", "/variations", "/warranties", "/purchases", "/purchases/new", "/suppliers", "/customers", "/customer-groups",
          "/expenses", "/expense-categories", "/tailor", "/tailor/measurements", "/factory", "/factory/photos", "/orders", "/appointments", "/import", "/m/products", "/m/sales",
          "/settings/company", "/settings/invoice", "/settings/barcode", "/settings/pos", "/printing", "/whatsapp", "/tax-rates"]
@@ -179,6 +179,10 @@ def counter(browser, lang, email, password):
     n_opts = page.locator('[data-testid="thobe-measure"] [data-testid="thobe-styles"] textarea').count()
     check(f"{tag} the Measurements screen has the measurements, every style option with its own remarks box (nothing to choose) and the preview",
           n_opts == 9 and page.locator('.style-tile').count() == 0 and page.locator('[data-testid="thobe-measure"] [data-testid="thobe-preview"]').count() == 1, n_opts)
+    pv = page.locator('[data-testid="thobe-measure"] [data-testid="thobe-preview"]').bounding_box()
+    st = page.locator('[data-testid="thobe-m-styles"]').bounding_box()
+    check(f"{tag} on the Measurements screen the collar, cuff and details sit under the preview, and the notes are in a box of their own",
+          st["y"] >= pv["y"] + pv["height"] - 1 and abs(st["x"] - pv["x"]) < 30 and page.locator('[data-testid="thobe-m-notes"]').count() == 1, f"{pv} {st}")
     page.fill('[data-testid="style-note-collar-wide-collar"]', "Collar a little higher")
     page.fill('[data-testid="style-note-cuff-double"]', "Cufflinks provided")
     page.fill('[data-testid="style-note-detail-pocket"]', "Left side")
@@ -202,6 +206,8 @@ def counter(browser, lang, email, password):
     msheet.close()
     page.click('[data-testid="thobe-m-save"]'); page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(800)
     saved = sql(f"select count(*) || ':' || max(waist_cm)::float from measurements m join family_members f on f.id = m.member_id join customers c on c.id = f.customer_id where c.phone = '+974{phone}'")
+    saved_styles = sql(f"select f.style_notes->>'detail:pen' from family_members f join customers c on c.id = f.customer_id where c.phone = '+974{phone}'")
+    check(f"{tag} saving on the Measurements screen keeps the collar, cuff and detail remarks with the measurements", saved_styles == "Pen slot inside", saved_styles)
     metres = page.input_value('[data-testid="thobe-metres"]')
     page.click('[data-testid="thobe-metres-more"]')
     page.fill('[data-testid="thobe-qty"]', "2")
@@ -431,6 +437,17 @@ def workshop(browser, lang):
     page.screenshot(path=f"{SHOTS}/pos-thobe-existing-view-{lang}.png", full_page=True)
     check(f"{tag} an existing customer's measurements open from the Measurements button, as a table, not a form",
           on_desk == 0 and viewed == "110" and inputs == 0 and page.locator('[data-testid="preview-chest_cm"]').text_content() == "110", f"{on_desk} {viewed} {inputs}")
+    # Remarks against the collar, cuff and details save with the same button, without changing the measurements.
+    done_first = page.locator('[data-testid="thobe-m-done"]').count() == 1 and page.locator('[data-testid="thobe-m-save"]').count() == 0
+    page.fill('[data-testid="style-note-collar-mandarin-band"]', "Softer band")
+    save_on = page.locator('[data-testid="thobe-m-save"]').is_enabled()
+    page.click('[data-testid="thobe-m-save"]'); page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(600)
+    check(f"{tag} changing a collar, cuff or detail remark turns Done into Save; it saves the remarks for the person, not new measurements",
+          done_first and save_on and sql(f"select style_notes->>'collar:mandarin-band' from family_members where id = '{member}'") == "Softer band"
+          and sql(f"select count(*) from measurements where member_id = '{member}'") == "1", f"{done_first} {save_on}")
+    page.click('[data-testid="thobe-measurements"]'); page.wait_for_selector('[data-testid="thobe-measure"]', timeout=15000)
+    check(f"{tag} the saved remarks are there next time, and Done is back",
+          page.input_value('[data-testid="style-note-collar-mandarin-band"]') == "Softer band" and page.locator('[data-testid="thobe-m-done"]').count() == 1)
     page.click('[data-testid="thobe-m-edit"]')
     filled = page.input_value('[data-testid="thobe-m-chest_cm"]')
     page.fill('[data-testid="thobe-m-sleeve_cm"]', "62")
