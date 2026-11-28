@@ -188,7 +188,6 @@ export default function Pos() {
   const [customer, setCustomer] = useState<Cust | null>(null);
   const [walkIn, setWalkIn] = useState({ name: '', phone: '' });
   const [lines, setLines] = useState<Line[]>([]);
-  const [orderDiscount, setOrderDiscount] = useState<{ kind: 'percent' | 'fixed'; amount: string }>({ kind: 'fixed', amount: '' });
   const [points, setPoints] = useState('');
   const [notes, setNotes] = useState('');
   const [deliver, setDeliver] = useState('');
@@ -232,7 +231,6 @@ export default function Pos() {
     setWalkIn({ name: c.walkInName ?? '', phone: c.walkInPhone ?? '' });
     setNotes(c.notes ?? '');
     if (c.branchId) setBranchId(c.branchId);
-    if (c.orderDiscount) setOrderDiscount({ kind: c.orderDiscount.kind, amount: String(c.orderDiscount.amount) });
   }, [draft.data]);
 
   const sale = useMemo(
@@ -242,12 +240,13 @@ export default function Pos() {
       walkInName: customer ? null : walkIn.name || null,
       walkInPhone: customer ? null : walkIn.phone || null,
       lines: lines.map(({ key: _k, ...l }) => l),
-      orderDiscount: Number(orderDiscount.amount) > 0 ? { kind: orderDiscount.kind, amount: Number(orderDiscount.amount) } : null,
+      // Discounts are given per item only; there's no discount on the whole sale.
+      orderDiscount: null,
       points: customer && Number(points) > 0 ? Math.trunc(Number(points)) : 0,
       notes: notes || null,
       deliveryAddressId: customer && deliver ? deliver : null,
     }),
-    [branchId, customer, walkIn, lines, orderDiscount, points, notes, deliver],
+    [branchId, customer, walkIn, lines, points, notes, deliver],
   );
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
@@ -272,7 +271,6 @@ export default function Pos() {
     setLines([]);
     setCustomer(null);
     setWalkIn({ name: '', phone: '' });
-    setOrderDiscount({ kind: 'fixed', amount: '' });
     setPoints('');
     setNotes('');
     setDeliver('');
@@ -502,15 +500,6 @@ export default function Pos() {
               <Empty>{t('Scan or tap items to add them.', 'امسح الأصناف أو اضغط عليها لإضافتها.')}</Empty>
             )}
             <div className="grid k2" style={{ gap: 8 }}>
-              {canDiscount ? (
-                <div className="row" style={{ gap: 4 }}>
-                  <input className="input" type="number" min={0} data-testid="order-discount" placeholder={t('Discount', 'الخصم')} aria-label={t('Discount on sale', 'خصم على الفاتورة')} value={orderDiscount.amount} onChange={(e) => setOrderDiscount({ ...orderDiscount, amount: e.target.value })} />
-                  <select className="input" style={{ width: 74 }} value={orderDiscount.kind} onChange={(e) => setOrderDiscount({ ...orderDiscount, kind: e.target.value as 'percent' | 'fixed' })} aria-label={t('Discount type', 'نوع الخصم')}>
-                    <option value="fixed">{t('QAR', 'ر.ق')}</option>
-                    <option value="percent">%</option>
-                  </select>
-                </div>
-              ) : null}
               {customer && cust.data && cust.data.balance > 0 ? (
                 <input className="input" type="number" min={0} max={cust.data.balance} data-testid="use-points" placeholder={t(`Use points (up to ${cust.data.balance})`, `استخدم النقاط (حتى ${cust.data.balance})`)} aria-label={t('Points to use', 'النقاط المستخدمة')} value={points} onChange={(e) => setPoints(e.target.value)} />
               ) : null}

@@ -109,6 +109,8 @@ def counter(browser, lang, email, password):
         check(f"{tag} a discount shows the original price, the discount and then the total; there's no field to change the price",
               [digits(x).split(".")[0] for x in shown] == ["120", "100", "120", "20", "100"]
               and page.locator('input[aria-label="Unit price"], input[aria-label="سعر الوحدة"]').count() == 0, shown)
+        check(f"{tag} discounts are on the products only: no discount on the whole sale",
+              page.locator('[data-testid="order-discount"], input[aria-label="Discount on sale"], input[aria-label="خصم على الفاتورة"]').count() == 0)
         page.fill('[data-testid="line-discount-0"]', "")
         page.wait_for_function("document.querySelector('[data-testid=cart-total]')?.textContent?.includes('120')", timeout=15000)
     page.click('[data-testid="pay"]')
