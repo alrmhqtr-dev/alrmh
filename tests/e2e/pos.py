@@ -485,9 +485,10 @@ def workshop(browser, lang):
     mp.goto(ADMIN + f"/print/measure/{member}"); mp.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); mp.wait_for_timeout(1200)
     mp.screenshot(path=f"{SHOTS}/print-measure-{lang}.png", full_page=True)
     mtxt = mp.locator('[data-testid="order-sheet"]').inner_text()
-    check(f"{tag} the measurements print is one A4 page, with a Notes box and the date in the header, and no table repeating the drawing",
+    check(f"{tag} the measurements print is one A4 page, with the measurements table, a Notes box and the date in the header (not under the table)",
           pdf_pages(mp) == 1 and mp.locator('[data-testid="sheet-notes-0"]').count() == 1 and mp.locator('[data-testid="sheet-measured"]').count() == 1
-          and mp.locator('[data-testid="order-sheet"] td.num').count() == 0, mtxt[:160])
+          and mp.locator('[data-testid="order-sheet"] td.num').count() == 7
+          and mtxt.count(mp.locator('[data-testid="sheet-measured"]').inner_text().split(" ", 1)[1]) == 1, mtxt[:160])
     check(f"{tag} the measurements print is the A4 sheet: drawn and marked, in full, with the collar, cuff and details",
           mp.locator('[data-testid="preview-sleeve_cm"]').text_content() == "63.5" and mp.locator('[data-testid="sheet-options"] .sheet-option').count() == 9
           and ("Measurements" in mtxt or "المقاسات" in mtxt) and "QAR" not in mtxt, mtxt[:120])

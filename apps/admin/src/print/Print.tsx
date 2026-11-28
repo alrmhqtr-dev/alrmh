@@ -308,8 +308,7 @@ function ThobeSheet({ r, biz, options, mode = 'order' }: { r: any; biz: Biz; opt
                     ))}
                   </tbody>
                 </table>}
-                {/* The measurements are marked on the drawing; no table repeating them. */}
-                {meas ? null : <div className="strong">{t('No measurements yet', 'لا توجد مقاسات بعد')}</div>}
+                {meas ? <MeasureTable m={meas} /> : <div className="strong">{t('No measurements yet', 'لا توجد مقاسات بعد')}</div>}
                 {/* One box for every note on this thobe, with room left to write by hand. */}
                 <div className="sheet-notes" data-testid={`sheet-notes-${k}`}>
                   <div className="sheet-notes-label">{t('Notes', 'ملاحظات')}</div>
