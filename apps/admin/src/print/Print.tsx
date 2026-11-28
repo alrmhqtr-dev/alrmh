@@ -249,6 +249,10 @@ function ThobeSheet({ r, biz, options, mode = 'order' }: { r: any; biz: Biz; opt
   const measure = mode === 'measure';
   const thobes = r.items.filter((i: any) => i.kind === 'thobe');
   const count = thobes.reduce((n: number, i: any) => n + i.qty, 0);
+  const measOf = (i: any) => r.measurements?.find((x: any) => x.member_id === i.snapshot.member?.id);
+  // When the measurements were taken goes in the header, not under them.
+  const firstMeas = thobes.map(measOf).find(Boolean);
+  const measuredLine = (m: any) => `${date(m.taken_at)}${m.tailor_name ? ` · ${m.tailor_name}` : ''}`;
   return (
     <div className="print-page pa4 order-sheet" data-testid="order-sheet">
       <div className="row spread" style={{ alignItems: 'flex-start' }}>
@@ -259,7 +263,8 @@ function ThobeSheet({ r, biz, options, mode = 'order' }: { r: any; biz: Biz; opt
         </div>
         <div style={{ textAlign: 'end' }}>
           <div className="strong" style={{ fontSize: 22 }}>{measure ? t('Measurements', 'المقاسات') : t('Thobe sheet', 'ورقة الثوب')}{r.number ? ` #${r.number}` : ''}</div>
-          <div>{measure ? t('Taken', 'أُخذت') : r.unpaid ? t('Before payment', 'قبل الدفع') : t('Ordered', 'تاريخ الطلب')} {date(r.created_at)}</div>
+          {measure ? null : <div>{r.unpaid ? t('Before payment', 'قبل الدفع') : t('Ordered', 'تاريخ الطلب')} {date(r.created_at)}</div>}
+          {firstMeas ? <div data-testid="sheet-measured">{t('Measured', 'المقاسات')} {measuredLine(firstMeas)}</div> : measure ? <div>{t('Not measured yet', 'لم تؤخذ المقاسات بعد')}</div> : null}
           {r.expected_delivery ? <div className="strong">{t('Ready by', 'التسليم')} {date(r.expected_delivery)}</div> : null}
           {r.number ? <div dangerouslySetInnerHTML={{ __html: code128Svg(r.number, 36, 8) }} /> : null}
         </div>
@@ -273,11 +278,12 @@ function ThobeSheet({ r, biz, options, mode = 'order' }: { r: any; biz: Biz; opt
       {thobes.map((i: any, k: number) => {
         const th = i.snapshot.thobe ?? {};
         const notes = th.style_notes ?? {};
-        const meas = r.measurements?.find((x: any) => x.member_id === i.snapshot.member?.id);
+        const meas = measOf(i);
         const rows: [string, ReactNode][] = [
           [t('Cloth', 'القماش'), th.fabric ? L(th.fabric) : '—'],
           [t('Cloth length', 'طول القماش'), th.metres ? `${th.metres} ${t('m', 'م')}` : '—'],
-          [t('Thobes', 'عدد الثياب'), String(i.qty)],
+          // The header has the count; per line only when there are several.
+          ...(thobes.length > 1 ? [[t('Thobes', 'عدد الثياب'), String(i.qty)] as [string, ReactNode]] : []),
         ];
         return (
           <section key={i.id} className="order-thobe" data-testid={`order-thobe-${k}`}>
@@ -286,6 +292,7 @@ function ThobeSheet({ r, biz, options, mode = 'order' }: { r: any; biz: Biz; opt
               <div className="strong" style={{ fontSize: 15 }} data-testid={`order-thobe-head-${k}`}>
                 {thobes.length > 1 ? `${k + 1}. ` : ''}
                 {i.snapshot.member?.relation && i.snapshot.member.relation !== 'self' ? `${i.snapshot.member.name} · ${RELATION[i.snapshot.member.relation] ?? ''}` : t('Thobe', 'ثوب')}
+                {meas && firstMeas && meas !== firstMeas && meas.taken_at !== firstMeas.taken_at ? <span style={{ fontWeight: 400 }}> · {t('Measured', 'المقاسات')} {measuredLine(meas)}</span> : null}
               </div>
             ) : null}
             <div className="order-thobe-body">
@@ -301,14 +308,15 @@ function ThobeSheet({ r, biz, options, mode = 'order' }: { r: any; biz: Biz; opt
                     ))}
                   </tbody>
                 </table>}
-                {i.snapshot.remarks ? <div style={{ whiteSpace: 'pre-line' }}><b>{t('Notes for the tailor', 'ملاحظات للخياط')}:</b> {i.snapshot.remarks}</div> : null}
-                {meas ? (
-                  <div>
-                    <MeasureTable m={meas} />
-                    <div>{t('Measured', 'المقاسات')} {date(meas.taken_at)}{meas.tailor_name ? ` · ${meas.tailor_name}` : ''}</div>
-                    {meas.remarks ? <div style={{ whiteSpace: 'pre-line' }}>{meas.remarks}</div> : null}
-                  </div>
-                ) : <div className="strong">{t('No measurements yet', 'لا توجد مقاسات بعد')}</div>}
+                {/* The measurements are marked on the drawing; no table repeating them. */}
+                {meas ? null : <div className="strong">{t('No measurements yet', 'لا توجد مقاسات بعد')}</div>}
+                {/* One box for every note on this thobe, with room left to write by hand. */}
+                <div className="sheet-notes" data-testid={`sheet-notes-${k}`}>
+                  <div className="sheet-notes-label">{t('Notes', 'ملاحظات')}</div>
+                  {i.snapshot.remarks ? <div><b>{t('For the tailor', 'للخياط')}:</b> {i.snapshot.remarks}</div> : null}
+                  {meas?.remarks ? <div><b>{t('Measurements', 'المقاسات')}:</b> {meas.remarks}</div> : null}
+                  {k === 0 && r.notes ? <div><b>{t('Order', 'الطلب')}:</b> {r.notes}</div> : null}
+                </div>
               </div>
             </div>
             {/* Every collar, cuff and detail, its picture and the remarks written against it (blank where none). */}
@@ -330,7 +338,7 @@ function ThobeSheet({ r, biz, options, mode = 'order' }: { r: any; biz: Biz; opt
           </section>
         );
       })}
-      {r.notes ? <div style={{ marginTop: 10 }}>{t('Notes', 'ملاحظات')}: {r.notes}</div> : null}
+      {r.notes && !thobes.length ? <div className="sheet-notes"><div className="sheet-notes-label">{t('Notes', 'ملاحظات')}</div>{r.notes}</div> : null}
     </div>
   );
 }

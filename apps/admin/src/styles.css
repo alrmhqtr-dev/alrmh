@@ -350,7 +350,11 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 
 /* The printed order: each thobe drawn with its measurements, then the bill. */
 .order-sheet .order-thobe { margin-top: 12px; padding-top: 10px; border-top: 1px solid #000; break-inside: avoid; }
-.order-sheet .order-thobe-body { display: grid; grid-template-columns: 118mm 1fr; gap: 6mm; align-items: start; margin-top: 6px; }
+.order-sheet .order-thobe-body { display: grid; grid-template-columns: 128mm 1fr; gap: 5mm; align-items: stretch; margin-top: 6px; }
+.order-sheet .order-thobe-body > .stack { min-height: 100%; }
+.order-sheet .sheet-notes { flex: 1; min-height: 24mm; border: 1.2px solid #777; border-radius: 4px; padding: 1.5mm 2.5mm; white-space: pre-line; font-size: 10.5pt; display: flex; flex-direction: column; gap: 1mm; }
+.order-sheet .sheet-notes-label { font-size: 8.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #444; }
+.order-sheet .order-thobe-body td { padding: 2px 2px; }
 .order-sheet .thobe-preview.print { background: #fff; border: 1px solid #999; border-radius: 6px; padding: 4px; }
 .order-sheet .thobe-preview.print figcaption { display: none; }
 .order-sheet .order-bill { margin-top: 14px; padding-top: 8px; border-top: 1px solid #000; break-inside: avoid; }
@@ -398,16 +402,18 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 .measure-button-row { padding-top: 10px; border-top: 1px solid var(--border); }
 
 /* Thobe sheet: every collar, cuff and detail with its picture and remarks, as on the tailor's sheet. */
-.order-sheet .sheet-options { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin-top: 3mm; align-items: start; }
+.order-sheet .sheet-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2.5mm; margin-top: 2.5mm; align-items: start; }
 .order-sheet .sheet-group { border: 1.2px solid #999; border-radius: 4px; break-inside: avoid; }
 .order-sheet .sheet-group.collar { border-color: #6a9a35; }
 .order-sheet .sheet-group.cuff { border-color: #3f74b8; }
 .order-sheet .sheet-group.detail { border-color: #b8407a; }
-.order-sheet .sheet-option { display: grid; grid-template-columns: 22mm 1fr; gap: 2mm; align-items: center; padding: 1.5mm 2mm; min-height: 13mm; }
+.order-sheet .sheet-option { display: grid; grid-template-columns: 17mm 1fr; gap: 1.5mm; align-items: center; padding: 1.2mm 1.5mm; min-height: 14mm; }
 .order-sheet .sheet-option + .sheet-option { border-top: 1px solid #ccc; }
-.order-sheet .sheet-option-pic { display: grid; justify-items: center; text-align: center; font-size: 8pt; line-height: 1.15; }
-.order-sheet .sheet-option-pic img { width: 13mm; height: 9mm; object-fit: contain; }
-.order-sheet .sheet-option-note { border: 1px solid #bbb; border-radius: 3px; min-height: 9mm; padding: 1mm 2mm; white-space: pre-line; font-size: 10pt; }
+.order-sheet .sheet-option-pic { display: grid; justify-items: center; text-align: center; font-size: 7.5pt; line-height: 1.1; }
+.order-sheet .sheet-option-pic img { width: 11mm; height: 7.5mm; object-fit: contain; }
+.order-sheet .sheet-option-note { border: 1px solid #bbb; border-radius: 3px; min-height: 11mm; padding: 1mm 1.5mm; white-space: pre-line; font-size: 9pt; line-height: 1.2; overflow-wrap: anywhere; }
+/* Each thobe on one A4 page: a second thobe starts a new page. */
+@media print { .order-sheet .order-thobe + .order-thobe { break-before: page; border-top: 0; margin-top: 0; } .order-sheet.pa4 { padding: 4mm 0; } }
 /* On the Measurements screen the preview stays in view while the styles below are filled in. */
 @media (min-width: 1101px) { .pos.solo .sticky-preview { position: sticky; top: 70px; } }
 

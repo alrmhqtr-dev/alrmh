@@ -42,6 +42,15 @@ def prev_box(page):
     return page.locator('[data-testid="thobe-preview"]').bounding_box()
 
 
+def pdf_pages(pg):
+    """How many A4 pages the print comes to."""
+    import re
+    pg.emulate_media(media="print")
+    data = pg.pdf(format="A4", print_background=True)
+    pg.emulate_media(media="screen")
+    return len(re.findall(rb"/Type\s*/Page[^s]", data))
+
+
 def check(name, ok, detail=""):
     results.append((name, ok))
     print(("ok   " if ok else "FAIL ") + name + (f"   [{detail}]" if detail and not ok else ""), flush=True)
@@ -261,6 +270,8 @@ def counter(browser, lang, email, password):
     sheet.screenshot(path=f"{SHOTS}/print-order-{lang}.png", full_page=True)
     th = sheet.locator('[data-testid="order-thobe-0"]')
     text = sheet.locator('[data-testid="order-sheet"]').inner_text()
+    check(f"{tag} each thobe on the A4 sheet fits one page (2 thobes, 2 pages) with its Notes box",
+          pdf_pages(sheet) == len(sheet.locator('.order-thobe').all()) and sheet.locator('[data-testid="sheet-notes-0"]').count() == 1, str(len(sheet.locator('.order-thobe').all())))
     check(f"{tag} the A4 thobe sheet draws the thobe with its collar, cuff, pocket and measurements marked, with the style remarks and no prices",
           th.locator('[data-testid="preview-chest_cm"]').text_content() == "108" and th.locator('[data-testid="preview-sleeve_cm"]').text_content() == "60"
           and all(th.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket"))
@@ -474,6 +485,9 @@ def workshop(browser, lang):
     mp.goto(ADMIN + f"/print/measure/{member}"); mp.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); mp.wait_for_timeout(1200)
     mp.screenshot(path=f"{SHOTS}/print-measure-{lang}.png", full_page=True)
     mtxt = mp.locator('[data-testid="order-sheet"]').inner_text()
+    check(f"{tag} the measurements print is one A4 page, with a Notes box and the date in the header, and no table repeating the drawing",
+          pdf_pages(mp) == 1 and mp.locator('[data-testid="sheet-notes-0"]').count() == 1 and mp.locator('[data-testid="sheet-measured"]').count() == 1
+          and mp.locator('[data-testid="order-sheet"] td.num').count() == 0, mtxt[:160])
     check(f"{tag} the measurements print is the A4 sheet: drawn and marked, in full, with the collar, cuff and details",
           mp.locator('[data-testid="preview-sleeve_cm"]').text_content() == "63.5" and mp.locator('[data-testid="sheet-options"] .sheet-option').count() == 9
           and ("Measurements" in mtxt or "المقاسات" in mtxt) and "QAR" not in mtxt, mtxt[:120])
