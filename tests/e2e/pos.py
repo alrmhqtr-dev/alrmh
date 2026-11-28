@@ -443,14 +443,20 @@ def workshop(browser, lang):
 
     # Editing measurements from the customer measurements page
     page.goto(ADMIN + f"/tailor/measurements"); page.wait_for_selector(f'[data-testid="edit-measure-Board {lang}"]', timeout=15000)
-    page.click(f'[data-testid="edit-measure-Board {lang}"]')
-    page.wait_for_selector('[data-testid="measure-screen"]', timeout=15000)
-    page.fill('[data-testid="m-sleeve_cm"]', "63.5")
-    scr = page.locator('[data-testid="measure-screen"]')
-    page.screenshot(path=f"{SHOTS}/measure-screen-{lang}.png")
-    check(f"{tag} editing from the customer measurements page is a screen of its own with the preview, marked as typed",
-          page.locator('.modal').count() == 0 and scr.locator('[data-testid="preview-sleeve_cm"]').text_content() == "63.5")
-    page.click('[data-testid="measure-save"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
+    with page.context.expect_page() as tab_info:
+        page.click(f'[data-testid="edit-measure-Board {lang}"]')
+    tab = tab_info.value
+    tab.wait_for_selector('[data-testid="measure-screen"]', timeout=15000)
+    tab.fill('[data-testid="m-sleeve_cm"]', "63.5")
+    scr = tab.locator('[data-testid="measure-screen"]')
+    tab.screenshot(path=f"{SHOTS}/measure-screen-{lang}.png")
+    check(f"{tag} editing from the customer measurements page opens in a new tab: a screen of its own with the preview, marked as typed",
+          "/measure/" in tab.url and "edit=1" in tab.url and tab.locator('.modal').count() == 0 and scr.locator('[data-testid="preview-sleeve_cm"]').text_content() == "63.5", tab.url)
+    tab.click('[data-testid="measure-save"]'); tab.click('[data-testid="confirm-ok"]')
+    try: tab.wait_for_event("close", timeout=8000)
+    except Exception: pass
+    page.wait_for_timeout(500)
+    check(f"{tag} the measurements tab closes itself once saved", tab.is_closed())
     check(f"{tag} measurements are edited from the customer measurements page (after asking)",
           sql(f"select sleeve_cm::float || ':' || count(*) over () from measurements where member_id = '{member}' order by taken_at desc limit 1") == "63.5:2")
     mp = page.context.new_page(); mp.add_init_script("window.print = () => {}")
@@ -498,6 +504,18 @@ def workshop(browser, lang):
           page.locator(".mgrid").count() == 0 and page.locator('[data-testid^="measure-"]').count() == 0 and page.locator('[data-testid="payment-row"]').count() >= 1, body[:200])
     page.goto(ADMIN + f"/orders/{b['orderId']}"); page.wait_for_selector(".mgrid", timeout=15000)
     check(f"{tag} the same order from the workshop still shows the measurements", page.locator(".mgrid").count() == 1)
+    mbtn = page.locator('[data-testid^="measure-"]').first
+    stages = page.locator('[data-testid="order-stages"]').bounding_box(); photos = page.locator(".card", has_text="Thobe photos" if lang == "en" else "صور الأثواب").last.bounding_box()
+    thobe_card = page.locator(".card", has_text="Thobe for" if lang == "en" else "ثوب لـ").first.bounding_box()
+    check(f"{tag} the order's stages sit below the thobe photos, in the same column as the thobe",
+          stages["y"] > photos["y"] + photos["height"] - 1 and abs(stages["x"] - thobe_card["x"]) < 2, f"{stages} {photos}")
+    label = mbtn.inner_text().strip()
+    with page.context.expect_page() as tab_info:
+        mbtn.click()
+    tab = tab_info.value; tab.wait_for_selector('[data-testid="measure-screen"]', timeout=15000)
+    check(f"{tag} the order's Measurements button opens the measurements, with the preview, in a new tab",
+          label in ("Measurements", "المقاسات") and "/measure/" in tab.url and tab.locator('[data-testid="measure-screen"] [data-testid="preview-sleeve_cm"]').count() == 1, f"{label} {tab.url}")
+    tab.close()
     page.screenshot(path=f"{SHOTS}/invoice-{lang}.png", full_page=True)
 
     # Mobiles read left to right in Arabic

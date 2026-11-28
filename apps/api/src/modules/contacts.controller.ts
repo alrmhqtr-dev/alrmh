@@ -112,7 +112,7 @@ export class ContactsController {
     );
     if (!m) throw new NotFoundException({ code: 'not_found' });
     const latest = await db.one(
-      `select taken_at, tailor_name, method, length_cm, shoulder_cm, chest_cm, waist_cm, sleeve_cm, neck_cm, cuff_cm, remarks from measurements where member_id = $1 order by taken_at desc limit 1`,
+      `select id, taken_at, tailor_name, method, length_cm, shoulder_cm, chest_cm, waist_cm, sleeve_cm, neck_cm, cuff_cm, remarks from measurements where member_id = $1 order by taken_at desc limit 1`,
       [id],
     );
     // The styles of the person's last thobe, for the measurement sheet.

@@ -267,7 +267,7 @@ export function ThobeDesk({
           {/* Measurements open on their own screen. */}
           <div className="row spread measure-button-row">
             <button className="btn secondary" data-testid="thobe-measurements" disabled={!member} onClick={() => setScreen('measure')}>
-              <Ruler size={16} /> {t('Measurements and styles', 'المقاسات والتفصيل')}
+              <Ruler size={16} /> {t('Measurements', 'المقاسات')}
             </button>
             <span className={`small ${measured ? 'secondary' : 'tone-error strong'}`} data-testid="thobe-measured-on">
               {member?.latest ? `${t('Taken', 'أُخذت')} ${date(member.latest.taken_at)}` : t('Not taken yet', 'لم تؤخذ بعد')}

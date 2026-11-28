@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth';
 import { t } from '../lib/i18n';
 import { MEASURE_KEYS, RELATION, date, measureLabel, phone } from '../lib/format';
 import { Empty, Input, Loading, PageHead, SearchBox, Select, openPrint, useToast } from '../ui';
-import { MeasureModal, MeasurementGrid, type Measurement } from '../measure';
+import { MeasurementGrid, openMeasure, type Measurement } from '../measure';
 
 type Found = { id: string; name: string | null; phone: string };
 type Cust = { id: string; name: string | null; phone: string; family: { id: string; name: string; relation: string; size: string; latest: Measurement | null; measurement_count: number }[] };
@@ -21,7 +21,6 @@ export function TakeMeasurements() {
   const [picked, setPicked] = useState<string | null>(null);
   const [adding, setAdding] = useState<{ name: string; phone: string } | null>(null);
   const [member, setMember] = useState<{ name: string; relation: string; size: string } | null>(null);
-  const [measure, setMeasure] = useState<{ id: string; name: string; latest: Measurement | null } | null>(null);
   const found = useQuery({ queryKey: ['tailor-search', q], queryFn: () => api<Found[]>(`/customers?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 && !picked });
   const cust = useQuery({ queryKey: ['customer', picked], queryFn: () => api<Cust>(`/customers/${picked}`), enabled: Boolean(picked) });
   const add = useMutation({
@@ -97,7 +96,7 @@ export function TakeMeasurements() {
                 </div>
                 <div className="row">
                   {m.latest ? <button className="btn sm secondary" onClick={() => openPrint(`measure/${m.id}`)}><Printer size={14} /> {t('Print', 'طباعة')}</button> : null}
-                  {can('workshop', 'pos') ? <button className="btn sm" data-testid={`tailor-measure-${m.id}`} onClick={() => setMeasure({ id: m.id, name: m.name, latest: m.latest })}><Ruler size={14} /> {m.latest ? t('New measurements', 'مقاسات جديدة') : t('Measure', 'قياس')}</button> : null}
+                  {can('workshop', 'pos') ? <button className="btn sm" data-testid={`tailor-measure-${m.id}`} onClick={() => openMeasure(m.id)}><Ruler size={14} /> {m.latest ? t('New measurements', 'مقاسات جديدة') : t('Measure', 'قياس')}</button> : null}
                 </div>
               </div>
               {m.latest ? <MeasurementGrid m={m.latest} /> : <div className="small muted">{t('Not measured yet.', 'لم تؤخذ المقاسات بعد.')}</div>}
@@ -121,7 +120,6 @@ export function TakeMeasurements() {
           )}
         </div>
       )}
-      {measure ? <MeasureModal memberId={measure.id} memberName={measure.name} previous={measure.latest} onClose={() => setMeasure(null)} onSaved={() => qc.invalidateQueries({ queryKey: ['customer', picked] })} /> : null}
     </div>
   );
 }
@@ -130,7 +128,6 @@ export function TakeMeasurements() {
 export function MeasurementsList() {
   const [q, setQ] = useState('');
   const { can } = useAuth();
-  const [editing, setEditing] = useState<any>(null);
   const list = useQuery({ queryKey: ['measurements', q], queryFn: () => api<any[]>(`/measurements${q ? `?q=${encodeURIComponent(q)}` : ''}`) });
   return (
     <div className="stack lg">
@@ -157,7 +154,7 @@ export function MeasurementsList() {
                   {MEASURE_KEYS.map((k) => <td key={k} className="right num">{Number(m[k])}</td>)}
                   <td className="small">{date(m.taken_at)}<div className="muted">{m.tailor_name}</div></td>
                   <td className="right" style={{ whiteSpace: 'nowrap' }}>
-                    {can('workshop', 'pos') ? <button className="btn sm ghost" data-testid={`edit-measure-${m.member_name}`} aria-label={t('Edit', 'تعديل')} title={t('Edit', 'تعديل')} onClick={() => setEditing(m)}><Pencil size={15} /></button> : null}
+                    {can('workshop', 'pos') ? <button className="btn sm ghost" data-testid={`edit-measure-${m.member_name}`} aria-label={t('Edit', 'تعديل')} title={t('Edit', 'تعديل')} onClick={() => openMeasure(m.member_id, true)}><Pencil size={15} /></button> : null}
                     <button className="btn sm ghost" aria-label={t('Print', 'طباعة')} onClick={() => openPrint(`measure/${m.member_id}`)}><Printer size={15} /></button>
                   </td>
                 </tr>
@@ -166,7 +163,6 @@ export function MeasurementsList() {
           </table>
         ) : <Empty>{t('No measurements yet.', 'لا مقاسات بعد.')}</Empty>}
       </div>
-      {editing ? <MeasureModal memberId={editing.member_id} memberName={editing.member_name} edit={editing} onClose={() => setEditing(null)} /> : null}
     </div>
   );
 }

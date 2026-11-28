@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth';
 import { L, isAr, t } from '../lib/i18n';
 import { RELATION, channelLabel, date, dateTime, methodLabel, money, money2, num, phone, stageLabel } from '../lib/format';
 import { fill, receiptUrl, waLink, type Templates } from '../lib/whatsapp';
-import { MeasureModal, MeasurementGrid, type Measurement } from '../measure';
+import { MeasurementGrid, openMeasure, type Measurement } from '../measure';
 import { Field, Input, Loading, Modal, PageHead, Select, StageBadge, TextArea, openPrint, useToast, confirmSave } from '../ui';
 import { nextStage } from './Orders';
 import { PhotoUploader } from './Factory';
@@ -67,7 +67,6 @@ export default function OrderDetail() {
   const q = useQuery({ queryKey: ['order', id], queryFn: () => api<Detail>(`/orders/${id}`) });
   const biz = useQuery({ queryKey: ['business'], queryFn: () => api<{ whatsapp: Templates }>('/business') });
   const isThobe = (q.data?.items ?? []).some((i) => i.kind === 'thobe');
-  const [measure, setMeasure] = useState<{ id: string; name: string } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [refundOpen, setRefundOpen] = useState(false);
@@ -208,8 +207,8 @@ export default function OrderDetail() {
                 <div className="row spread">
                   <div className="overline">{t('Measurements', 'المقاسات')} · {s.measureMethod === 'saved' ? t('saved', 'محفوظة') : s.measureMethod === 'home' ? t('home visit', 'زيارة منزلية') : t('branch visit', 'زيارة الفرع')}</div>
                   {can('workshop', 'pos') && s.member?.id ? (
-                    <button className="btn sm secondary no-print" data-testid={`measure-${s.member.name}`} onClick={() => setMeasure({ id: s.member.id, name: s.member.name })}>
-                      <Ruler size={14} /> {m ? t('Update', 'تحديث') : t('Record', 'تسجيل')}
+                    <button className="btn sm secondary no-print" data-testid={`measure-${s.member.name}`} onClick={() => openMeasure(s.member.id)}>
+                      <Ruler size={14} /> {t('Measurements', 'المقاسات')}
                     </button>
                   ) : null}
                 </div>
@@ -248,6 +247,20 @@ export default function OrderDetail() {
               {can('workshop') ? <PhotoUploader orderId={o.id} onDone={refresh} /> : null}
             </div>
           ) : null}
+          {invoice ? null : <div className="card pad" data-testid="order-stages">
+            <div className="overline" style={{ marginBottom: 10 }}>{t('Stages', 'المراحل')}</div>
+            <div className="timeline">
+              {o.events.map((e, i) => (
+                <div key={i} className="tl-item">
+                  <div className="tl-dot"><span />{i < o.events.length - 1 ? <i /> : null}</div>
+                  <div className="tl-body">
+                    <div className="strong">{stageLabel(e.stage, isThobe)}</div>
+                    <div className="small muted">{dateTime(e.at)}{e.staff_name ? ` · ${e.staff_name}` : ''}{e.note === 'saved' ? ` · ${t('saved measurements', 'مقاسات محفوظة')}` : e.note === 'counter' ? ` · ${t('handed over at the counter', 'سُلّم في المحل')}` : e.note ? ` · ${e.note}` : ''}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>}
           {o.notes ? <div className="note" style={{ whiteSpace: 'pre-line' }}>{t('Notes', 'ملاحظات')}: {o.notes}</div> : null}
         </div>
 
@@ -326,24 +339,9 @@ export default function OrderDetail() {
             </div>
             {o.returns.length ? <div className="small secondary">{t('Returns', 'المرتجعات')}: {o.returns.map((r) => `${r.number} (${money(r.amount)})`).join(' · ')}</div> : null}
           </div>
-          {invoice ? null : <div className="card pad">
-            <div className="overline" style={{ marginBottom: 10 }}>{t('History', 'السجل')}</div>
-            <div className="timeline">
-              {o.events.map((e, i) => (
-                <div key={i} className="tl-item">
-                  <div className="tl-dot"><span />{i < o.events.length - 1 ? <i /> : null}</div>
-                  <div className="tl-body">
-                    <div className="strong">{stageLabel(e.stage, isThobe)}</div>
-                    <div className="small muted">{dateTime(e.at)}{e.staff_name ? ` · ${e.staff_name}` : ''}{e.note === 'saved' ? ` · ${t('saved measurements', 'مقاسات محفوظة')}` : e.note === 'counter' ? ` · ${t('handed over at the counter', 'سُلّم في المحل')}` : e.note ? ` · ${e.note}` : ''}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>}
         </div>
       </div>
 
-      {measure ? <MeasureModal memberId={measure.id} memberName={measure.name} previous={o.measurements.find((m) => m.member_id === measure.id)} onClose={() => setMeasure(null)} onSaved={refresh} /> : null}
       {payOpen ? (
         <Modal title={t('Take payment', 'استلام دفعة')} onClose={() => setPayOpen(null)} footer={<><button className="btn secondary" onClick={() => setPayOpen(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" data-testid="payment-save" disabled={!(Number(payOpen.amount) > 0) || takePayment.isPending} onClick={() => takePayment.mutate()}>{t('Save', 'حفظ')}</button></>}>
           <div className="note">{t(`Due: ${money(o.balance)}`, `المستحق: ${money(o.balance)}`)}</div>

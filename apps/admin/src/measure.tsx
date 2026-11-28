@@ -124,3 +124,8 @@ export function MeasureModal({ memberId, memberName, previous, edit, onClose, on
     </div>
   );
 }
+
+/** Measurements always open in a tab of their own; it closes itself once they're saved. */
+export function openMeasure(memberId: string, edit = false) {
+  window.open(`/measure/${memberId}${edit ? '?edit=1' : ''}`, '_blank');
+}

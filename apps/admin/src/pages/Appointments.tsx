@@ -6,7 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { addDays, day, minuteToTime, money, phone, time, todayQatar } from '../lib/format';
 import { t } from '../lib/i18n';
-import { MeasureModal } from '../measure';
+import { openMeasure } from '../measure';
 import { PlaceOrderModal } from '../place-order';
 import { Empty, Loading, PageHead, Tabs, useToast } from '../ui';
 
@@ -36,7 +36,6 @@ type Appt = {
 export default function Appointments() {
   const [from, setFrom] = useState(todayQatar());
   const [kind, setKind] = useState<'all' | 'branch' | 'home'>('home');
-  const [measure, setMeasure] = useState<{ id: string; name: string } | null>(null);
   const [ordering, setOrdering] = useState<Appt | null>(null);
   const { can } = useAuth();
   const toast = useToast();
@@ -125,7 +124,7 @@ export default function Appointments() {
                           ) : null}
                           {can('workshop') && a.status !== 'done' ? (
                             <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
-                              <button className="btn sm" data-testid={`appt-measure-${a.member_name}`} onClick={() => setMeasure({ id: a.member_id, name: a.member_name })}>
+                              <button className="btn sm" data-testid={`appt-measure-${a.member_name}`} onClick={() => openMeasure(a.member_id)}>
                                 <Ruler size={14} /> {t('Record', 'تسجيل')}
                               </button>
                               {a.fee && !a.fee_paid_at ? (
@@ -146,7 +145,6 @@ export default function Appointments() {
         })
       )}
       {q.data && !q.data.length ? <div className="card"><Empty>{t('No visits booked this week.', 'لا زيارات محجوزة هذا الأسبوع.')}</Empty></div> : null}
-      {measure ? <MeasureModal memberId={measure.id} memberName={measure.name} onClose={() => setMeasure(null)} /> : null}
       {ordering ? (
         <PlaceOrderModal customerId={ordering.customer_id} memberId={ordering.member_id} appointmentId={ordering.id} branchId={ordering.branch_id} onClose={() => setOrdering(null)} />
       ) : null}

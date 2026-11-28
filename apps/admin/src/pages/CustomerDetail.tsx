@@ -6,7 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { RELATION, channelLabel, date, money, num, phone } from '../lib/format';
 import { L, t } from '../lib/i18n';
-import { MeasureModal, MeasurementGrid, type Measurement } from '../measure';
+import { MeasurementGrid, openMeasure, type Measurement } from '../measure';
 import { PlaceOrderModal } from '../place-order';
 import { Empty, Field, Input, Loading, Modal, PageHead, Select, StageBadge, TextArea, useToast, confirmSave } from '../ui';
 
@@ -41,7 +41,6 @@ export default function CustomerDetail() {
     if (l.startsWith('Reward: ')) return `${t('Reward', 'مكافأة')}: ${L(cat.data?.products.find((p) => p.id === l.slice(8))) || l.slice(8)}`;
     return l;
   };
-  const [measure, setMeasure] = useState<{ id: string; name: string; prev: Measurement | null; edit?: boolean } | null>(null);
   const [adjust, setAdjust] = useState(false);
   const [ordering, setOrdering] = useState(false);
   const [points, setPoints] = useState('');
@@ -120,11 +119,11 @@ export default function CustomerDetail() {
                 {can('workshop', 'pos') ? (
                   <div className="row" style={{ gap: 6 }}>
                     {m.latest?.id ? (
-                      <button className="btn sm secondary" data-testid={`edit-measure-${m.name}`} onClick={() => setMeasure({ id: m.id, name: m.name, prev: m.latest, edit: true })}>
+                      <button className="btn sm secondary" data-testid={`edit-measure-${m.name}`} onClick={() => openMeasure(m.id, true)}>
                         <Pencil size={14} /> {t('Edit', 'تعديل')}
                       </button>
                     ) : null}
-                    <button className="btn sm" data-testid={`record-${m.name}`} onClick={() => setMeasure({ id: m.id, name: m.name, prev: m.latest })}>
+                    <button className="btn sm" data-testid={`record-${m.name}`} onClick={() => openMeasure(m.id)}>
                       <Ruler size={14} /> {m.latest ? t('New measurements', 'مقاسات جديدة') : t('Record measurements', 'تسجيل المقاسات')}
                     </button>
                   </div>
@@ -207,7 +206,6 @@ export default function CustomerDetail() {
         </div>
       </div>
 
-      {measure ? <MeasureModal memberId={measure.id} memberName={measure.name} previous={measure.prev} edit={measure.edit && measure.prev?.id ? (measure.prev as Measurement & { id: string }) : undefined} onClose={() => setMeasure(null)} /> : null}
       {edit ? (
         <Modal title={t('Edit customer', 'تعديل العميل')} onClose={() => setEdit(null)} footer={<><button className="btn secondary" onClick={() => setEdit(null)}>{t('Cancel', 'إلغاء')}</button><button className="btn" data-testid="customer-edit-save" disabled={!edit.name.trim() || saveEdit.isPending} onClick={async () => (await confirmSave()) && saveEdit.mutate()}>{t('Save', 'حفظ')}</button></>}>
           <div className="grid k2">

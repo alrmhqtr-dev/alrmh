@@ -122,10 +122,16 @@ def journey(browser, lang, method, phone, name, reorder):
     admin.goto(ADMIN + "/")
     admin.fill('[data-testid="login-email"]', ADMIN_EMAIL); admin.fill('[data-testid="login-password"]', ADMIN_PASSWORD); admin.click('[data-testid="login-submit"]')
     admin.click('[data-testid="nav-appointments"]'); admin.wait_for_selector(f'[data-testid="appt-order-{name}"]', timeout=15000)
-    admin.click(f'[data-testid="appt-measure-{name}"]')
+    with admin.context.expect_page() as tab_info:
+        admin.click(f'[data-testid="appt-measure-{name}"]')
+    mtab = tab_info.value; mtab.wait_for_selector('[data-testid="measure-screen"]', timeout=15000)
     for k, v in {"length_cm": 149, "shoulder_cm": 47, "chest_cm": 111, "waist_cm": 102, "sleeve_cm": 62, "neck_cm": 41, "cuff_cm": 24}.items():
-        admin.fill(f'[data-testid="m-{k}"]', str(v))
-    admin.click('[data-testid="measure-save"]'); admin.wait_for_timeout(1500)
+        mtab.fill(f'[data-testid="m-{k}"]', str(v))
+    mtab.click('[data-testid="measure-save"]')
+    try: mtab.wait_for_event("close", timeout=8000)
+    except Exception: pass
+    check(f"{tag} measurements from a home visit open in their own tab, which closes once saved", mtab.is_closed())
+    admin.bring_to_front()
     admin.click(f'[data-testid="appt-order-{name}"]'); admin.wait_for_selector('[data-testid="style-note-collar-classic-qatari"]', timeout=15000)
     admin.select_option('[data-testid="po-cloth-0"]', "japanese-cotton")
     start = admin.input_value('[data-testid="po-metres-0"]')

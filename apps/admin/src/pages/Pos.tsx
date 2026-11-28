@@ -9,8 +9,8 @@ import { MEASURE_KEYS, date, measureLabel, methodLabel, money, money2, num, phon
 import { fill, receiptUrl, waLink, type Templates } from '../lib/whatsapp';
 import { Empty, Field, Input, Loading, Modal, Select, TextArea, openPrint, useToast } from '../ui';
 import { OpenRegisterForm, useRegister } from '../register';
-import { MeasureModal, type Measurement } from '../measure';
 import { type Cloth, type Style } from '../thobe-options';
+import { type Measurement } from '../measure';
 import { ThobeDesk } from '../pos-thobe';
 import { CustomerStart } from '../pos-start';
 import { CART_PRINT_KEY } from '../print/cart';
@@ -195,7 +195,6 @@ export default function Pos() {
   const [paying, setPaying] = useState(false);
   const [done, setDone] = useState<SaleResult | null>(null);
   const [draftId, setDraftId] = useState<string | null>(params.get('draft'));
-  const [measure, setMeasure] = useState<{ id: string; name: string; latest: Measurement | null } | null>(null);
   const [thobe, setThobe] = useState({ memberId: '', collarId: '', cuffId: '', fabricId: '', metres: '', qty: '1', remarks: '' });
   const [addMember, setAddMember] = useState<{ name: string; relation: string; size: string } | null>(null);
   const mode = (params.get('mode') as 'draft' | 'quotation' | null) ?? null;
@@ -584,9 +583,6 @@ export default function Pos() {
       </>
       )}
       {paying && q ? <PayModal total={q.total} allowPartial={Boolean(customer)} busy={sell.isPending} onClose={() => setPaying(false)} onPay={(p) => sell.mutate(p)} /> : null}
-      {measure ? (
-        <MeasureModal memberId={measure.id} memberName={measure.name} previous={measure.latest} onClose={() => setMeasure(null)} onSaved={() => qc.invalidateQueries({ queryKey: ['customer', customer?.id] })} />
-      ) : null}
     </div>
   );
 }

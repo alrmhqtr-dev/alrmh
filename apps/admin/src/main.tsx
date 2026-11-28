@@ -40,6 +40,7 @@ import { SupplierDetail } from './pages/Suppliers';
 import Expenses from './pages/Expenses';
 import Reports from './pages/Reports';
 import SalesReport from './pages/SalesReport';
+import MeasurePage from './pages/MeasurePage';
 import { BusinessPage } from './pages/Business';
 import Roles from './pages/Roles';
 import Import from './pages/Import';
@@ -411,6 +412,7 @@ function Shell() {
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/reports" element={<Guard perms={['reports']}><Reports /></Guard>} />
               <Route path="/reports/sales" element={<Guard perms={['reports']}><SalesReport /></Guard>} />
+              <Route path="/measure/:memberId" element={<Guard perms={['workshop', 'pos']}><MeasurePage /></Guard>} />
               <Route path="/import" element={<Import />} />
               {Object.keys(LISTS).map((k) => (
                 <Route key={k} path={`/${k}`} element={<ListPage name={k} />} />
