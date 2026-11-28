@@ -444,10 +444,23 @@ def workshop(browser, lang):
     # Editing measurements from the customer measurements page
     page.goto(ADMIN + f"/tailor/measurements"); page.wait_for_selector(f'[data-testid="edit-measure-Board {lang}"]', timeout=15000)
     page.click(f'[data-testid="edit-measure-Board {lang}"]')
+    page.wait_for_selector('[data-testid="measure-screen"]', timeout=15000)
     page.fill('[data-testid="m-sleeve_cm"]', "63.5")
+    scr = page.locator('[data-testid="measure-screen"]')
+    page.screenshot(path=f"{SHOTS}/measure-screen-{lang}.png")
+    check(f"{tag} editing from the customer measurements page is a screen of its own with the preview, marked as typed",
+          page.locator('.modal').count() == 0 and scr.locator('[data-testid="preview-sleeve_cm"]').text_content() == "63.5")
     page.click('[data-testid="measure-save"]'); page.click('[data-testid="confirm-ok"]'); page.wait_for_timeout(1200)
     check(f"{tag} measurements are edited from the customer measurements page (after asking)",
           sql(f"select sleeve_cm::float || ':' || count(*) over () from measurements where member_id = '{member}' order by taken_at desc limit 1") == "63.5:2")
+    mp = page.context.new_page(); mp.add_init_script("window.print = () => {}")
+    mp.goto(ADMIN + f"/print/measure/{member}"); mp.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); mp.wait_for_timeout(1200)
+    mp.screenshot(path=f"{SHOTS}/print-measure-{lang}.png", full_page=True)
+    mtxt = mp.locator('[data-testid="order-sheet"]').inner_text()
+    check(f"{tag} the measurements print is the A4 sheet: drawn and marked, in full, with the collar, cuff and details",
+          mp.locator('[data-testid="preview-sleeve_cm"]').text_content() == "63.5" and mp.locator('[data-testid="sheet-options"] .sheet-option').count() == 9
+          and ("Measurements" in mtxt or "المقاسات" in mtxt) and "QAR" not in mtxt, mtxt[:120])
+    mp.close()
 
     # Stock: cloth in metres, products by quantity, and new stock received
     page.goto(ADMIN + "/stock"); page.wait_for_selector('[data-testid="receive-new"]', timeout=15000)

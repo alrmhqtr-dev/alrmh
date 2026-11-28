@@ -115,7 +115,13 @@ export class ContactsController {
       `select taken_at, tailor_name, method, length_cm, shoulder_cm, chest_cm, waist_cm, sleeve_cm, neck_cm, cuff_cm, remarks from measurements where member_id = $1 order by taken_at desc limit 1`,
       [id],
     );
-    return { ...m, latest: latest ?? null };
+    // The styles of the person's last thobe, for the measurement sheet.
+    const last = await db.one(
+      `select oi.snapshot->'thobe' as thobe from order_items oi join orders o on o.id = oi.order_id
+        where oi.kind = 'thobe' and oi.snapshot->'member'->>'id' = $1 and o.stage <> 'cancelled' order by o.created_at desc limit 1`,
+      [id],
+    );
+    return { ...m, latest: latest ?? null, last_thobe: last?.thobe ?? null };
   }
 
   @Get('suppliers/:id')

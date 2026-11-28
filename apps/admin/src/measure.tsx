@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from './lib/api';
 import { useAuth } from './lib/auth';
 import { MEASURE_FIELDS, date, measureLabel } from './lib/format';
 import { L, t } from './lib/i18n';
-import { Field, Input, Modal, Select, TextArea, confirmSave, useToast } from './ui';
+import { Field, Input, Select, TextArea, confirmSave, useToast } from './ui';
+import { ThobePreview } from './thobe-preview';
 
 export type Measurement = Record<(typeof MEASURE_FIELDS)[number][0], number> & { id?: string; taken_at: string; tailor_name: string; remarks: string | null; method?: string };
 
@@ -58,53 +60,67 @@ export function MeasureModal({ memberId, memberName, previous, edit, onClose, on
     onError: (e) => toast(errorMessage(e), 'error'),
   });
   const complete = MEASURE_FIELDS.every(([k]) => String(values[k] ?? '').trim() !== '');
+  const title = `${edit ? t('Edit measurements', 'تعديل المقاسات') : t('Record measurements', 'تسجيل المقاسات')} · ${memberName}`;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  // A screen of its own, like the thobe's Measurements screen: the fields, and the preview marked as they're typed.
   return (
-    <Modal
-      title={`${edit ? t('Edit measurements', 'تعديل المقاسات') : t('Record measurements', 'تسجيل المقاسات')} · ${memberName}`}
-      onClose={onClose}
-      wide
-      footer={
-        <>
-          <button className="btn secondary" onClick={onClose}>{t('Cancel', 'إلغاء')}</button>
-          <button className="btn" data-testid="measure-save" disabled={!complete || save.isPending} onClick={async () => (!edit || (await confirmSave({ message: t(`Replace ${memberName}'s saved measurements with these?`, `استبدال مقاسات ${memberName} المحفوظة بهذه؟`) }))) && save.mutate()}>
-            {edit ? t('Save changes', 'حفظ التعديلات') : t('Save measurements', 'حفظ المقاسات')}
-          </button>
-        </>
-      }
-    >
-      {edit ? <div className="note">{t('Correcting the measurements taken on', 'تصحيح المقاسات المأخوذة في')} {date(edit.taken_at)}.</div> : previous ? <div className="note">{t('Pre-filled from', 'معبأة من')} {date(previous.taken_at)}. {t('Change only what has changed.', 'غيّر ما تغيّر فقط.')}</div> : null}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}>
-        {MEASURE_FIELDS.map(([k]) => (
-          <Field key={k} label={`${measureLabel(k)} (${t('cm', 'سم')})`}>
-            <Input data-testid={`m-${k}`} type="number" inputMode="decimal" step="any" min={0} value={values[k]} onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))} />
-          </Field>
-        ))}
-      </div>
-      <div className="grid k3">
-        <Field label={t('Tailor', 'الخياط')}>
-          <Input value={tailor} onChange={(e) => setTailor(e.target.value)} />
-        </Field>
-        {edit ? null : <>
-        <Field label={t('Where', 'المكان')}>
-          <Select value={method} onChange={(e) => setMethod(e.target.value as 'branch' | 'home')}>
-            <option value="branch">{t('At the branch', 'في الفرع')}</option>
-            <option value="home">{t('Home visit', 'زيارة منزلية')}</option>
-          </Select>
-        </Field>
-        {method === 'branch' ? (
-          <Field label={t('Branch', 'الفرع')}>
-            <Select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-              {(branches.data ?? []).map((b) => (
-                <option key={b.id} value={b.id}>{L(b)}</option>
+    <div className="measure-screen" role="dialog" aria-modal="true" aria-label={title} data-testid="measure-screen">
+      <div className="measure-screen-inner stack">
+        <div className="row spread wrap">
+          <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
+          <button className="btn ghost" onClick={onClose}><ArrowLeft size={16} className="flip-rtl" /> {t('Back', 'رجوع')}</button>
+        </div>
+        <div className="thobe-desk">
+          <div className="card pad stack">
+            {edit ? <div className="note">{t('Correcting the measurements taken on', 'تصحيح المقاسات المأخوذة في')} {date(edit.taken_at)}.</div> : previous ? <div className="note">{t('Pre-filled from', 'معبأة من')} {date(previous.taken_at)}. {t('Change only what has changed.', 'غيّر ما تغيّر فقط.')}</div> : null}
+            <div className="measure-grid">
+              {MEASURE_FIELDS.map(([k], i) => (
+                <Field key={k} label={`${measureLabel(k)} (${t('cm', 'سم')})`}>
+                  <Input data-testid={`m-${k}`} autoFocus={i === 0} type="number" inputMode="decimal" step="any" min={0} value={values[k]} onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))} />
+                </Field>
               ))}
-            </Select>
-          </Field>
-        ) : <div />}
-        </>}
+            </div>
+            <div className="grid k3">
+              <Field label={t('Tailor', 'الخياط')}>
+                <Input value={tailor} onChange={(e) => setTailor(e.target.value)} />
+              </Field>
+              {edit ? null : <>
+              <Field label={t('Where', 'المكان')}>
+                <Select value={method} onChange={(e) => setMethod(e.target.value as 'branch' | 'home')}>
+                  <option value="branch">{t('At the branch', 'في الفرع')}</option>
+                  <option value="home">{t('Home visit', 'زيارة منزلية')}</option>
+                </Select>
+              </Field>
+              {method === 'branch' ? (
+                <Field label={t('Branch', 'الفرع')}>
+                  <Select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+                    {(branches.data ?? []).map((b) => (
+                      <option key={b.id} value={b.id}>{L(b)}</option>
+                    ))}
+                  </Select>
+                </Field>
+              ) : <div />}
+              </>}
+            </div>
+            <Field label={t('Remarks for the workshop', 'ملاحظات للورشة')} hint={t('Shown to the customer and on the tailor sheet.', 'تظهر للعميل وفي ورقة الخياط.')}>
+              <TextArea value={remarks} maxLength={300} onChange={(e) => setRemarks(e.target.value)} placeholder={t('e.g. Prefers a looser fit around the chest', 'مثال: يفضّل قصة أوسع عند الصدر')} />
+            </Field>
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn secondary" onClick={onClose}>{t('Cancel', 'إلغاء')}</button>
+              <button className="btn" data-testid="measure-save" disabled={!complete || save.isPending} onClick={async () => (!edit || (await confirmSave({ message: t(`Replace ${memberName}'s saved measurements with these?`, `استبدال مقاسات ${memberName} المحفوظة بهذه؟`) }))) && save.mutate()}>
+                {edit ? t('Save changes', 'حفظ التعديلات') : t('Save measurements', 'حفظ المقاسات')}
+              </button>
+            </div>
+          </div>
+          <aside className="thobe-desk-preview sticky-preview">
+            <ThobePreview m={values} />
+          </aside>
+        </div>
       </div>
-      <Field label={t('Remarks for the workshop', 'ملاحظات للورشة')} hint={t('Shown to the customer and on the tailor sheet.', 'تظهر للعميل وفي ورقة الخياط.')}>
-        <TextArea value={remarks} maxLength={300} onChange={(e) => setRemarks(e.target.value)} placeholder={t('e.g. Prefers a looser fit around the chest', 'مثال: يفضّل قصة أوسع عند الصدر')} />
-      </Field>
-    </Modal>
+    </div>
   );
 }

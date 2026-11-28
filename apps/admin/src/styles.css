@@ -410,3 +410,8 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 .order-sheet .sheet-option-note { border: 1px solid #bbb; border-radius: 3px; min-height: 9mm; padding: 1mm 2mm; white-space: pre-line; font-size: 10pt; }
 /* On the Measurements screen the preview stays in view while the styles below are filled in. */
 @media (min-width: 1101px) { .pos.solo .sticky-preview { position: sticky; top: 70px; } }
+
+/* Recording or editing measurements from the customer pages: a screen of its own, with the preview. */
+.measure-screen { position: fixed; inset: 0; z-index: 60; background: var(--canvas, #f8f6f1); overflow-y: auto; }
+.measure-screen-inner { max-width: 1320px; margin: 0 auto; padding: 24px; }
+@media (min-width: 1101px) { .measure-screen .sticky-preview { position: sticky; top: 16px; } }

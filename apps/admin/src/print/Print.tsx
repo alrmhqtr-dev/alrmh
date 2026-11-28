@@ -245,7 +245,8 @@ function Ticket({ r, biz }: { r: any; biz: Biz }) {
 }
 
 /** The thobe record on A4: each thobe drawn with its collar, cuff, pocket and the measurements marked, the styles with their remarks, and the measurements in full. No prices: that's the receipt and the invoice. */
-function ThobeSheet({ r, biz, options }: { r: any; biz: Biz; options?: StyleOptions }) {
+function ThobeSheet({ r, biz, options, mode = 'order' }: { r: any; biz: Biz; options?: StyleOptions; mode?: 'order' | 'measure' }) {
+  const measure = mode === 'measure';
   const thobes = r.items.filter((i: any) => i.kind === 'thobe');
   const count = thobes.reduce((n: number, i: any) => n + i.qty, 0);
   return (
@@ -257,8 +258,8 @@ function ThobeSheet({ r, biz, options }: { r: any; biz: Biz; options?: StyleOpti
           <div>{L({ name_en: r.branch_en, name_ar: r.branch_ar })}{biz.company.phone ? <> · <span className="ltr">{biz.company.phone}</span></> : null}</div>
         </div>
         <div style={{ textAlign: 'end' }}>
-          <div className="strong" style={{ fontSize: 22 }}>{t('Thobe sheet', 'ورقة الثوب')}{r.number ? ` #${r.number}` : ''}</div>
-          <div>{r.unpaid ? t('Before payment', 'قبل الدفع') : t('Ordered', 'تاريخ الطلب')} {date(r.created_at)}</div>
+          <div className="strong" style={{ fontSize: 22 }}>{measure ? t('Measurements', 'المقاسات') : t('Thobe sheet', 'ورقة الثوب')}{r.number ? ` #${r.number}` : ''}</div>
+          <div>{measure ? t('Taken', 'أُخذت') : r.unpaid ? t('Before payment', 'قبل الدفع') : t('Ordered', 'تاريخ الطلب')} {date(r.created_at)}</div>
           {r.expected_delivery ? <div className="strong">{t('Ready by', 'التسليم')} {date(r.expected_delivery)}</div> : null}
           {r.number ? <div dangerouslySetInnerHTML={{ __html: code128Svg(r.number, 36, 8) }} /> : null}
         </div>
@@ -266,7 +267,7 @@ function ThobeSheet({ r, biz, options }: { r: any; biz: Biz; options?: StyleOpti
       <div className="hr" />
       <div className="row spread">
         <div>{t('Customer', 'العميل')}: <b>{r.customer_name ?? t('Walk-in', 'زبون')}</b>{r.phone ? <> · <bdi dir="ltr">{phone(r.phone)}</bdi></> : null}</div>
-        <div>{t('Thobes', 'الثياب')}: <b className="num">{count}</b></div>
+        {measure ? null : <div>{t('Thobes', 'الثياب')}: <b className="num">{count}</b></div>}
       </div>
 
       {thobes.map((i: any, k: number) => {
@@ -290,7 +291,7 @@ function ThobeSheet({ r, biz, options }: { r: any; biz: Biz; options?: StyleOpti
             <div className="order-thobe-body">
               <ThobePreview m={meas ?? {}} collar={th.collar} cuff={th.cuff} pocket={th.pocket === true} className="print" />
               <div className="stack" style={{ gap: 8 }}>
-                <table>
+                {measure ? null : <table>
                   <tbody>
                     {rows.map(([a, b]) => (
                       <tr key={a}>
@@ -299,7 +300,7 @@ function ThobeSheet({ r, biz, options }: { r: any; biz: Biz; options?: StyleOpti
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table>}
                 {i.snapshot.remarks ? <div style={{ whiteSpace: 'pre-line' }}><b>{t('Notes for the tailor', 'ملاحظات للخياط')}:</b> {i.snapshot.remarks}</div> : null}
                 {meas ? (
                   <div>
@@ -311,6 +312,7 @@ function ThobeSheet({ r, biz, options }: { r: any; biz: Biz; options?: StyleOpti
               </div>
             </div>
             {/* Every collar, cuff and detail, its picture and the remarks written against it (blank where none). */}
+            {options && measure ? <div className="small strong" style={{ marginTop: '3mm' }}>{t("Collar, cuff and details · from the last thobe", 'الياقة والكبك والتفاصيل · من آخر ثوب')}</div> : null}
             {options ? (
               <div className="sheet-options" data-testid="sheet-options">
                 {styleGroups(options).map((g) => (
@@ -418,7 +420,7 @@ export default function Print() {
   const draft = useQuery({ queryKey: ['draft', id], queryFn: () => api<any>(`/drafts/${id}`), enabled: kind === 'quotation' });
   const member = useQuery({ queryKey: ['member', id], queryFn: () => api<any>(`/members/${id}`), enabled: kind === 'measure' });
   const reg = useQuery({ queryKey: ['register-print', id], queryFn: () => api<any>(`/registers/${id}`), enabled: kind === 'register' });
-  const styles = useQuery({ queryKey: ['pos-items'], queryFn: () => api<StyleOptions>('/pos/items'), enabled: kind === 'order' || kind === 'cart-thobe' });
+  const styles = useQuery({ queryKey: ['pos-items'], queryFn: () => api<StyleOptions>('/pos/items'), enabled: kind === 'order' || kind === 'cart-thobe' || kind === 'measure' });
   const purchase = useQuery({ queryKey: ['purchase', id], queryFn: () => api<any>(`/purchases/${id}`), enabled: kind === 'purchase' });
   const b = biz.data;
   let body: ReactNode = null;
@@ -457,19 +459,19 @@ export default function Print() {
         notes: draft.data.notes,
       };
       body = <Invoice r={r} biz={b} title={draft.data.kind === 'quotation' ? t('Quotation', 'عرض سعر') : t('Draft', 'مسودة')} number={draft.data.number} dateText={date(draft.data.created_at)} valid={draft.data.valid_until} />;
-    } else if (kind === 'measure' && member.data) {
+    } else if (kind === 'measure' && member.data && !styles.isLoading) {
+      // A person's measurements on A4, laid out like the thobe sheet: drawn and marked, in full, with their last thobe's styles.
       ready = true;
       const m = member.data;
-      body = (
-        <div className={`print-page ${b.printing.ticket_paper === 'a4' ? 'pa4' : b.printing.ticket_paper === 'a5' ? 'pa5' : 'p80'}`}>
-          <div className="c strong" style={{ fontSize: '1.3em' }}>{t('Measurements', 'المقاسات')}</div>
-          <div className="c">{L(b.company)}</div>
-          <div className="c strong">{m.name} · {RELATION[m.relation]}</div>
-          <div className="c">{m.customer_name} · <bdi dir="ltr">{phone(m.phone)}</bdi></div>
-          <div className="hr" />
-          {m.latest ? <><MeasureTable m={m.latest} /><div>{date(m.latest.taken_at)} · {m.latest.tailor_name}{m.latest.remarks ? ` · ${m.latest.remarks}` : ''}</div></> : <div>{t('No measurements yet', 'لا توجد مقاسات')}</div>}
-        </div>
-      );
+      const r = {
+        number: '',
+        created_at: m.latest?.taken_at ?? new Date().toISOString(),
+        customer_name: m.customer_name,
+        phone: m.phone,
+        items: [{ id: 0, kind: 'thobe', qty: 1, snapshot: { member: { id: m.id, name: m.name, relation: m.relation }, thobe: m.last_thobe ?? {} } }],
+        measurements: m.latest ? [{ ...m.latest, member_id: m.id }] : [],
+      };
+      body = <ThobeSheet r={r} biz={b} options={styles.data} mode="measure" />;
     } else if (kind === 'register' && reg.data) {
       ready = true;
       body = <Register r={reg.data} />;
