@@ -274,7 +274,7 @@ function ThobeSheet({ r, biz, options }: { r: any; biz: Biz; options?: StyleOpti
         const notes = th.style_notes ?? {};
         const meas = r.measurements?.find((x: any) => x.member_id === i.snapshot.member?.id);
         const rows: [string, ReactNode][] = [
-          [t('Cloth', 'القماش'), L(th.fabric)],
+          [t('Cloth', 'القماش'), th.fabric ? L(th.fabric) : '—'],
           [t('Cloth length', 'طول القماش'), th.metres ? `${th.metres} ${t('m', 'م')}` : '—'],
           [t('Thobes', 'عدد الثياب'), String(i.qty)],
         ];

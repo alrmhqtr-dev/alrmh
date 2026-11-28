@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Pencil, Plus, Ruler } from 'lucide-react';
+import { ArrowLeft, Pencil, Plus, Printer, Ruler } from 'lucide-react';
 import { api, errorMessage } from './lib/api';
 import { MEASURE_KEYS, date, measureLabel, money, num, phone, RELATION } from './lib/format';
 import { t } from './lib/i18n';
-import { Field, Input, Loading, Select, TextArea, useToast } from './ui';
+import { Field, Input, Loading, Select, TextArea, openPrint, useToast } from './ui';
+import { CART_PRINT_KEY } from './print/cart';
 import { ClothSelect, MetresInput, StyleRemarks, cleanNotes, drawnStyles, thobePrice, validMetres, type Cloth, type StyleNotes, type StyleOptions } from './thobe-options';
 import { ThobePreview } from './thobe-preview';
 
@@ -95,6 +96,39 @@ export function ThobeDesk({
     }
     setBusy(false);
   };
+  /** The A4 thobe sheet for the thobe as it is on screen: measurements, remarks and (if chosen) the cloth. Not yet in the sale. */
+  const printThobe = () => {
+    if (!member) return;
+    const r = {
+      unpaid: true,
+      number: '',
+      created_at: new Date().toISOString(),
+      customer_name: customer?.name ?? null,
+      phone: customer?.phone ?? null,
+      items: [{
+        id: 0, kind: 'thobe', qty: Math.max(1, Math.trunc(Number(opt.qty)) || 1),
+        snapshot: {
+          member: { id: member.id, name: member.name, relation: member.relation },
+          remarks: opt.remarks.trim() || null,
+          thobe: {
+            collar: drawn.collar ?? null, cuff: drawn.cuff ?? null, pocket: drawn.pocket,
+            fabric: cloth ? { id: cloth.id, name_en: cloth.name_en, name_ar: cloth.name_ar } : null,
+            metres: validMetres(opt.metres) ? Number(opt.metres) : null,
+            style_notes: cleanNotes(notes),
+          },
+        },
+      }],
+      measurements: [{
+        member_id: member.id,
+        ...Object.fromEntries(MEASURE_KEYS.map((k) => [k, meas[k] === '' ? null : Number(meas[k])])),
+        taken_at: member.latest?.taken_at ?? new Date().toISOString(),
+        tailor_name: member.latest?.tailor_name ?? null,
+        remarks: measRemarks.trim() || null,
+      }],
+    };
+    localStorage.setItem(CART_PRINT_KEY, JSON.stringify(r));
+    openPrint('cart-thobe');
+  };
   const add = () => {
     if (!member) return;
     onAdd({
@@ -136,9 +170,12 @@ export function ThobeDesk({
               <h2>{t('Measurements (cm)', 'المقاسات (سم)')}</h2>
               <div className="small secondary"><bdi>{member.name}</bdi> · {RELATION[member.relation]}</div>
             </div>
+            <span className="row" style={{ gap: 6 }}>
+            <button className="btn sm secondary" data-testid="thobe-m-print" onClick={printThobe}><Printer size={14} /> {t('Print', 'طباعة')}</button>
             <button className="btn sm ghost" data-testid="thobe-m-back" onClick={() => { setMeas(fromLatest(member)); setMeasRemarks(member.latest?.remarks ?? ''); setEditing(!member.latest); setScreen('thobe'); }}>
               <ArrowLeft size={14} className="flip-rtl" /> {t('Back to the thobe', 'رجوع إلى الثوب')}
             </button>
+            </span>
           </div>
           {member.latest && !editing ? (
             <>

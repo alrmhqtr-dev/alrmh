@@ -181,6 +181,14 @@ def counter(browser, lang, email, password):
     check(f"{tag} the measurements screen has the preview: marked as they're typed, with the collar, cuff and pocket written up",
           live == "97" and prev.locator('[data-testid="preview-waist_cm"]').text_content() == "98" and prev.locator('[data-testid="preview-chest_cm"]').text_content() == "108"
           and all(prev.locator(f'[data-testid="preview-{x}"]').count() == 1 for x in ("collar", "cuff", "pocket")))
+    with page.expect_popup(timeout=15000) as pop:
+        page.click('[data-testid="thobe-m-print"]')
+    msheet = pop.value; msheet.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); msheet.wait_for_timeout(800)
+    mtext = msheet.locator('[data-testid="order-sheet"]').inner_text()
+    check(f"{tag} the Measurements screen prints the A4 thobe sheet as it is on screen, before it's in the sale",
+          msheet.locator('[data-testid="preview-waist_cm"]').first.text_content() == "98" and "Pen slot inside" in msheet.locator('[data-testid="sheet-detail-pen"]').inner_text()
+          and msheet.locator('[data-testid="sheet-options"] .sheet-option').count() == 9 and "QAR" not in mtext, mtext[:150])
+    msheet.close()
     page.click('[data-testid="thobe-m-save"]'); page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(800)
     saved = sql(f"select count(*) || ':' || max(waist_cm)::float from measurements m join family_members f on f.id = m.member_id join customers c on c.id = f.customer_id where c.phone = '+974{phone}'")
     metres = page.input_value('[data-testid="thobe-metres"]')
