@@ -8,7 +8,7 @@ import { MEASURE_KEYS, RELATION, date, dateTime, measureLabel, methodLabel, mone
 import { code128Svg, qrSvg } from '../lib/barcode';
 import { receiptUrl } from '../lib/whatsapp';
 import { LABELS_KEY } from '../pages/Labels';
-import { CART_PRINT_KEY } from './cart';
+import { CART_PRINT_KEY, MEASURE_PRINT_KEY } from './cart';
 import { ThobePreview } from '../thobe-preview';
 import { styleGroups, type StyleOptions } from '../thobe-options';
 
@@ -463,13 +463,20 @@ export default function Print() {
       // A person's measurements on A4, laid out like the thobe sheet: drawn and marked, in full, with their last thobe's styles.
       ready = true;
       const m = member.data;
+      // From the measurements page's Print: the values on screen, which may not be saved yet.
+      let typed: any = null;
+      if (new URLSearchParams(loc.search).get('typed') === '1') {
+        try { typed = JSON.parse(localStorage.getItem(MEASURE_PRINT_KEY) ?? 'null'); } catch { typed = null; }
+        if (typed?.memberId !== m.id) typed = null;
+      }
+      const latest = typed ? { ...m.latest, ...typed } : m.latest;
       const r = {
         number: '',
-        created_at: m.latest?.taken_at ?? new Date().toISOString(),
+        created_at: latest?.taken_at ?? new Date().toISOString(),
         customer_name: m.customer_name,
         phone: m.phone,
         items: [{ id: 0, kind: 'thobe', qty: 1, snapshot: { member: { id: m.id, name: m.name, relation: m.relation }, thobe: m.last_thobe ?? {} } }],
-        measurements: m.latest ? [{ ...m.latest, member_id: m.id }] : [],
+        measurements: latest ? [{ ...latest, member_id: m.id }] : [],
       };
       body = <ThobeSheet r={r} biz={b} options={styles.data} mode="measure" />;
     } else if (kind === 'register' && reg.data) {

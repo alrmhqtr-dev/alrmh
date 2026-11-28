@@ -454,6 +454,15 @@ def workshop(browser, lang):
     tab.screenshot(path=f"{SHOTS}/measure-screen-{lang}.png")
     check(f"{tag} editing from the customer measurements page opens in a new tab: a screen of its own with the preview, marked as typed",
           "/measure/" in tab.url and "edit=1" in tab.url and tab.locator('.modal').count() == 0 and scr.locator('[data-testid="preview-sleeve_cm"]').text_content() == "63.5", tab.url)
+    check(f"{tag} the measurements page is a page in the admin, with the menu and the top bar",
+          tab.locator('[data-testid="nav-appointments"]').count() == 1 and tab.locator('[data-testid="measure-print"]').count() == 1)
+    tab.context.add_init_script("window.print = () => {}")
+    with tab.context.expect_page() as pr_info:
+        tab.click('[data-testid="measure-print"]')
+    pr = pr_info.value; pr.wait_for_selector('[data-testid="order-sheet"]', timeout=15000); pr.wait_for_timeout(800)
+    check(f"{tag} Print on the measurements page prints the A4 sheet with the values on screen, before saving",
+          pr.locator('[data-testid="preview-sleeve_cm"]').text_content() == "63.5" and ("Measurements" in pr.title() or "المقاسات" in pr.title()), pr.title())
+    pr.close()
     tab.click('[data-testid="measure-save"]'); tab.click('[data-testid="confirm-ok"]')
     try: tab.wait_for_event("close", timeout=8000)
     except Exception: pass

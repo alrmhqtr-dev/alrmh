@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeft, Printer } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from './lib/api';
 import { useAuth } from './lib/auth';
 import { MEASURE_FIELDS, date, measureLabel } from './lib/format';
 import { L, t } from './lib/i18n';
-import { Field, Input, Select, TextArea, confirmSave, useToast } from './ui';
+import { Field, Input, PageHead, Select, TextArea, confirmSave, openPrint, useToast } from './ui';
+import { MEASURE_PRINT_KEY } from './print/cart';
 import { ThobePreview } from './thobe-preview';
 
 export type Measurement = Record<(typeof MEASURE_FIELDS)[number][0], number> & { id?: string; taken_at: string; tailor_name: string; remarks: string | null; method?: string };
@@ -61,19 +62,26 @@ export function MeasureModal({ memberId, memberName, previous, edit, onClose, on
   });
   const complete = MEASURE_FIELDS.every(([k]) => String(values[k] ?? '').trim() !== '');
   const title = `${edit ? t('Edit measurements', 'تعديل المقاسات') : t('Record measurements', 'تسجيل المقاسات')} · ${memberName}`;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  // A screen of its own, like the thobe's Measurements screen: the fields, and the preview marked as they're typed.
+  // Prints the A4 measurements sheet with the values as they are on screen, saved or not.
+  const print = () => {
+    try {
+      localStorage.setItem(MEASURE_PRINT_KEY, JSON.stringify({
+        memberId,
+        ...Object.fromEntries(MEASURE_FIELDS.map(([k]) => [k, values[k] === '' ? null : Number(values[k])])),
+        tailor_name: tailor || null,
+        remarks: remarks.trim() || null,
+        taken_at: edit?.taken_at ?? new Date().toISOString(),
+      }));
+    } catch { /* private mode: the sheet falls back to the saved measurements */ }
+    openPrint(`measure/${memberId}?typed=1`);
+  };
+  // A page in the admin (menu and top bar): the fields, and the preview marked as they're typed.
   return (
-    <div className="measure-screen" role="dialog" aria-modal="true" aria-label={title} data-testid="measure-screen">
-      <div className="measure-screen-inner stack">
-        <div className="row spread wrap">
-          <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
-          <button className="btn ghost" onClick={onClose}><ArrowLeft size={16} className="flip-rtl" /> {t('Back', 'رجوع')}</button>
-        </div>
+    <div className="stack lg measure-page" aria-label={title} data-testid="measure-screen">
+      <PageHead title={title}>
+        <button className="btn secondary" data-testid="measure-print" onClick={print}><Printer size={16} /> {t('Print', 'طباعة')}</button>
+        <button className="btn ghost" data-testid="measure-back" onClick={onClose}><ArrowLeft size={16} className="flip-rtl" /> {t('Back', 'رجوع')}</button>
+      </PageHead>
         <div className="thobe-desk">
           <div className="card pad stack">
             {edit ? <div className="note">{t('Correcting the measurements taken on', 'تصحيح المقاسات المأخوذة في')} {date(edit.taken_at)}.</div> : previous ? <div className="note">{t('Pre-filled from', 'معبأة من')} {date(previous.taken_at)}. {t('Change only what has changed.', 'غيّر ما تغيّر فقط.')}</div> : null}
@@ -120,7 +128,6 @@ export function MeasureModal({ memberId, memberName, previous, edit, onClose, on
             <ThobePreview m={values} />
           </aside>
         </div>
-      </div>
     </div>
   );
 }
