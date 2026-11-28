@@ -32,6 +32,7 @@ import Pos from './pages/Pos';
 import { Drafts, Registers, Returns, Sales, Shipments } from './pages/Sales';
 import { MeasurementsList, TakeMeasurements } from './pages/Tailor';
 import { FactoryInvoices, ThobePhotos } from './pages/Factory';
+import Cloth from './pages/Cloth';
 import Products from './pages/Products';
 import { Adjustments, StockLevels, Suggestions, Transfers } from './pages/Stock';
 import Labels from './pages/Labels';
@@ -313,7 +314,7 @@ function Shell() {
   }, []);
   const location = useLocation();
   const allGroups = groups();
-  const current = allGroups.find((g) => g.items.some((i) => i.to.split('?')[0] === location.pathname && location.pathname !== '/'))?.key ?? null;
+  const current = allGroups.find((g) => [...g.items, ...(g.more ?? [])].some((i) => i.to.split('?')[0] === location.pathname && location.pathname !== '/'))?.key ?? null;
   const [openKey, setOpenKey] = useState<string | null>(current);
   useEffect(() => {
     if (current) setOpenKey(current);
@@ -400,6 +401,7 @@ function Shell() {
               <Route path="/factory" element={<FactoryInvoices />} />
               <Route path="/factory/photos" element={<ThobePhotos />} />
               <Route path="/products" element={<Products />} />
+              <Route path="/cloth" element={<Cloth />} />
               <Route path="/labels" element={<Labels />} />
               <Route path="/stock" element={<StockLevels />} />
               <Route path="/stock/adjustments" element={<Adjustments />} />

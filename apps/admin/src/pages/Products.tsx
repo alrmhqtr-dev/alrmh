@@ -8,6 +8,7 @@ import { L, t } from '../lib/i18n';
 import { money, num } from '../lib/format';
 import { Empty, Field, Input, Loading, Modal, PageHead, SearchBox, Select, TextArea, useToast, confirmSave } from '../ui';
 import { ReceiveModal, StockHistory, type ReceiveItem } from './Stock';
+import { productTools } from '../nav';
 
 export type Product = {
   id: string;
@@ -69,6 +70,11 @@ export default function Products() {
         <Link className="btn secondary" to="/labels"><Barcode size={16} /> {t('Labels', 'الملصقات')}</Link>
         {editable ? <button className="btn" data-testid="add-product" onClick={() => setEdit({})}><Plus size={16} /> {t('Add product', 'أضف منتجًا')}</button> : null}
       </PageHead>
+      <nav className="tools" data-testid="product-tools" aria-label={t('Product set-up', 'إعداد المنتجات')}>
+        {productTools().filter((i) => !i.perms || can(...i.perms)).map((i) => (
+          <Link key={i.to} className="pill" to={i.to} data-testid={`tool-${i.to.slice(1).replace(/[/?=]/g, '-')}`}><i.icon size={14} /> {i.label}</Link>
+        ))}
+      </nav>
       <div className="card table-wrap">
         {rows.length ? (
           <table data-testid="products-table">

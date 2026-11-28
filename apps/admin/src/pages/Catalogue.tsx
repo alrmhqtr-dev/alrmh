@@ -10,11 +10,11 @@ import { Field, Input, Loading, Modal, PageHead, Select, Tabs, useConfirm, useTo
 import { ReceiveModal, type ReceiveItem } from './Stock';
 
 type Product = { id: string; category: string; name_en: string; name_ar: string; description_en: string; description_ar: string; price: number; sizes: string[]; image_url: string | null; active: boolean };
-type Fabric = { id: string; name_en: string; name_ar: string; note_en: string; note_ar: string; price: number; active: boolean; sku: string; cost: number; track_stock: boolean; alert_qty: number; metres_per_thobe: number; tax_rate_id: string | null };
+export type Fabric = { id: string; name_en: string; name_ar: string; note_en: string; note_ar: string; price: number; active: boolean; sku: string; cost: number; track_stock: boolean; alert_qty: number; metres_per_thobe: number; tax_rate_id: string | null };
 type Collar = { id: string; name_en: string; name_ar: string; active: boolean; shape: string; image_url: string | null };
 type Cuff = { id: string; name_en: string; name_ar: string; active: boolean; image_url: string | null };
 type Category = { id: string; name_en: string; name_ar: string; active: boolean; product_count: number };
-type Cat = { categories: Category[]; collarShapes: string[]; products: Product[]; fabrics: Fabric[]; collars: Collar[]; cuffs: Cuff[] };
+export type Cat = { categories: Category[]; collarShapes: string[]; products: Product[]; fabrics: Fabric[]; collars: Collar[]; cuffs: Cuff[] };
 type Kind = 'categories' | 'fabrics' | 'collars' | 'cuffs';
 
 const noun = (k: Kind) => ({ categories: t('category', 'قسم'), fabrics: t('cloth', 'قماش'), collars: t('collar', 'ياقة'), cuffs: t('cuff', 'كبك') })[k];
@@ -139,7 +139,7 @@ export default function Catalogue() {
   );
 }
 
-function EditModal({ kind, item, cat, onClose }: { kind: Kind; item: any | null; cat: Cat; onClose: () => void }) {
+export function EditModal({ kind, item, cat, onClose }: { kind: Kind; item: any | null; cat: Cat; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();

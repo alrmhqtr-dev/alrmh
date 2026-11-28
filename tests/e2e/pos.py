@@ -68,7 +68,7 @@ CASHIER = f"cashier{run}@alrmh.qa"
 call("POST", "/admin/staff", {"email": CASHIER, "name": "أمين الكاشير", "role": "cashier", "password": "cashier-pass-2026", "branchId": branch, "language": "ar"}, owner)
 level = lambda: float(sql(f"select coalesce(sum(qty),0) from stock_moves where item_kind = 'product' and item_id = '{prod}' and branch_id = '{branch}'"))
 
-PAGES = ["/", "/pos", "/sales", "/sales?payment=due", "/drafts", "/quotations", "/returns", "/shipments", "/registers", "/discounts", "/products", "/labels", "/stock", "/stock/adjustments",
+PAGES = ["/", "/pos", "/sales", "/sales?payment=due", "/drafts", "/quotations", "/returns", "/shipments", "/registers", "/discounts", "/products", "/cloth", "/labels", "/stock", "/stock/adjustments",
          "/stock/transfers", "/suggestions", "/catalogue", "/brands", "/units", "/variations", "/warranties", "/purchases", "/purchases/new", "/suppliers", "/customers", "/customer-groups",
          "/expenses", "/expense-categories", "/tailor", "/tailor/measurements", "/factory", "/factory/photos", "/orders", "/appointments", "/import", "/m/products", "/m/sales",
          "/settings/company", "/settings/invoice", "/settings/barcode", "/settings/pos", "/printing", "/whatsapp", "/tax-rates"]

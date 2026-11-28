@@ -419,3 +419,6 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 
 /* Recording or editing measurements from the customer pages: a screen of its own, with the preview. */
 @media (min-width: 1101px) { .measure-page .sticky-preview { position: sticky; top: 70px; } }
+
+.tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.tools .pill { color: inherit; text-decoration: none; }

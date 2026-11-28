@@ -48,7 +48,26 @@ import { t } from './lib/i18n';
 import type { Perm } from './lib/auth';
 
 export type NavItem = { to: string; label: string; icon: any; perms?: Perm[]; testid?: string };
-export type NavGroup = { key: string; label: string; icon: any; items: NavItem[]; perms?: Perm[] };
+/** `more`: pages that belong to the group but are opened from inside its pages, not from the menu. */
+export type NavGroup = { key: string; label: string; icon: any; items: NavItem[]; more?: NavItem[]; perms?: Perm[] };
+
+/** Product set-up pages, linked from the top of the product list instead of the menu. */
+export const productTools = (): NavItem[] => [
+  { to: '/catalogue', label: t('Categories & thobe options', 'أقسام المنتجات وخيارات الثوب'), icon: Tags },
+  { to: '/variations', label: t('Variations', 'متغيرات (تباين)'), icon: Layers },
+  { to: '/brands', label: t('Brands', 'العلامات التجارية'), icon: Gem },
+  { to: '/units', label: t('Units', 'الوحدات'), icon: Scale },
+  { to: '/warranties', label: t('Warranties', 'الضمانات'), icon: Shield },
+  { to: '/suggestions', label: t('Reorder suggestions', 'التوصيات'), icon: Lightbulb },
+  { to: '/import?tab=products', label: t('Import products', 'استيراد المنتجات'), icon: Download, perms: ['products'] },
+  { to: '/import?tab=opening', label: t('Import opening stock', 'استيراد المخزون الافتتاحي'), icon: Download, perms: ['products'] },
+];
+
+/** Linked from the Stock page. */
+export const stockTools = (): NavItem[] => [
+  { to: '/stock/adjustments', label: t('Stock adjustments', 'تسوية المخزون'), icon: Scale },
+  { to: '/stock/transfers', label: t('Stock transfers', 'نقل المخزون'), icon: ArrowLeftRight },
+];
 
 /** Daily work, always visible at the top of the menu. */
 export const quickNav = (): NavItem[] => [
@@ -107,20 +126,10 @@ export const groups = (): NavGroup[] => [
     icon: Boxes,
     items: [
       { to: '/products', label: t('Product list', 'قائمة المنتجات'), icon: ListOrdered },
-      { to: '/labels', label: t('Print labels', 'طباعة الملصقات'), icon: Barcode },
-      { to: '/products?new=1', label: t('Add product', 'أضف منتجًا'), icon: PlusCircle, perms: ['products', 'manage'] },
-      { to: '/variations', label: t('Variations', 'متغيرات (تباين)'), icon: Layers },
-      { to: '/import?tab=products', label: t('Import products', 'استيراد المنتجات'), icon: Download, perms: ['products'] },
-      { to: '/import?tab=opening', label: t('Import opening stock', 'استيراد المخزون الافتتاحي'), icon: Download, perms: ['products'] },
-      { to: '/units', label: t('Units', 'الوحدات'), icon: Scale },
-      { to: '/catalogue', label: t('Categories & thobe options', 'أقسام المنتجات وخيارات الثوب'), icon: Tags },
-      { to: '/suggestions', label: t('Reorder suggestions', 'التوصيات'), icon: Lightbulb },
-      { to: '/brands', label: t('Brands', 'العلامات التجارية'), icon: Gem },
-      { to: '/warranties', label: t('Warranties', 'الضمانات'), icon: Shield },
+      { to: '/cloth', label: t('Cloth list', 'قائمة الأقمشة'), icon: Ruler },
       { to: '/stock', label: t('Stock', 'المخزون'), icon: Package },
-      { to: '/stock/adjustments', label: t('Stock adjustments', 'تسوية المخزون'), icon: Scale },
-      { to: '/stock/transfers', label: t('Stock transfers', 'نقل المخزون'), icon: ArrowLeftRight },
     ],
+    more: [...productTools(), ...stockTools(), { to: '/labels', label: t('Print labels', 'طباعة الملصقات'), icon: Barcode }],
   },
   {
     key: 'purchases',
