@@ -408,3 +408,5 @@ textarea.input.notes { min-height: 96px; resize: vertical; }
 .order-sheet .sheet-option-pic { display: grid; justify-items: center; text-align: center; font-size: 8pt; line-height: 1.15; }
 .order-sheet .sheet-option-pic img { width: 13mm; height: 9mm; object-fit: contain; }
 .order-sheet .sheet-option-note { border: 1px solid #bbb; border-radius: 3px; min-height: 9mm; padding: 1mm 2mm; white-space: pre-line; font-size: 10pt; }
+/* On the Measurements screen the preview stays in view while the styles below are filled in. */
+@media (min-width: 1101px) { .pos.solo .sticky-preview { position: sticky; top: 70px; } }

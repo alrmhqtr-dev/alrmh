@@ -157,18 +157,21 @@ def counter(browser, lang, email, password):
     # The thobe page: a Measurements button under the customer; every collar, cuff and detail with a remarks box.
     page.click('[data-testid="pos-tab-thobes"]')
     page.wait_for_selector('[data-testid="thobe-desk"]', timeout=15000); page.wait_for_timeout(600)
-    n_opts = page.locator('[data-testid="thobe-styles"] textarea').count()
-    check(f"{tag} the thobe page has no measurement fields, a Measurements button under the customer, and every style option with its own remarks box",
+    check(f"{tag} the thobe page is the customer (with a Measurements button) and the cloth: no measurements, styles or preview",
           page.locator('[data-testid="thobe-m-chest_cm"]').count() == 0 and page.locator('[data-testid="thobe-measurements"]').count() == 1
-          and n_opts == 9 and page.locator('.style-tile').count() == 0 and not page.locator('[data-testid="pay"]').is_visible(), n_opts)
+          and page.locator('[data-testid="thobe-styles"]').count() == 0 and page.locator('[data-testid="thobe-preview"]').count() == 0
+          and not page.locator('[data-testid="pay"]').is_visible())
     page.select_option('[data-testid="thobe-fabric"]', index=1)
     add_off = page.locator('[data-testid="thobe-add"]').is_disabled()
+    # Measurements, every collar, cuff and detail with a remarks box, and the preview: their own screen.
+    page.click('[data-testid="thobe-measurements"]'); page.wait_for_selector('[data-testid="thobe-measure"]', timeout=15000)
+    n_opts = page.locator('[data-testid="thobe-measure"] [data-testid="thobe-styles"] textarea').count()
+    check(f"{tag} the Measurements screen has the measurements, every style option with its own remarks box (nothing to choose) and the preview",
+          n_opts == 9 and page.locator('.style-tile').count() == 0 and page.locator('[data-testid="thobe-measure"] [data-testid="thobe-preview"]').count() == 1, n_opts)
     page.fill('[data-testid="style-note-collar-wide-collar"]', "Collar a little higher")
     page.fill('[data-testid="style-note-cuff-double"]', "Cufflinks provided")
     page.fill('[data-testid="style-note-detail-pocket"]', "Left side")
     page.fill('[data-testid="style-note-detail-pen"]', "Pen slot inside")
-    # Measurements on their own screen.
-    page.click('[data-testid="thobe-measurements"]'); page.wait_for_selector('[data-testid="thobe-measure"]', timeout=15000)
     for k, v in {"length_cm": 148, "shoulder_cm": 46, "chest_cm": 108, "waist_cm": 97, "sleeve_cm": 60, "neck_cm": 40, "cuff_cm": 24}.items():
         page.fill(f'[data-testid="thobe-m-{k}"]', str(v))
     prev = page.locator('[data-testid="thobe-preview"]')
@@ -187,6 +190,7 @@ def counter(browser, lang, email, password):
     page.screenshot(path=f"{SHOTS}/pos-thobe-{lang}.png", full_page=True)
     check(f"{tag} saving measurements returns to the thobe page; thobes couldn't be added before",
           saved == "1:98" and add_off and not page.locator('[data-testid="thobe-add"]').is_disabled()
+          and "4" in page.locator('[data-testid="thobe-remarks-count"]').inner_text()
           and "Not taken" not in page.locator('[data-testid="thobe-measured-on"]').inner_text(), saved)
     check(f"{tag} the thobe page has no preview (it's with the measurements); the cloth length + adds 0.5 m",
           page.locator('[data-testid="thobe-preview"]').count() == 0 and float(page.input_value('[data-testid="thobe-metres"]')) == float(metres) + 0.5, metres)

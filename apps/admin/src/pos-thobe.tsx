@@ -23,8 +23,8 @@ const fromLatest = (m: Member) => (m.latest ? Object.fromEntries(MEASURE_KEYS.ma
 
 /**
  * Thobes at the counter for the sale's customer. The thobe page: who they're for (with a Measurements
- * button), the cloth and how many, and every collar, cuff and detail with a remarks box.
- * The measurements and the preview have their own screen, opened from that button.
+ * button) and the cloth and how many. The Measurements screen, opened from that button, has the
+ * measurements, every collar, cuff and detail with a remarks box, and the preview.
  */
 export function ThobeDesk({
   items,
@@ -74,6 +74,7 @@ export function ThobeDesk({
   const changed = !member?.latest || MEASURE_KEYS.some((k) => Number(meas[k]) !== Number(member.latest![k])) || (measRemarks.trim() || null) !== (member.latest.remarks ?? null);
   const cloth = items.fabrics.find((f) => f.id === opt.fabricId);
   const drawn = drawnStyles(items, notes);
+  const written = Object.values(notes).filter((v) => v.trim()).length;
   const ready = Boolean(member) && measured && opt.fabricId && validMetres(opt.metres) && Number(opt.qty) >= 1;
   const missing = useMemo(
     () => [!measured ? t('measurements', 'المقاسات') : null, !opt.fabricId ? t('cloth', 'القماش') : null].filter(Boolean) as string[],
@@ -128,6 +129,7 @@ export function ThobeDesk({
   if (screen === 'measure' && member)
     return (
       <div className="thobe-desk" data-testid="thobe-measure">
+        <div className="stack">
         <div className="card pad stack">
           <div className="row spread">
             <div>
@@ -151,6 +153,9 @@ export function ThobeDesk({
               <div className="row spread">
                 <span className="small secondary">{t('Taken', 'أُخذت')} {date(member.latest.taken_at)}{member.latest.tailor_name ? ` · ${member.latest.tailor_name}` : ''}</span>
                 <button type="button" className="btn sm secondary" data-testid="thobe-m-edit" onClick={() => setEditing(true)}><Pencil size={14} /> {t('Edit', 'تعديل')}</button>
+              </div>
+              <div className="row" style={{ justifyContent: 'flex-end' }}>
+                <button className="btn" data-testid="thobe-m-done" onClick={() => setScreen('thobe')}>{t('Done', 'تم')}</button>
               </div>
             </>
           ) : (
@@ -176,7 +181,13 @@ export function ThobeDesk({
             </>
           )}
         </div>
-        <aside className="thobe-desk-preview">
+        {/* Every collar, cuff and detail with its own remarks, here with the measurements and the preview. */}
+        <div className="card pad stack">
+          <h2>{t('Collar, cuff and details', 'الياقة والكبك والتفاصيل')}</h2>
+          <StyleRemarks options={items} notes={notes} onChange={(k, v) => setNotes((n) => ({ ...n, [k]: v }))} />
+        </div>
+        </div>
+        <aside className="thobe-desk-preview sticky-preview">
           <ThobePreview m={meas} collar={drawn.collar} cuff={drawn.cuff} pocket={drawn.pocket} />
         </aside>
       </div>
@@ -219,14 +230,18 @@ export function ThobeDesk({
           {/* Measurements open on their own screen. */}
           <div className="row spread measure-button-row">
             <button className="btn secondary" data-testid="thobe-measurements" disabled={!member} onClick={() => setScreen('measure')}>
-              <Ruler size={16} /> {t('Measurements', 'المقاسات')}
+              <Ruler size={16} /> {t('Measurements and styles', 'المقاسات والتفصيل')}
             </button>
             <span className={`small ${measured ? 'secondary' : 'tone-error strong'}`} data-testid="thobe-measured-on">
               {member?.latest ? `${t('Taken', 'أُخذت')} ${date(member.latest.taken_at)}` : t('Not taken yet', 'لم تؤخذ بعد')}
+              {written ? <span className="secondary" data-testid="thobe-remarks-count"> · {t(`${written} style remarks`, `${written} ملاحظات على التفصيل`)}</span> : null}
             </span>
           </div>
         </div>
 
+      </div>
+      {/* The cloth and how many. Measurements, the collar, cuff and details, and the preview are on the Measurements screen. */}
+      <div className="stack">
         <div className="card pad stack">
           <h2>{t('Cloth', 'القماش')}</h2>
           <div className="thobe-row">
@@ -250,12 +265,6 @@ export function ThobeDesk({
           </div>
         </div>
       </div>
-      {/* Every collar, cuff and detail with its own remarks. The preview is with the measurements, on their own screen. */}
-      <aside className="thobe-desk-preview stack">
-        <div className="card pad">
-          <StyleRemarks options={items} notes={notes} onChange={(k, v) => setNotes((n) => ({ ...n, [k]: v }))} />
-        </div>
-      </aside>
     </div>
   );
 }
